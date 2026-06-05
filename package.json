@@ -4,7 +4,7 @@
   "description": "Mother Care School Node.js Backend with Authentication",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only server.ts",
+    "dev": "nodemon --watch src --watch server.ts --ext ts --exec \"npx ts-node server.ts\"",
     "build": "tsc",
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
@@ -55,6 +55,7 @@
     "jest": "^30.4.2",
     "jest-junit": "^17.0.0",
     "jest-mock-extended": "^4.0.1",
+    "nodemon": "^3.1.14",
     "prisma": "^5.10.0",
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.11",
