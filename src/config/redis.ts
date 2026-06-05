@@ -36,11 +36,19 @@ export async function testRedisConnection(): Promise<boolean> {
   if (!client) return false;
 
   try {
-    // Test with a quick set/get
-    const key = '__redis_test__';
-    await client.set(key, 'ok', { ex: 5 });
-    const result = await client.get(key);
-    return result === 'ok';
+    // Test with a quick set/get (5s timeout to avoid hanging)
+    const result = await Promise.race([
+      (async () => {
+        const key = '__redis_test__';
+        await client.set(key, 'ok', { ex: 5 });
+        const val = await client.get(key);
+        return val === 'ok';
+      })(),
+      new Promise<false>((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), 5000),
+      ),
+    ]);
+    return result;
   } catch (err: any) {
     console.warn('[Redis] Upstash test failed:', err.message);
     return false;

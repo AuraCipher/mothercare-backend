@@ -7,74 +7,57 @@
   <style>
     *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
     :root {
-      --dark-1:#0f172a; --dark-2:#1e293b; --dark-3:#334155;
-      --indigo:#6366f1; --violet:#8b5cf6;
-      --text:#e2e8f0; --muted:#94a3b8;
-      --green:#10b981; --red:#ef4444; --amber:#f59e0b;
+      --bg: #1a1614; --surface: #24201e; --border: #3a3430;
+      --text: #f0ebe3; --muted: #a0988a; --accent: #c4a882; --accent-hover: #b39a76;
+      --green: #8bba8a; --red: #c77a7a; --amber: #c4a060;
     }
-    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--dark-1); color:var(--text); min-height:100vh; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
     .wrap { max-width:900px; margin:0 auto; padding:2rem; }
-
-    header { display:flex; align-items:center; justify-content:space-between; margin-bottom:2rem; flex-wrap:wrap; gap:0.75rem; }
+    header { display:flex; align-items:center; justify-content:space-between; margin-bottom:2rem; }
     .brand { display:flex; align-items:center; gap:0.75rem; }
-    .logo { width:36px; height:36px; border-radius:10px; background:linear-gradient(135deg,var(--indigo),var(--violet)); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-    .logo svg { width:20px; height:20px; }
-    h1 { font-size:1.4rem; font-weight:700; }
-
-    .card { background:var(--dark-2); border:1px solid var(--dark-3); border-radius:16px; padding:1.5rem; margin-bottom:1.5rem; }
-    .card-title { font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:1.25rem; }
-
+    .logo { width:36px; height:36px; border-radius:10px; background:var(--accent); display:flex; align-items:center; justify-content:center; }
+    .logo svg { width:20px; height:20px; stroke:var(--bg); }
+    h1 { font-size:1.3rem; font-weight:600; }
+    .user-info { display:flex; align-items:center; gap:0.75rem; font-size:0.85rem; color:var(--muted); }
+    .user-info button { background:none; border:none; color:var(--accent); cursor:pointer; }
+    .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.5rem; margin-bottom:1.5rem; }
+    .card-title { font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:1.25rem; }
     .form-row { display:flex; gap:0.75rem; align-items:flex-end; flex-wrap:wrap; }
     .form-group { display:flex; flex-direction:column; gap:0.35rem; flex:1; min-width:180px; }
-    .form-group label { font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; }
-    .form-group input,
-    .form-group select { background:var(--dark-1); border:1px solid var(--dark-3); border-radius:8px; padding:0.6rem 0.9rem; color:var(--text); font-size:0.9rem; outline:none; }
-    .form-group input:focus,
-    .form-group select:focus { border-color:var(--indigo); }
-
-    .btn { padding:0.6rem 1.4rem; border:none; border-radius:8px; font-size:0.875rem; font-weight:600; cursor:pointer; transition:opacity 0.15s; white-space:nowrap; }
+    .form-group label { font-size:0.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; }
+    .form-group input,.form-group select { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:0.6rem 0.9rem; color:var(--text); font-size:0.9rem; outline:none; }
+    .form-group input:focus,.form-group select:focus { border-color:var(--accent); }
+    .btn { padding:0.6rem 1.4rem; border:none; border-radius:8px; font-size:0.875rem; font-weight:500; cursor:pointer; }
     .btn:hover { opacity:0.85; }
-    .btn-primary { background:linear-gradient(135deg,var(--indigo),var(--violet)); color:#fff; }
-    .btn-danger  { background:var(--red); color:#fff; }
+    .btn-primary { background:var(--accent); color:var(--bg); }
+    .btn-danger { background:var(--red); color:var(--bg); }
     .btn-sm { padding:0.35rem 0.7rem; font-size:0.78rem; }
-    .btn-outline { background:transparent; border:1px solid var(--dark-3); color:var(--text); }
-
-    /* Token bar */
-    #tokenBar { display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap; }
-    #tokenBar .form-group { flex:1; min-width:220px; }
-    #tokenBar .form-group input { font-family:monospace; font-size:0.82rem; }
-    .token-status { font-size:0.78rem; color:var(--green); }
-    .token-status.disconnected { color:var(--red); }
-
-    /* Key list */
-    .key-card { background:var(--dark-1); border:1px solid var(--dark-3); border-radius:12px; padding:1.1rem 1.25rem; margin-bottom:0.65rem; display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
-    .key-card .info { flex:1; min-width:0; }
-    .key-name { font-weight:600; margin-bottom:0.2rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .login-wrap { max-width:360px; margin:4rem auto 0; }
+    .login-wrap h2 { text-align:center; margin-bottom:1.5rem; font-size:1.15rem; font-weight:500; }
+    .login-wrap .form-group { margin-bottom:1rem; }
+    .login-wrap .btn-primary { width:100%; margin-top:0.5rem; padding:0.7rem; }
+    .hint { text-align:center; color:var(--muted); font-size:0.78rem; margin-top:0.75rem; }
+    .error-line { color:var(--red); font-size:0.83rem; padding:0.4rem 0; text-align:center; min-height:1.4rem; }
+    .key-card { background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:1rem 1.25rem; margin-bottom:0.65rem; display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
+    .key-card .info { flex:1; }
+    .key-name { font-weight:500; margin-bottom:0.2rem; font-size:0.9rem; }
     .key-meta { font-size:0.78rem; color:var(--muted); }
-
-    .badge { display:inline-block; padding:0.2rem 0.55rem; border-radius:999px; font-size:0.68rem; font-weight:700; text-transform:uppercase; vertical-align:middle; }
-    .badge-pub { background:rgba(16,185,129,0.15); color:var(--green); border:1px solid rgba(16,185,129,0.3); }
-    .badge-sec { background:rgba(99,102,241,0.15); color:var(--indigo); border:1px solid rgba(99,102,241,0.3); }
-    .badge-rev { background:rgba(239,68,68,0.15); color:var(--red); border:1px solid rgba(239,68,68,0.3); }
-
-    /* Toast */
-    .toast { position:fixed; top:1.25rem; right:1.25rem; background:var(--dark-2); border:1px solid var(--dark-3); padding:0.85rem 1.25rem; border-radius:12px; z-index:999; transform:translateX(130%); transition:transform 0.3s ease; max-width:340px; font-size:0.875rem; }
+    .badge { display:inline-block; padding:0.2rem 0.55rem; border-radius:999px; font-size:0.65rem; font-weight:600; text-transform:uppercase; }
+    .badge-pub { background:rgba(139,186,138,0.12); color:var(--green); border:1px solid rgba(139,186,138,0.25); }
+    .badge-sec { background:rgba(196,168,130,0.12); color:var(--accent); border:1px solid rgba(196,168,130,0.25); }
+    .badge-rev { background:rgba(199,122,122,0.12); color:var(--red); border:1px solid rgba(199,122,122,0.25); }
+    .toast { position:fixed; top:1.25rem; right:1.25rem; background:var(--surface); border:1px solid var(--border); padding:0.85rem 1.25rem; border-radius:10px; z-index:999; transform:translateX(130%); transition:0.3s; max-width:340px; font-size:0.875rem; }
     .toast.show { transform:translateX(0); }
     .toast.success { border-color:var(--green); }
-    .toast.error   { border-color:var(--red); }
-
-    /* Modal */
-    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.65); backdrop-filter:blur(4px); z-index:998; display:none; align-items:center; justify-content:center; }
+    .toast.error { border-color:var(--red); }
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(4px); z-index:998; display:none; align-items:center; justify-content:center; }
     .modal-overlay.show { display:flex; }
-    .modal { background:var(--dark-2); border:1px solid var(--dark-3); border-radius:16px; padding:2rem; max-width:500px; width:92%; }
-    .modal h3 { margin-bottom:0.5rem; }
-    .modal .warn { color:var(--amber); font-size:0.8rem; margin-bottom:0.25rem; }
-    .key-display { background:var(--dark-1); border:1px solid var(--dark-3); border-radius:10px; padding:0.9rem 1rem; word-break:break-all; font-family:monospace; font-size:0.82rem; color:var(--green); margin:1rem 0; user-select:all; }
+    .modal { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:2rem; max-width:500px; width:92%; }
+    .modal h3 { margin-bottom:0.5rem; font-weight:500; }
+    .modal .warn { color:var(--amber); font-size:0.8rem; }
+    .key-display { background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:0.9rem 1rem; word-break:break-all; font-family:monospace; font-size:0.82rem; color:var(--green); margin:1rem 0; user-select:all; }
     .modal-footer { display:flex; gap:0.75rem; justify-content:flex-end; margin-top:1.25rem; }
-
-    .empty   { text-align:center; color:var(--muted); padding:2rem; font-size:0.9rem; }
-    .loading { text-align:center; color:var(--muted); padding:2rem; font-size:0.9rem; }
-
+    .empty,.loading { text-align:center; color:var(--muted); padding:2rem; font-size:0.9rem; }
     .hidden { display:none !important; }
   </style>
 </head>
@@ -82,133 +65,75 @@
 <div class="wrap">
   <header>
     <div class="brand">
-      <div class="logo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round">
-          <path d="M22 10v6M2 10l10-5 10 5-10 5-10-5z"/>
-          <path d="M6 12v4l4 2"/>
-        </svg>
-      </div>
+      <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M22 10v6M2 10l10-5 10 5-10 5-10-5z"/><path d="M6 12v4l4 2"/></svg></div>
       <h1>MCS Key Manager</h1>
     </div>
-    <div id="tokenBar">
-      <div class="form-group">
-        <label for="jwtInput">JWT Token</label>
-        <input type="text" id="jwtInput" placeholder="Paste your Bearer token from Postman" autocomplete="off" />
-      </div>
-      <button class="btn btn-primary" id="connectBtn">Connect</button>
-      <button class="btn btn-sm btn-outline hidden" id="disconnectBtn">Disconnect</button>
-      <span id="tokenStatus" class="token-status disconnected">Not connected</span>
-    </div>
+    <div class="user-info hidden" id="userInfo">Logged in as <strong id="userName"></strong> <button id="logoutBtn">Logout</button></div>
   </header>
 
-  <!-- Key Manager -->
+  <div id="loginScreen">
+    <div class="card login-wrap">
+      <h2>Admin Login</h2>
+      <div class="form-group"><label>Username / Phone / Email</label><input type="text" id="loginId" placeholder="admin" autocomplete="username" /></div>
+      <div class="form-group"><label>Password</label><input type="password" id="loginPw" placeholder="••••••••" autocomplete="current-password" /></div>
+      <div id="loginError" class="error-line"></div>
+      <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">Sign In</button>
+      <p class="hint">Default: admin / Admin@1234</p>
+    </div>
+  </div>
+
   <div id="managerScreen" class="hidden">
     <div class="card">
       <div class="card-title">Generate New Key</div>
       <div class="form-row">
-        <div class="form-group">
-          <label for="keyName">Name</label>
-          <input type="text" id="keyName" placeholder="e.g. Production Frontend" />
-        </div>
-        <div class="form-group" style="flex:0;min-width:160px;">
-          <label for="keyType">Type</label>
-          <select id="keyType">
-            <option value="publishable">Publishable</option>
-            <option value="secret">Secret</option>
-          </select>
-        </div>
-        <button class="btn btn-primary" id="generateBtn">Generate</button>
+        <div class="form-group"><label>Name</label><input type="text" id="keyName" placeholder="e.g. Production Frontend" /></div>
+        <div class="form-group" style="flex:0;min-width:150px;"><label>Type</label><select id="keyType"><option value="publishable">Publishable</option><option value="secret">Secret</option></select></div>
+        <button class="btn btn-primary" id="generateBtn" onclick="doCreate()">Generate</button>
       </div>
     </div>
-
     <div class="card">
       <div class="card-title">API Keys</div>
-      <div id="keysList" class="empty">Connect with a JWT token above to see keys.</div>
+      <div id="keysList" class="loading">Loading…</div>
     </div>
-  </div>
-
-  <!-- Welcome card shown before connecting -->
-  <div id="welcomeCard" class="card">
-    <div class="card-title">Getting Started</div>
-    <p style="color:var(--muted);margin-bottom:1rem;">
-      Use an API client like <strong>Postman</strong> or <strong>cURL</strong> to log in and get your JWT token:
-    </p>
-    <div style="background:var(--dark-1);border:1px solid var(--dark-3);border-radius:10px;padding:1rem;font-family:monospace;font-size:0.82rem;margin-bottom:1rem;">
-      POST /auth/login<br>
-      Content-Type: application/json<br><br>
-      {<br>
-      &nbsp;&nbsp;"identifier": "admin",<br>
-      &nbsp;&nbsp;"password": "Admin@1234",<br>
-      &nbsp;&nbsp;"rememberMe": true<br>
-      }
-    </div>
-    <p style="color:var(--muted);font-size:0.82rem;">
-      Copy the <code style="color:var(--green);">token</code> value from the response, paste it above, and click <strong>Connect</strong>.
-    </p>
   </div>
 </div>
 
-<!-- Toast -->
 <div class="toast" id="toast"></div>
 
-<!-- New-key modal -->
 <div class="modal-overlay" id="modal">
   <div class="modal">
     <h3>Key Generated</h3>
     <p class="warn">⚠ Copy this key now — it will never be shown again.</p>
     <div id="modalKey" class="key-display"></div>
     <div class="modal-footer">
-      <button class="btn btn-primary" id="copyBtn">Copy</button>
-      <button class="btn btn-sm" style="background:var(--dark-3);color:var(--text);" id="doneBtn">Done</button>
+      <button class="btn btn-primary" onclick="copyKey()">Copy</button>
+      <button class="btn btn-sm" style="background:var(--border);color:var(--text);" onclick="closeModal()">Done</button>
     </div>
   </div>
 </div>
 
 <script>
-  // ── State ──────────────────────────────────────────────────────────
+  // ─── State ──────────────────────────────────────────────
   let jwt = localStorage.getItem('mcs_jwt') || '';
   let newKeyValue = '';
 
-  // ── Boot ───────────────────────────────────────────────────────────
-  function init() {
-    // Attach event listeners
-    document.getElementById('connectBtn').addEventListener('click', connectToken);
-    document.getElementById('disconnectBtn').addEventListener('click', disconnectToken);
-    document.getElementById('generateBtn').addEventListener('click', doCreate);
-    document.getElementById('copyBtn').addEventListener('click', copyKey);
-    document.getElementById('doneBtn').addEventListener('click', closeModal);
-    document.getElementById('jwtInput').addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') connectToken();
-    });
-    document.getElementById('keyName').addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') doCreate();
-    });
-    document.getElementById('modal').addEventListener('click', function(e) {
-      if (e.target === this) closeModal();
-    });
+  // ─── Boot ───────────────────────────────────────────────
+  document.getElementById('loginId').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') doLogin();
+  });
+  document.getElementById('loginPw').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') doLogin();
+  });
 
-    // Event delegation for revoke buttons (dynamically created)
-    document.getElementById('keysList').addEventListener('click', function(e) {
-      const btn = e.target.closest('.btn-revoke');
-      if (btn) doRevoke(btn.dataset.id, btn.dataset.name);
-    });
+  // Logout button
+  document.getElementById('logoutBtn').addEventListener('click', function() {
+    logout();
+  });
 
-    // Auto-connect if token exists
-    if (jwt) {
-      document.getElementById('jwtInput').value = jwt;
-      showConnected();
-      loadKeys();
-    }
-  }
+  // Auto-login if token exists
+  if (jwt) { showManager(); loadKeys(); }
 
-  // Run on DOM ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
-
-  // ── Helpers ────────────────────────────────────────────────────────
+  // ─── Helpers ────────────────────────────────────────────
   function esc(str) {
     return String(str)
       .replace(/&/g, '&amp;')
@@ -228,96 +153,82 @@
     el.textContent = msg;
     el.className = 'toast ' + type + ' show';
     clearTimeout(el._t);
-    el._t = setTimeout(() => el.classList.remove('show'), 4000);
+    el._t = setTimeout(function() { el.classList.remove('show'); }, 4000);
   }
 
-  // ── Token Connection ──────────────────────────────────────────────
-  function connectToken() {
-    const token = document.getElementById('jwtInput').value.trim();
-    if (!token) { toast('Paste a JWT token first.', 'error'); return; }
-
-    jwt = token;
-    localStorage.setItem('mcs_jwt', jwt);
-
-    // Update UI optimistically
-    showConnected();
-    document.getElementById('keysList').innerHTML = '<div class="loading">Verifying token…</div>';
-
-    fetch('/api-keys', { headers: authHeaders() })
-      .then(res => {
-        if (res.status === 401) {
-          toast('Token rejected — not valid or expired.', 'error');
-          localStorage.removeItem('mcs_jwt');
-          jwt = '';
-          disconnectToken();
-          return;
-        }
-        if (res.status === 403) {
-          toast('Token valid but need super_admin role.', 'error');
-          localStorage.removeItem('mcs_jwt');
-          jwt = '';
-          disconnectToken();
-          return;
-        }
-        if (!res.ok) {
-          toast('Server error (' + res.status + '). Try again.', 'error');
-          localStorage.removeItem('mcs_jwt');
-          jwt = '';
-          disconnectToken();
-          return;
-        }
-        loadKeys();
-        toast('Connected successfully!', 'success');
-      })
-      .catch(() => {
-        toast('Cannot reach backend server.', 'error');
-        localStorage.removeItem('mcs_jwt');
-        jwt = '';
-        // Stay showing the UI but show error
-        document.getElementById('keysList').innerHTML = '<div class="empty">Failed to reach server. Is it running?</div>';
-      });
-  }
-
-  function disconnectToken() {
-    localStorage.removeItem('mcs_jwt');
-    jwt = '';
-    document.getElementById('jwtInput').value = '';
-    document.getElementById('managerScreen').classList.add('hidden');
-    document.getElementById('welcomeCard').classList.remove('hidden');
-    document.getElementById('keysList').innerHTML = '';
-    document.getElementById('connectBtn').classList.remove('hidden');
-    document.getElementById('disconnectBtn').classList.add('hidden');
-    document.getElementById('tokenStatus').textContent = 'Not connected';
-    document.getElementById('tokenStatus').className = 'token-status disconnected';
-    toast('Disconnected', 'success');
-  }
-
-  function showConnected() {
-    document.getElementById('managerScreen').classList.remove('hidden');
-    document.getElementById('welcomeCard').classList.add('hidden');
-    document.getElementById('connectBtn').classList.add('hidden');
-    document.getElementById('disconnectBtn').classList.remove('hidden');
-    document.getElementById('tokenStatus').textContent = 'Connected';
-    document.getElementById('tokenStatus').className = 'token-status';
-  }
-
-  // ── Handle API errors ────────────────────────────────────────────
   function handleApiError(status, message) {
     if (status === 401) {
-      toast('Session expired. Reconnect with a fresh token.', 'error');
       localStorage.removeItem('mcs_jwt');
       jwt = '';
-      disconnectToken();
+      document.getElementById('managerScreen').classList.add('hidden');
+      document.getElementById('loginScreen').classList.remove('hidden');
+      document.getElementById('userInfo').classList.add('hidden');
+      document.getElementById('loginError').textContent = 'Session expired.';
       return;
     }
-    if (status === 403) {
-      toast('Access denied — super_admin role required.', 'error');
-      return;
-    }
-    toast(message || 'An error occurred', 'error');
+    if (status === 403) { toast('Access denied.', 'error'); return; }
+    toast(message || 'Error', 'error');
   }
 
-  // ── Load Keys ──────────────────────────────────────────────────────
+  // ─── Login ──────────────────────────────────────────────
+  async function doLogin() {
+    const id = document.getElementById('loginId').value.trim();
+    const pw = document.getElementById('loginPw').value.trim();
+    const errEl = document.getElementById('loginError');
+    errEl.textContent = '';
+    if (!id || !pw) { errEl.textContent = 'Enter both fields.'; return; }
+
+    const btn = document.getElementById('loginBtn');
+    btn.disabled = true;
+    btn.textContent = 'Signing in…';
+
+    try {
+      const res = await fetch('/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: id, password: pw, rememberMe: true }),
+      });
+      const data = await res.json();
+
+      if (data.success && data.token) {
+        jwt = data.token;
+        localStorage.setItem('mcs_jwt', jwt);
+        document.getElementById('userName').textContent = data.user?.name || id;
+        showManager();
+        loadKeys();
+      } else {
+        errEl.textContent = data.message || 'Login failed.';
+      }
+    } catch (err) {
+      errEl.textContent = 'Network error.';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+    }
+  }
+
+  function showManager() {
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('managerScreen').classList.remove('hidden');
+    document.getElementById('userInfo').classList.remove('hidden');
+  }
+
+  function logout() {
+    // Hit backend logout (best effort, ignore errors)
+    if (jwt) {
+      fetch('/auth/logout', { method: 'POST', headers: authHeaders() }).catch(function() {});
+    }
+    localStorage.removeItem('mcs_jwt');
+    jwt = '';
+    document.getElementById('loginScreen').classList.remove('hidden');
+    document.getElementById('managerScreen').classList.add('hidden');
+    document.getElementById('userInfo').classList.add('hidden');
+    document.getElementById('keysList').innerHTML = '';
+    document.cookie = 'token=; path=/; max-age=0';
+    toast('Logged out', 'success');
+  }
+
+  // ─── Load Keys ──────────────────────────────────────────
   async function loadKeys() {
     const el = document.getElementById('keysList');
     el.className = 'loading';
@@ -331,57 +242,49 @@
 
       const keys = data.data || [];
       el.className = '';
+      if (!keys.length) { el.innerHTML = '<div class="empty">No keys yet.</div>'; return; }
 
-      if (!keys.length) {
-        el.innerHTML = '<div class="empty">No keys yet. Generate one above.</div>';
-        return;
-      }
-
-      el.innerHTML = keys.map(k => `
-        <div class="key-card">
-          <div class="info">
-            <div class="key-name">
-              ${esc(k.name)}
-              <span class="badge ${k.type === 'publishable' ? 'badge-pub' : 'badge-sec'}">${esc(k.type)}</span>
-              ${k.revokedAt ? '<span class="badge badge-rev">Revoked</span>' : ''}
-            </div>
-            <div class="key-meta">
-              Prefix: <strong>${esc(k.prefix)}…</strong>
-              &bull; Created: ${fmt(k.createdAt)}
-              ${k.lastUsedAt ? ' &bull; Last used: ' + fmt(k.lastUsedAt) : ''}
-            </div>
-          </div>
-          <div>
-            ${!k.revokedAt
-              ? `<button class="btn btn-danger btn-sm btn-revoke" data-id="${esc(k.id)}" data-name="${esc(k.name)}">Revoke</button>`
+      el.innerHTML = keys.map(function(k) {
+        return '<div class="key-card">' +
+          '<div class="info">' +
+            '<div class="key-name">' + esc(k.name) +
+              ' <span class="badge ' + (k.type === 'publishable' ? 'badge-pub' : 'badge-sec') + '">' + esc(k.type) + '</span>' +
+              (k.revokedAt ? ' <span class="badge badge-rev">Revoked</span>' : '') +
+            '</div>' +
+            '<div class="key-meta">Prefix: <strong>' + esc(k.prefix) + '…</strong> &bull; Created: ' + fmt(k.createdAt) +
+              (k.lastUsedAt ? ' &bull; Last used: ' + fmt(k.lastUsedAt) : '') +
+            '</div>' +
+          '</div>' +
+          '<div>' +
+            (!k.revokedAt
+              ? '<button class="btn btn-danger btn-sm" onclick="doRevoke(\'' + esc(k.id) + '\', \'' + esc(k.name) + '\')">Revoke</button>'
               : '<span style="font-size:0.78rem;color:var(--muted);">Revoked</span>'
-            }
-          </div>
-        </div>
-      `).join('');
+            ) +
+          '</div>' +
+        '</div>';
+      }).join('');
     } catch (err) {
-      el.className = '';
-      el.innerHTML = '<div class="empty">Failed to load keys — check your connection.</div>';
+      el.innerHTML = '<div class="empty">Failed to load keys.</div>';
     }
   }
 
-  // ── Create Key ─────────────────────────────────────────────────────
+  // ─── Create Key ─────────────────────────────────────────
   async function doCreate() {
     const name = document.getElementById('keyName').value.trim();
     const type = document.getElementById('keyType').value;
-    if (!name) { toast('Enter a key name first.', 'error'); return; }
+    if (!name) { toast('Enter a name.', 'error'); return; }
 
     const btn = document.getElementById('generateBtn');
-    btn.disabled = true; btn.textContent = 'Generating…';
+    btn.disabled = true;
+    btn.textContent = 'Generating…';
 
     try {
       const res = await fetch('/api-keys', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ name, type }),
+        body: JSON.stringify({ name: name, type: type }),
       });
       const data = await res.json();
-
       if (!res.ok) { handleApiError(res.status, data.message); return; }
 
       newKeyValue = data.key?.key || '';
@@ -390,41 +293,44 @@
       document.getElementById('keyName').value = '';
       loadKeys();
     } catch (err) {
-      toast('Failed to generate key — check connection.', 'error');
+      toast('Failed.', 'error');
     } finally {
-      btn.disabled = false; btn.textContent = 'Generate';
+      btn.disabled = false;
+      btn.textContent = 'Generate';
     }
   }
 
-  // ── Revoke Key ─────────────────────────────────────────────────────
+  // ─── Revoke Key ─────────────────────────────────────────
   async function doRevoke(id, name) {
-    if (!confirm('Revoke key "' + name + '"? This cannot be undone.')) return;
+    if (!confirm('Revoke "' + name + '"?')) return;
 
     try {
       const res = await fetch('/api-keys/' + id, { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
-
       if (!res.ok) { handleApiError(res.status, data.message); return; }
-
-      toast('Key revoked.', 'success');
+      toast('Revoked.', 'success');
       loadKeys();
     } catch (err) {
-      toast('Failed to revoke key.', 'error');
+      toast('Failed.', 'error');
     }
   }
 
-  // ── Modal ──────────────────────────────────────────────────────────
+  // ─── Modal ──────────────────────────────────────────────
   function closeModal() {
     document.getElementById('modal').classList.remove('show');
     newKeyValue = '';
   }
 
   function copyKey() {
-    if (!newKeyValue) return;
-    navigator.clipboard.writeText(newKeyValue)
-      .then(() => toast('Copied to clipboard!', 'success'))
-      .catch(() => toast('Copy failed — select the key manually.', 'error'));
+    if (newKeyValue) {
+      navigator.clipboard.writeText(newKeyValue)
+        .then(function() { toast('Copied!', 'success'); });
+    }
   }
+
+  document.getElementById('modal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
 </script>
 </body>
 </html>

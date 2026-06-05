@@ -304,7 +304,7 @@ router.get('/stats', async (req: Request, res: Response) => {
   });
 
   const roleCounts = userBreakdown.reduce((acc: any, item: any) => {
-    acc[item.role] = item._count;
+    acc[item.role] = item._count.role;
     return acc;
   }, {});
 
