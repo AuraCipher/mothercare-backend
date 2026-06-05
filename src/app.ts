@@ -63,6 +63,20 @@ app.get('/key-manager', (_req, res) => {
 });
 
 // ─── Public Routes ─────────────────────────────────────────────
+app.get('/', (_req, res) => {
+  res.json({
+    name: 'Mother Care School',
+    version: '1.0.0',
+    endpoints: {
+      auth: '/auth',
+      apiKeys: '/api-keys',
+      admin: '/admin',
+      health: '/health',
+      keyManager: '/key-manager',
+    },
+  });
+});
+
 app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
 });
