@@ -1,0 +1,48 @@
+import { Request, Response, NextFunction } from 'express';
+import authService from './auth.service';
+import {
+  loginSchema,
+  changePasswordSchema,
+} from './auth.schema';
+
+const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<any>) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+};
+
+export const login = asyncHandler(async (req: Request, res: Response) => {
+  const data = await authService.login(req.body);
+  res.status(200).json(data);
+});
+
+export const getMe = asyncHandler(async (req: Request, res: Response) => {
+  // @ts-ignore: req.user is set by auth middleware
+  const user = await authService.getMe(req.user.id);
+  res.status(200).json({ success: true, user });
+});
+
+export const changePassword = asyncHandler(async (req: Request, res: Response) => {
+  // @ts-ignore: req.user is set by auth middleware
+  const result = await authService.changePassword(req.user.id, req.body);
+  res.status(200).json(result);
+});
+
+export const forgotPassword = asyncHandler(async (_req: Request, res: Response) => {
+  res.status(501).json({ success: false, message: 'Not implemented' });
+});
+
+export const verifyOTP = asyncHandler(async (_req: Request, res: Response) => {
+  res.status(501).json({ success: false, message: 'Not implemented' });
+});
+
+export const resetPassword = asyncHandler(async (_req: Request, res: Response) => {
+  res.status(501).json({ success: false, message: 'Not implemented' });
+});
+
+export const logout = asyncHandler(async (req: Request, res: Response) => {
+  // @ts-ignore: req.user is set by auth middleware
+  const userId = req.user?.id;
+  const result = await authService.logout(userId);
+  res.status(200).json(result);
+});
