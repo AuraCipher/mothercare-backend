@@ -27,6 +27,9 @@ const envSchema = z.object({
   TWILIO_PHONE_NUMBER: z.string().optional(),
   TWILIO_WHATSAPP_NUMBER: z.string().optional(),
   ALLOWED_ORIGINS: z.string().optional(),
+
+  // Default school branch name for single-school auto-assignment
+  DEFAULT_BRANCH_NAME: z.string().default('Mother Care Sohan'),
 });
 
 const parsed = envSchema.safeParse(process.env);

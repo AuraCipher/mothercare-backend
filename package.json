@@ -9,11 +9,15 @@
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:seed": "npx ts-node prisma/seed.ts",
     "prisma:studio": "prisma studio",
     "lint": "eslint src --ext .ts",
     "test": "jest",
     "test:coverage": "jest --coverage",
     "test:watch": "jest --watch"
+  },
+  "prisma": {
+    "seed": "npx ts-node prisma/seed.ts"
   },
   "keywords": [
     "nodejs",

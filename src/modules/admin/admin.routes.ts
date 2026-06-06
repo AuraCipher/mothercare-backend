@@ -141,7 +141,22 @@ router.get('/groups/:id', async (req: Request, res: Response) => {
 
 router.post('/groups', async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
-  const { communityId, name, section, displayOrder, capacity } = req.body;
+  let { communityId, name, section, displayOrder, capacity } = req.body;
+
+  // If no communityId provided, auto-assign to the default branch (single-school mode).
+  // Tries the well-known branch name first, then falls back to the oldest community.
+  if (!communityId) {
+    const defaultBranchName = process.env.DEFAULT_BRANCH_NAME || 'Mother Care Sohan';
+    let branch = await prisma.community.findFirst({ where: { name: defaultBranchName } });
+    if (!branch) {
+      branch = await prisma.community.findFirst({ orderBy: { createdAt: 'asc' } });
+    }
+    if (!branch) {
+      res.status(400).json({ success: false, message: 'No school branch found. Create a branch first.' });
+      return;
+    }
+    communityId = branch.id;
+  }
 
   const group = await prisma.group.create({
     data: {

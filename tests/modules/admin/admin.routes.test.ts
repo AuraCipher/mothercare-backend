@@ -431,6 +431,70 @@ describe('Admin — Groups', () => {
       expect(res.status).toBe(201);
       expect(res.body.success).toBe(true);
     });
+
+    test('auto-assigns communityId — tries default branch name first, then falls back to first community', async () => {
+      const firstCommunity = createMockCommunity();
+      // First call (by name) returns null, second call (orderBy) returns the community
+      prismaMock.community.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(firstCommunity as any);
+      prismaMock.group.create.mockResolvedValue({ ...mockGroup, communityId: firstCommunity.id } as any);
+
+      const res = await request(app)
+        .post('/admin/groups')
+        .set(adminToken)
+        .send({ name: 'Auto Community Group', displayOrder: 5 });
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      // First lookup was by name
+      expect(prismaMock.community.findFirst).toHaveBeenNthCalledWith(1,
+        expect.objectContaining({ where: expect.objectContaining({ name: expect.any(String) }) }),
+      );
+      // Second lookup was the fallback
+      expect(prismaMock.community.findFirst).toHaveBeenNthCalledWith(2,
+        expect.objectContaining({ orderBy: { createdAt: 'asc' } }),
+      );
+      expect(prismaMock.group.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ communityId: firstCommunity.id }),
+        }),
+      );
+    });
+
+    test('auto-assigns communityId directly from default branch name when it exists', async () => {
+      const defaultBranch = createMockCommunity({ name: 'Mother Care Sohan' });
+      prismaMock.community.findFirst.mockResolvedValue(defaultBranch as any);
+      prismaMock.group.create.mockResolvedValue({ ...mockGroup, communityId: defaultBranch.id } as any);
+
+      const res = await request(app)
+        .post('/admin/groups')
+        .set(adminToken)
+        .send({ name: 'Another Group', displayOrder: 3 });
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      // Only one findFirst call — the name-based lookup succeeded
+      expect(prismaMock.community.findFirst).toHaveBeenCalledTimes(1);
+      expect(prismaMock.community.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { name: 'Mother Care Sohan' } }),
+      );
+    });
+
+    test('returns 400 when no communityId provided and no communities exist', async () => {
+      prismaMock.community.findFirst.mockResolvedValue(null);
+
+      const res = await request(app)
+        .post('/admin/groups')
+        .set(adminToken)
+        .send({ name: 'Orphan Group', displayOrder: 5 });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('branch');
+      // group.create should NOT have been called
+      expect(prismaMock.group.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('DELETE /admin/groups/:id', () => {
@@ -812,10 +876,10 @@ describe('Admin — Stats', () => {
       totalCommunities: 5,
       activeApiKeys: 3,
       byRole: {
-        super_admin: { role: 1 },
-        management: { role: 2 },
-        teacher: { role: 20 },
-        parent: { role: 77 },
+        super_admin: 1,
+        management: 2,
+        teacher: 20,
+        parent: 77,
       },
     });
   });
