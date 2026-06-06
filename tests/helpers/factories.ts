@@ -51,7 +51,7 @@ export interface MockApiKey {
 
 export interface MockGroup {
   id: string;
-  communityId: string;
+  academicYearId: string;
   name: string;
   section: string | null;
   displayOrder: number;
@@ -64,12 +64,22 @@ export interface MockGroup {
 
 export interface MockStudent {
   id: string;
+  academicYearId: string;
   groupId: string | null;
   name: string;
+  rollNumber: string | null;
+  admissionNumber: string | null;
   gender: 'male' | 'female' | 'other' | null;
   dateOfBirth: Date | null;
-  admissionDate: Date;
+  religion: string | null;
+  nationality: string | null;
+  address: string | null;
+  phone: string | null;
+  bloodGroup: string | null;
+  previousSchool: string | null;
+  status: 'ACTIVE' | 'GRADUATED' | 'WITHDRAWN' | 'TRANSFERRED';
   isActive: boolean;
+  admissionDate: Date;
   createdAt: Date;
 }
 
@@ -85,14 +95,53 @@ export interface MockTeacher {
   updatedAt: Date;
 }
 
-export interface MockCommunity {
+// ═════════════════════════════════════════════════════════════
+// Phase 02: Branch + Academic Year Model Factories
+// ═════════════════════════════════════════════════════════════
+
+export interface MockBranch {
   id: string;
   name: string;
-  description: string | null;
-  schoolId: string | null;
-  academicYear: string;
+  code: string;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  logoUrl: string | null;
+  isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface MockAcademicCalendar {
+  id: string;
+  label: string;
+  startDate: Date;
+  endDate: Date;
+  isCurrent: boolean;
+  createdAt: Date;
+}
+
+export interface MockAcademicYear {
+  id: string;
+  branchId: string;
+  calendarId: string;
+  status: 'BUILD_STAGE' | 'ACTIVE' | 'ARCHIVED';
+  previousAcademicYearId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface MockAcademicYearMember {
+  id: string;
+  academicYearId: string;
+  userId: string;
+  role: 'super_admin' | 'management' | 'teacher' | 'parent';
+}
+
+export interface MockBranchMember {
+  id: string;
+  branchId: string;
+  userId: string;
 }
 
 export interface MockGroupMember {
@@ -101,6 +150,16 @@ export interface MockGroupMember {
   userId: string;
   role: 'super_admin' | 'management' | 'teacher' | 'parent';
   joinedAt: Date;
+}
+
+export interface MockCommunity {
+  id: string;
+  name: string;
+  description: string | null;
+  schoolId: string | null;
+  academicYear: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface MockCommunityMember {
@@ -189,7 +248,7 @@ export function createMockApiKey(overrides: Partial<MockApiKey> = {}): MockApiKe
 export function createMockGroup(overrides: Partial<MockGroup> = {}): MockGroup {
   return {
     id: unique('group'),
-    communityId: unique('comm'),
+    academicYearId: unique('ay'),
     name: 'Class 1',
     section: null,
     displayOrder: 1,
@@ -211,12 +270,22 @@ export function createMockGroup(overrides: Partial<MockGroup> = {}): MockGroup {
 export function createMockStudent(overrides: Partial<MockStudent> = {}): MockStudent {
   return {
     id: unique('student'),
+    academicYearId: unique('ay'),
     groupId: unique('group'),
     name: 'Test Student',
+    rollNumber: null,
+    admissionNumber: null,
     gender: null,
     dateOfBirth: null,
-    admissionDate: pastDate(30),
+    religion: null,
+    nationality: 'Pakistani',
+    address: null,
+    phone: null,
+    bloodGroup: null,
+    previousSchool: null,
+    status: 'ACTIVE',
     isActive: true,
+    admissionDate: pastDate(30),
     createdAt: pastDate(30),
     ...overrides,
   };
@@ -228,6 +297,73 @@ export function createMockStudent(overrides: Partial<MockStudent> = {}): MockStu
  * @param overrides - Partial fields to override defaults
  * @returns A complete MockTeacher
  */
+// ═════════════════════════════════════════════════════════════
+// Phase 02 Factory Functions
+// ═════════════════════════════════════════════════════════════
+
+export function createMockBranch(overrides: Partial<MockBranch> = {}): MockBranch {
+  const id = overrides.id || unique('branch');
+  return {
+    id,
+    name: `Branch ${id.slice(0, 4)}`,
+    code: `BR_${id.slice(0, 4).toUpperCase()}`,
+    address: null,
+    phone: null,
+    email: null,
+    logoUrl: null,
+    isActive: true,
+    createdAt: pastDate(7),
+    updatedAt: now(),
+    ...overrides,
+  };
+}
+
+export function createMockAcademicCalendar(overrides: Partial<MockAcademicCalendar> = {}): MockAcademicCalendar {
+  const id = overrides.id || unique('cal');
+  return {
+    id,
+    label: `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
+    startDate: pastDate(30),
+    endDate: new Date(Date.now() + 300 * 86400000),
+    isCurrent: false,
+    createdAt: pastDate(7),
+    ...overrides,
+  };
+}
+
+export function createMockAcademicYear(overrides: Partial<MockAcademicYear> = {}): MockAcademicYear {
+  const id = overrides.id || unique('ay');
+  return {
+    id,
+    branchId: unique('branch'),
+    calendarId: unique('cal'),
+    status: 'BUILD_STAGE',
+    previousAcademicYearId: null,
+    createdAt: pastDate(7),
+    updatedAt: now(),
+    ...overrides,
+  };
+}
+
+export function createMockAcademicYearMember(overrides: Partial<MockAcademicYearMember> = {}): MockAcademicYearMember {
+  return {
+    id: unique('aym'),
+    academicYearId: unique('ay'),
+    userId: unique('user'),
+    role: 'teacher',
+    ...overrides,
+  };
+}
+
+export function createMockBranchMember(overrides: Partial<MockBranchMember> = {}): MockBranchMember {
+  return {
+    id: unique('bm'),
+    branchId: unique('branch'),
+    userId: unique('user'),
+    ...overrides,
+  };
+}
+
 export function createMockTeacher(overrides: Partial<MockTeacher> = {}): MockTeacher {
   return {
     id: unique('teacher'),

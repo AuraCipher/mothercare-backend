@@ -1,18 +1,36 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import auth from '../../middleware/auth.middleware';
 import { roleMiddleware } from '../../middleware/role.middleware';
+import branchRoutes from './branch.routes';
+import calendarRoutes from './academic-calendar.routes';
+import academicYearRoutes from './academic-year.routes';
+import meRoutes from './me.routes';
 
 const router = Router();
+const meRouter = Router();
 
 // All admin routes require super_admin or management
 router.use(auth);
 router.use(roleMiddleware(['super_admin', 'management']));
 
 // ═══════════════════════════════════════════════════════════════════
+// Phase 02: Branch + Academic Year System Routes
+// ═══════════════════════════════════════════════════════════════════
+
+router.use('/branches', branchRoutes);
+router.use('/calendars', calendarRoutes);
+router.use(academicYearRoutes); // Contains /branches/:branchId/academic-years + /academic-years/:id + academic-year members
+
+// ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
 // ═══════════════════════════════════════════════════════════════════
 
-router.get('/users', async (req: Request, res: Response) => {
+const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
+  (req: Request, res: Response, next: NextFunction) => {
+    fn(req, res, next).catch(next);
+  };
+
+router.get('/users', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
   const { role, status, search } = req.query;
 
@@ -38,10 +56,9 @@ router.get('/users', async (req: Request, res: Response) => {
   });
 
   res.json({ success: true, data: users });
-  return;
-});
+}));
 
-router.get('/users/:id', async (req: Request, res: Response) => {
+router.get('/users/:id', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
   const user = await prisma.user.findUnique({
     where: { id: req.params.id },
@@ -56,9 +73,9 @@ router.get('/users/:id', async (req: Request, res: Response) => {
     return;
   }
   res.json({ success: true, data: user });
-});
+}));
 
-router.post('/users', async (req: Request, res: Response) => {
+router.post('/users', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
   const { name, username, email, phone, password, role, gender, dateOfBirth, address } = req.body;
 
@@ -86,28 +103,27 @@ router.post('/users', async (req: Request, res: Response) => {
   });
 
   res.status(201).json({ success: true, data: { id: user.id, name: user.name, role: user.role } });
-});
+}));
 
-router.delete('/users/:id', async (req: Request, res: Response) => {
+router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
-  // Soft delete: mark inactive
   const user = await prisma.user.update({
     where: { id: req.params.id },
     data: { status: 'inactive' },
   });
   res.json({ success: true, message: 'User deactivated', data: { id: user.id } });
-});
+}));
 
 // ═══════════════════════════════════════════════════════════════════
-// GROUPS / CLASSES (Create, Read, Delete)
+// GROUPS / CLASSES (Create, Read, Delete) — Updated for AcademicYear
 // ═══════════════════════════════════════════════════════════════════
 
-router.get('/groups', async (req: Request, res: Response) => {
+router.get('/groups', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
-  const { communityId, section } = req.query;
+  const { academicYearId, section } = req.query;
 
   const where: any = {};
-  if (communityId) where.communityId = communityId;
+  if (academicYearId) where.academicYearId = academicYearId;
   if (section) where.section = section;
 
   const groups = await prisma.group.findMany({
@@ -115,21 +131,21 @@ router.get('/groups', async (req: Request, res: Response) => {
     orderBy: { displayOrder: 'asc' },
     include: {
       _count: { select: { members: true, students: true } },
-      community: { select: { name: true } },
+      academicYear: { select: { id: true } },
     },
   });
 
   res.json({ success: true, data: groups });
-});
+}));
 
-router.get('/groups/:id', async (req: Request, res: Response) => {
+router.get('/groups/:id', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
   const group = await prisma.group.findUnique({
     where: { id: req.params.id },
     include: {
       members: { include: { user: { select: { id: true, name: true, role: true } } } },
       students: true,
-      community: { select: { name: true } },
+      academicYear: { select: { id: true } },
     },
   });
   if (!group) {
@@ -137,30 +153,29 @@ router.get('/groups/:id', async (req: Request, res: Response) => {
     return;
   }
   res.json({ success: true, data: group });
-});
+}));
 
-router.post('/groups', async (req: Request, res: Response) => {
+router.post('/groups', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
-  let { communityId, name, section, displayOrder, capacity } = req.body;
+  let { academicYearId, name, section, displayOrder, capacity } = req.body;
 
-  // If no communityId provided, auto-assign to the default branch (single-school mode).
-  // Tries the well-known branch name first, then falls back to the oldest community.
-  if (!communityId) {
-    const defaultBranchName = process.env.DEFAULT_BRANCH_NAME || 'Mother Care Sohan';
-    let branch = await prisma.community.findFirst({ where: { name: defaultBranchName } });
-    if (!branch) {
-      branch = await prisma.community.findFirst({ orderBy: { createdAt: 'asc' } });
-    }
-    if (!branch) {
-      res.status(400).json({ success: false, message: 'No school branch found. Create a branch first.' });
+  // If no academicYearId provided, auto-assign to the current ACTIVE academic year
+  if (!academicYearId) {
+    const activeAy = await prisma.academicYear.findFirst({
+      where: { status: 'ACTIVE' },
+      select: { id: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!activeAy) {
+      res.status(400).json({ success: false, message: 'No active academic year found. Create and publish an academic year first.' });
       return;
     }
-    communityId = branch.id;
+    academicYearId = activeAy.id;
   }
 
   const group = await prisma.group.create({
     data: {
-      communityId,
+      academicYearId,
       name,
       section: section || undefined,
       displayOrder: displayOrder || 1,
@@ -169,26 +184,27 @@ router.post('/groups', async (req: Request, res: Response) => {
   });
 
   res.status(201).json({ success: true, data: group });
-});
+}));
 
-router.delete('/groups/:id', async (req: Request, res: Response) => {
+router.delete('/groups/:id', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
   await prisma.group.update({
     where: { id: req.params.id },
     data: { isActive: false },
   });
   res.json({ success: true, message: 'Group deactivated' });
-});
+}));
 
 // ═══════════════════════════════════════════════════════════════════
 // STUDENTS (Create, Read, Delete)
 // ═══════════════════════════════════════════════════════════════════
 
-router.get('/students', async (req: Request, res: Response) => {
+router.get('/students', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
-  const { groupId, isActive } = req.query;
+  const { groupId, isActive, academicYearId } = req.query;
   const where: any = {};
   if (groupId) where.groupId = groupId;
+  if (academicYearId) where.academicYearId = academicYearId;
   if (isActive !== undefined) where.isActive = isActive === 'true';
 
   const students = await prisma.student.findMany({
@@ -200,9 +216,9 @@ router.get('/students', async (req: Request, res: Response) => {
   });
 
   res.json({ success: true, data: students });
-});
+}));
 
-router.get('/students/:id', async (req: Request, res: Response) => {
+router.get('/students/:id', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
   const student = await prisma.student.findUnique({
     where: { id: req.params.id },
@@ -216,11 +232,30 @@ router.get('/students/:id', async (req: Request, res: Response) => {
     return;
   }
   res.json({ success: true, data: student });
-});
+}));
 
-router.post('/students', async (req: Request, res: Response) => {
+router.post('/students', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
-  const { name, gender, dateOfBirth, groupId } = req.body;
+  const { name, gender, dateOfBirth, groupId, academicYearId } = req.body;
+
+  if (!name) {
+    res.status(400).json({ success: false, message: 'Student name is required' });
+    return;
+  }
+
+  // Auto-assign to ACTIVE academic year if not provided
+  let targetAyId = academicYearId;
+  if (!targetAyId) {
+    const activeAy = await prisma.academicYear.findFirst({
+      where: { status: 'ACTIVE' },
+      select: { id: true },
+    });
+    if (!activeAy) {
+      res.status(400).json({ success: false, message: 'No active academic year found. Create one first.' });
+      return;
+    }
+    targetAyId = activeAy.id;
+  }
 
   const student = await prisma.student.create({
     data: {
@@ -228,87 +263,35 @@ router.post('/students', async (req: Request, res: Response) => {
       gender,
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
       groupId,
+      academicYearId: targetAyId,
     },
   });
 
   res.status(201).json({ success: true, data: student });
-});
+}));
 
-router.delete('/students/:id', async (req: Request, res: Response) => {
+router.delete('/students/:id', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
   const student = await prisma.student.update({
     where: { id: req.params.id },
     data: { isActive: false },
   });
   res.json({ success: true, message: 'Student deactivated', data: { id: student.id } });
-});
+}));
 
 // ═══════════════════════════════════════════════════════════════════
-// COMMUNITIES (Create, Read, Delete)
+// STATS (Dashboard data) — Updated: Community → AcademicYear
 // ═══════════════════════════════════════════════════════════════════
 
-router.get('/communities', async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
-  const communities = await prisma.community.findMany({
-    orderBy: { createdAt: 'desc' },
-    include: {
-      _count: { select: { members: true, groups: true } },
-    },
-  });
-  res.json({ success: true, data: communities });
-});
-
-router.get('/communities/:id', async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
-  const community = await prisma.community.findUnique({
-    where: { id: req.params.id },
-    include: {
-      members: { include: { user: { select: { id: true, name: true, role: true } } } },
-      groups: true,
-      announcements: { take: 10, orderBy: { createdAt: 'desc' } },
-    },
-  });
-  if (!community) {
-    res.status(404).json({ success: false, message: 'Community not found' });
-    return;
-  }
-  res.json({ success: true, data: community });
-});
-
-router.post('/communities', async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
-  const { name, description, academicYear } = req.body;
-
-  const community = await prisma.community.create({
-    data: {
-      name,
-      description,
-      academicYear: academicYear || '2025-2026',
-    },
-  });
-
-  res.status(201).json({ success: true, data: community });
-});
-
-router.delete('/communities/:id', async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
-  // Hard delete with cascade (groups, members, announcements)
-  await prisma.community.delete({ where: { id: req.params.id } });
-  res.json({ success: true, message: 'Community deleted' });
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// STATS (Dashboard data)
-// ═══════════════════════════════════════════════════════════════════
-
-router.get('/stats', async (req: Request, res: Response) => {
+router.get('/stats', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../lib/prisma'));
 
-  const [users, groups, students, communities, apiKeys] = await Promise.all([
+  const [users, groups, students, academicYears, branches, apiKeys] = await Promise.all([
     prisma.user.count({ where: { status: 'active' } }),
     prisma.group.count(),
     prisma.student.count({ where: { isActive: true } }),
-    prisma.community.count(),
+    prisma.academicYear.count(),
+    prisma.branch.count({ where: { isActive: true } }),
     prisma.apiKey.count({ where: { revokedAt: null } }),
   ]);
 
@@ -329,11 +312,22 @@ router.get('/stats', async (req: Request, res: Response) => {
       totalUsers: users,
       totalGroups: groups,
       totalStudents: students,
-      totalCommunities: communities,
+      totalAcademicYears: academicYears,
+      totalBranches: branches,
       activeApiKeys: apiKeys,
       byRole: roleCounts,
     },
   });
-});
+}));
 
 export default router;
+
+// ═══════════════════════════════════════════════════════════════════
+// /me routes (authenticated but no admin role check)
+// ═══════════════════════════════════════════════════════════════════
+
+// Mount /me with its own auth (no admin role requirement)
+meRouter.use(auth);
+meRouter.use(meRoutes);
+
+export { meRouter };

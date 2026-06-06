@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import authRoutes from './modules/auth/auth.routes';
 import apiKeyRoutes from './modules/api-key/api-key.routes';
-import adminRoutes from './modules/admin/admin.routes';
+import adminRoutes, { meRouter } from './modules/admin/admin.routes';
 import errorHandler from './middleware/errorHandler';
 import requestLogger from './middlewares/requestLogger';
 import env from './config/env';
@@ -85,6 +85,7 @@ app.get('/health', (_req, res) => {
 app.use('/auth', authRoutes);
 app.use('/api-keys', apiKeyRoutes);
 app.use('/admin', adminRoutes);
+app.use('/me', meRouter);
 
 // ─── 404 Handler ─────────────────────────────────────────────
 app.use('*', (_req, res) => {

@@ -53,4 +53,25 @@ jest.mock('@prisma/client', () => ({
     publishable: 'publishable',
     secret: 'secret',
   },
+
+  AcademicYearStatus: {
+    BUILD_STAGE: 'BUILD_STAGE',
+    ACTIVE: 'ACTIVE',
+    ARCHIVED: 'ARCHIVED',
+  },
+
+  PromotionStatus: {
+    PENDING: 'PENDING',
+    IN_PROGRESS: 'IN_PROGRESS',
+    COMPLETED: 'COMPLETED',
+    REVERSED: 'REVERSED',
+    FAILED: 'FAILED',
+  },
+
+  StudentStatus: {
+    ACTIVE: 'ACTIVE',
+    GRADUATED: 'GRADUATED',
+    WITHDRAWN: 'WITHDRAWN',
+    TRANSFERRED: 'TRANSFERRED',
+  },
 }));
