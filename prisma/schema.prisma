@@ -1,0 +1,722 @@
+// Mother Care — School Management Platform
+// Database Schema v2.0 — Academic Year System
+// PostgreSQL + Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                         ENUMERATIONS                            ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+enum Role {
+  super_admin // Highest authority, full system access
+  management  // Administrative staff with assigned permissions
+  teacher     // Class/group instructors
+  parent      // Parent/student merged account
+}
+
+enum Gender {
+  male
+  female
+  other
+}
+
+enum AccountStatus {
+  active
+  inactive
+  suspended
+}
+
+// Academic Year lifecycle: BUILD_STAGE → ACTIVE → ARCHIVED
+enum AcademicYearStatus {
+  BUILD_STAGE // Year being set up — only admins see it
+  ACTIVE      // Current operational year — everyone sees it
+  ARCHIVED    // Closed year — admins can still edit data
+}
+
+// Year-end close / batch promotion state machine
+enum PromotionStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  REVERSED
+  FAILED
+}
+
+// Student lifecycle status
+enum StudentStatus {
+  ACTIVE
+  GRADUATED
+  WITHDRAWN
+  TRANSFERRED
+}
+
+enum ApiKeyType {
+  publishable // Public: verified store / registered layout
+  secret      // Admin: bypass login, full CRUD
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                           USERS                                 ║
+// ║  All credentials created by admin. No signup / forgot password. ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model User {
+  id               String        @id @default(uuid())
+  schoolId         String?
+  name             String
+  username         String?       @unique
+  email            String?       @unique
+  phone            String?       @unique
+  passwordHash     String
+  role             Role          @default(parent)
+  managementPerms  String[]      @default([])
+  gender           Gender?
+  dateOfBirth      DateTime?
+  address          String?
+  profilePhoto     String?
+  status           AccountStatus @default(active)
+  isEmailVerified  Boolean       @default(false)
+  isPhoneVerified  Boolean       @default(false)
+  lastLoginAt      DateTime?
+  lastSeen         DateTime?
+  rememberMeToken  String?       @unique
+  rememberMeExpiry DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  // Existing relations
+  managementProfile ManagementProfile?
+  teacherProfile    TeacherProfile?
+  parentProfile     ParentProfile?
+  sentMessages      Message[]               @relation("SentMessages")
+  notifications     NotificationRecipient[]
+  deviceTokens      DeviceToken[]
+  auditLogs         AuditLog[]
+  groupMembers      GroupMember[]
+  batchPromotions   BatchPromotion[]        @relation("PromotedByUser")
+  passwordResetTokens PasswordResetToken[]
+
+  // New relations for Academic Year System
+  branchMembers       BranchMember[]
+  academicYearMembers AcademicYearMember[]
+  teacherAssignments  TeacherAssignment[]
+  academicYearSnapshots AcademicYearSnapshot[] @relation("SnapshotTriggeredBy")
+
+  @@index([username])
+  @@index([email])
+  @@index([phone])
+  @@index([role])
+  @@index([status])
+  @@map("users")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                       SCHOOL / TENANT                           ║
+// ║  Kept for backward compatibility (may be deprecated later).     ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model School {
+  id              String   @id @default(uuid())
+  name            String
+  address         String?
+  phone           String?
+  email           String?
+  logoUrl         String?
+  website         String?
+  timezone        String   @default("Asia/Karachi")
+  currency        String   @default("PKR")
+  passingMarks    Float    @default(50.0)
+  attendanceAlert Int      @default(75)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("schools")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                        BRANCH (Physical Campus)                 ║
+// ║  A physical school campus or franchise location.               ║
+// ║  Example: "Mother Care Sohan" (code: MCS-SOHAN)               ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model Branch {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  code      String   @unique // Short code: "MCS-SOHAN"
+  address   String?
+  phone     String?
+  email     String?
+  logoUrl   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  academicYears AcademicYear[]
+  branchMembers BranchMember[]
+
+  @@map("branches")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                   ACADEMIC CALENDAR                             ║
+// ║  Shared reference: label ("2025-2026"), start/end dates.       ║
+// ║  Decoupled from the container — multiple branches share the    ║
+// ║  same calendar definition.                                     ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model AcademicCalendar {
+  id        String   @id @default(uuid())
+  label     String   @unique // "2025-2026", "2026-2027"
+  startDate DateTime
+  endDate   DateTime
+  isCurrent Boolean  @default(false) // Only one globally
+  createdAt DateTime @default(now())
+
+  academicYears AcademicYear[]
+
+  @@map("academic_calendars")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                      ACADEMIC YEAR                              ║
+// ║  The core container — everything lives inside one.              ║
+// ║  Lifecycle: BUILD_STAGE → ACTIVE → ARCHIVED                    ║
+// ║  Exactly one ACTIVE per branch.                                 ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model AcademicYear {
+  id                    String             @id @default(uuid())
+  branchId              String
+  calendarId            String
+  status                AcademicYearStatus @default(BUILD_STAGE)
+  previousAcademicYearId String?           // Self-referencing FK for year chain
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  branch              Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  calendar            AcademicCalendar   @relation(fields: [calendarId], references: [id])
+  previousAcademicYear AcademicYear?      @relation("YearSequence", fields: [previousAcademicYearId], references: [id])
+  nextAcademicYears    AcademicYear[]     @relation("YearSequence")
+
+  members             AcademicYearMember[]
+  groups              Group[]
+  subjects            Subject[]
+  teacherAssignments  TeacherAssignment[]
+  students            Student[]
+  enrollments         Enrollment[]
+  snapshots           AcademicYearSnapshot[]  @relation("SourceAcademicYear")
+  newSnapshots        AcademicYearSnapshot[]  @relation("NewAcademicYear")
+  announcements       Announcement[]
+
+  @@unique([branchId, calendarId])
+  @@map("academic_years")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                   ACADEMIC YEAR MEMBER                          ║
+// ║  Links users to an academic year with a specific role.          ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model AcademicYearMember {
+  id             String @id @default(uuid())
+  academicYearId String
+  userId         String
+  role           Role
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([academicYearId, userId])
+  @@map("academic_year_members")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                       BRANCH MEMBER                             ║
+// ║  Links users to a branch (cross-year membership).               ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model BranchMember {
+  id       String @id @default(uuid())
+  branchId String
+  userId   String
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, userId])
+  @@map("branch_members")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                     GROUPS (CLASSES / SECTIONS)                 ║
+// ║  Represents a class + section within an academic year.          ║
+// ║  Examples: "Playgroup", "Class 3-A", "Class 10-Bio"            ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model Group {
+  id               String   @id @default(uuid())
+  academicYearId   String
+  name             String // "Playgroup", "Class 3", "Class 10"
+  section          String? // "A", "B" or "Bio", "CompSci", "Arts"
+  displayOrder     Int     // 1-13 for ordering/grade level
+  capacity         Int     @default(30)
+  onlyAdminCanSend Boolean @default(true)
+  isActive         Boolean @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  academicYear AcademicYear     @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  members       GroupMember[]
+  messages      Message[]
+  students      Student[]
+  groupSubjects  GroupSubject[]
+  teacherAssignments TeacherAssignment[]
+  enrollments   Enrollment[]
+
+  @@unique([academicYearId, name, section])
+  @@map("groups")
+}
+
+// Group membership (users in a group)
+model GroupMember {
+  id       String   @id @default(uuid())
+  groupId  String
+  userId   String
+  role     Role
+  joinedAt DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@map("group_members")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                      SUBJECT                                    ║
+// ║  Subjects exist at the AcademicYear level and are linked to     ║
+// ║  specific groups via GroupSubject. One definition can be shared ║
+// ║  across multiple groups/sections.                               ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model Subject {
+  id             String   @id @default(uuid())
+  academicYearId String
+  name           String   // "English", "Mathematics", "Science"
+  code           String?  // Optional subject code (unique per AY)
+  description    String?
+  totalMarks     Float    @default(100)
+  passingMarks   Float    @default(50)
+  isElective     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  academicYear      AcademicYear      @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  groupSubjects     GroupSubject[]
+  teacherAssignments TeacherAssignment[]
+
+  @@unique([academicYearId, code])
+  @@map("subjects")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    GROUP-SUBJECT LINKING                        ║
+// ║  Links a subject to a specific group within an academic year.   ║
+// ║  Enables sharing "English" across Class 1-A and Class 1-B.     ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model GroupSubject {
+  id        String @id @default(uuid())
+  groupId   String
+  subjectId String
+
+  group   Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, subjectId])
+  @@map("group_subjects")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                     TEACHER PROFILE                             ║
+// ║  Detailed profile for teacher role users.                       ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model TeacherProfile {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  employeeId       String?  @unique
+  qualification    String?
+  specialization   String?
+  joiningDate      DateTime?
+  salary           Decimal? @db.Decimal(12, 2)
+  phone            String?
+  emergencyContact String?
+  address          String?
+  dateOfBirth      DateTime?
+  gender           Gender?
+  bloodGroup       String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("teacher_profiles")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    TEACHER ASSIGNMENT                           ║
+// ║  Assigns a teacher to teach a specific subject in a specific    ║
+// ║  group during an academic year. isClassTeacher marks the homeroom ║
+// ║  teacher for that group.                                        ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model TeacherAssignment {
+  id             String  @id @default(uuid())
+  academicYearId String
+  teacherId      String  // FK → User (role=teacher)
+  groupId        String
+  subjectId      String
+  isClassTeacher Boolean @default(false)
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  teacher      User         @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  group        Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  subject      Subject      @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, subjectId, teacherId])
+  @@map("teacher_assignments")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    MANAGEMENT PROFILE                           ║
+// ║  Track admin/management staff details.                         ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model ManagementProfile {
+  id          String    @id @default(uuid())
+  userId      String    @unique
+  employeeId  String?   @unique
+  department  String?
+  designation String?
+  permissions String[]  @default([])
+  joiningDate DateTime?
+  salary      Decimal?  @db.Decimal(12, 2)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("management_profiles")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                      PARENT PROFILE                             ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model ParentProfile {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  occupation String?
+  relation   String? // "Father", "Mother", "Guardian"
+  cnicNumber String?  @unique
+  createdAt  DateTime @default(now())
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  children StudentParent[]
+
+  @@map("parent_profiles")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                          STUDENT                                ║
+// ║  Core student record. Current placement is groupId. Full        ║
+// ║  history tracked via Enrollment model.                          ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model Student {
+  id              String        @id @default(uuid())
+  academicYearId  String
+  groupId         String?
+  name            String
+  rollNumber      String?
+  admissionNumber String?       @unique
+  dateOfBirth     DateTime?
+  gender          Gender?
+  religion        String?
+  nationality     String?       @default("Pakistani")
+  address         String?
+  phone           String?
+  bloodGroup      String?
+  previousSchool  String?
+  status          StudentStatus @default(ACTIVE)
+  isActive        Boolean       @default(true)
+  admissionDate   DateTime      @default(now())
+  createdAt       DateTime      @default(now())
+
+  academicYear AcademicYear    @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  group        Group?          @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  parents      StudentParent[]
+  enrollments  Enrollment[]
+
+  @@index([groupId])
+  @@index([academicYearId])
+  @@map("students")
+}
+
+// Student-Parent linking (many-to-many)
+model StudentParent {
+  id        String   @id @default(uuid())
+  studentId String
+  parentId  String
+  relation  String   // "Father", "Mother", "Guardian"
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  student Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  parent  ParentProfile @relation(fields: [parentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, parentId])
+  @@map("student_parents")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                       ENROLLMENT                                ║
+// ║  One record per student per academic year. Immutable after      ║
+// ║  creation (only leftAt can be set at year-end close).           ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model Enrollment {
+  id             String    @id @default(uuid())
+  studentId      String
+  academicYearId String
+  groupId        String
+  rollNumber     String?
+  joinedAt       DateTime  @default(now())
+  leftAt         DateTime?
+
+  student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  group        Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, academicYearId])
+  @@map("enrollments")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    ACADEMIC YEAR SNAPSHOT                       ║
+// ║  Records a year-end close / batch promotion event. Contains     ║
+// ║  frozen snapshot of all groups within the academic year.        ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model AcademicYearSnapshot {
+  id               String          @id @default(uuid())
+  academicYearId   String
+  newAcademicYearId String?
+  fromLabel        String          // Human label of source year
+  toLabel          String          // Human label of target year
+  triggeredById    String          // User who triggered the close
+  status           PromotionStatus @default(PENDING)
+  totalStudents    Int             @default(0)
+  totalGraduated   Int             @default(0)
+  canReverse       Boolean         @default(true)
+  reversedAt       DateTime?
+  createdAt        DateTime        @default(now())
+
+  academicYear    AcademicYear    @relation("SourceAcademicYear", fields: [academicYearId], references: [id], onDelete: Cascade)
+  newAcademicYear AcademicYear?   @relation("NewAcademicYear", fields: [newAcademicYearId], references: [id])
+  triggeredBy     User            @relation("SnapshotTriggeredBy", fields: [triggeredById], references: [id])
+  groupSnapshots  GroupSnapshot[]
+
+  @@map("academic_year_snapshots")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                      GROUP SNAPSHOT                             ║
+// ║  Frozen state of a group at year-end close time.                ║
+// ║  studentsData and teachersData are JSON snapshots.              ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model GroupSnapshot {
+  id            String   @id @default(uuid())
+  snapshotId    String
+  groupId       String   // Original group ID (not FK — group may change)
+  groupName     String
+  section       String?
+  displayOrder  Int
+  studentsData  Json?    // Frozen student list
+  teachersData  Json?    // Frozen teacher assignments
+  studentCount  Int      @default(0)
+
+  snapshot AcademicYearSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@map("group_snapshots")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    ANNOUNCEMENTS                                ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model Announcement {
+  id             String   @id @default(uuid())
+  academicYearId String
+  senderId       String
+  title          String
+  content        String?
+  mediaUrl       String?
+  isPinned       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+
+  @@index([academicYearId, createdAt])
+  @@map("announcements")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                     MESSAGES (GROUP CHAT)                       ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model Message {
+  id        String   @id @default(uuid())
+  groupId   String
+  senderId  String
+  content   String?
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  group  Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sender User  @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, createdAt])
+  @@map("messages")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    BATCH PROMOTION                              ║
+// ║  Promote all students from current class to next.              ║
+// ║  Will be fully reworked in Phase 12.                           ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model BatchPromotion {
+  id            String    @id @default(uuid())
+  academicYearId String
+  fromYear      String
+  toYear        String
+  promotedById  String
+  status        String    @default("pending")
+  totalStudents Int
+  canReverse    Boolean   @default(true)
+  reversedAt    DateTime?
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  promotedBy User @relation("PromotedByUser", fields: [promotedById], references: [id])
+
+  @@map("batch_promotions")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    NOTIFICATION SYSTEM                          ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model NotificationRecipient {
+  id        String    @id @default(uuid())
+  userId    String
+  title     String
+  body      String
+  type      String    // "announcement", "message", etc.
+  data      Json?
+  isRead    Boolean   @default(false)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notification_recipients")
+}
+
+// Device tokens for push notifications
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  platform  String   // "android", "ios", "web"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("device_tokens")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    PASSWORD RESET TOKENS                        ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([token])
+  @@map("password_reset_tokens")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                       AUDIT TRAIL                               ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  action    String
+  entity    String
+  entityId  String?
+  oldValue  Json?
+  newValue  Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                         API KEYS                                ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model ApiKey {
+  id         String     @id @default(uuid())
+  name       String
+  type       ApiKeyType @default(publishable)
+  keyHash    String     @unique
+  prefix     String     // e.g. "mcs_abc1"
+  createdBy  String
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime   @default(now())
+
+  @@index([prefix])
+  @@index([revokedAt])
+  @@index([type])
+  @@map("api_keys")
+}
