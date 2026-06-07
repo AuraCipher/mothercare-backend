@@ -796,20 +796,22 @@ describe('Phase 02 — Branch Members (BA-022)', () => {
     mockUser = createMockUser({ role: 'teacher' });
   });
 
-  test('POST adds a user to branch', async () => {
+  test('POST adds a user to branch with role', async () => {
     prismaMock.branch.findUnique.mockResolvedValue(mockBranch as any);
     prismaMock.user.findUnique.mockResolvedValue(mockUser as any);
     prismaMock.branchMember.findUnique.mockResolvedValue(null);
+    prismaMock.branchMember.findFirst.mockResolvedValue(null);
     prismaMock.branchMember.create.mockResolvedValue({
       id: 'bm-1',
       branchId: mockBranch.id,
       userId: mockUser.id,
+      role: 'teacher',
     } as any);
 
     const res = await request(app)
       .post(`/admin/branches/${mockBranch.id}/members`)
       .set(adminToken)
-      .send({ userId: mockUser.id });
+      .send({ userId: mockUser.id, role: 'teacher' });
 
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
@@ -818,19 +820,26 @@ describe('Phase 02 — Branch Members (BA-022)', () => {
   test('returns 409 when user is already a branch member', async () => {
     prismaMock.branch.findUnique.mockResolvedValue(mockBranch as any);
     prismaMock.user.findUnique.mockResolvedValue(mockUser as any);
-    prismaMock.branchMember.findUnique.mockResolvedValue({ id: 'bm-1' } as any);
+    prismaMock.branchMember.findUnique.mockResolvedValue(createMockBranchMember({
+      branchId: mockBranch.id,
+      userId: mockUser.id,
+    }) as any);
 
     const res = await request(app)
       .post(`/admin/branches/${mockBranch.id}/members`)
       .set(adminToken)
-      .send({ userId: mockUser.id });
+      .send({ userId: mockUser.id, role: 'teacher' });
 
     expect(res.status).toBe(409);
   });
 
   test('DELETE removes a branch member', async () => {
-    prismaMock.branchMember.findUnique.mockResolvedValue({ id: 'bm-1' } as any);
-    prismaMock.branchMember.delete.mockResolvedValue({} as any);
+    prismaMock.branchMember.findUnique.mockResolvedValue(createMockBranchMember({
+      branchId: mockBranch.id,
+      userId: mockUser.id,
+      role: 'teacher',
+    }) as any);
+    prismaMock.branchMember.update.mockResolvedValue({} as any);
 
     const res = await request(app)
       .delete(`/admin/branches/${mockBranch.id}/members/${mockUser.id}`)
@@ -1140,5 +1149,118 @@ describe('Admin — Stats', () => {
       activeApiKeys: 3,
       byRole: { super_admin: 1, management: 2, teacher: 20, parent: 77 },
     });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Phase 04 — Branch Member Management
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Phase 04 — Branch Member Management', () => {
+  let mockBranch: MockBranch;
+  let mockUser: MockUser;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockBranch = createMockBranch();
+    mockUser = createMockUser({ role: 'teacher' });
+  });
+
+  test('POST /admin/branches/:id/members — adds member with role', async () => {
+    prismaMock.branch.findUnique.mockResolvedValue(mockBranch as any);
+    prismaMock.user.findUnique.mockResolvedValue(mockUser as any);
+    prismaMock.branchMember.findUnique.mockResolvedValue(null);
+    prismaMock.branchMember.findFirst.mockResolvedValue(null);
+    prismaMock.branchMember.create.mockResolvedValue(createMockBranchMember({
+      branchId: mockBranch.id,
+      userId: mockUser.id,
+      role: 'teacher',
+    }) as any);
+
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/members`)
+      .set(adminToken)
+      .send({ userId: mockUser.id, role: 'teacher' });
+
+    expect(res.status).toBe(201);
+  });
+
+  test('POST rejects creating second branch_admin', async () => {
+    prismaMock.branch.findUnique.mockResolvedValue(mockBranch as any);
+    prismaMock.user.findUnique.mockResolvedValue(mockUser as any);
+    prismaMock.branchMember.findUnique.mockResolvedValue(null);
+    prismaMock.branchMember.findFirst.mockResolvedValue(createMockBranchMember({ role: 'branch_admin' }) as any);
+
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/members`)
+      .set(adminToken)
+      .send({ userId: mockUser.id, role: 'branch_admin' });
+
+    expect(res.status).toBe(409);
+  });
+
+  test('POST returns 400 when userId missing', async () => {
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/members`)
+      .set(adminToken)
+      .send({ role: 'teacher' });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('PUT /admin/branches/:id/members/:userId — updates role', async () => {
+    const membership = createMockBranchMember({ branchId: mockBranch.id, userId: mockUser.id, role: 'teacher' });
+    prismaMock.branchMember.findUnique.mockResolvedValue(membership as any);
+    prismaMock.branchMember.update.mockResolvedValue({ ...membership, role: 'sub_admin' } as any);
+
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/members/${mockUser.id}`)
+      .set(adminToken)
+      .send({ role: 'sub_admin' });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.branchMember.update).toHaveBeenCalled();
+  });
+
+  test('DELETE /admin/branches/:id/members/:userId — removes member', async () => {
+    const membership = createMockBranchMember({ branchId: mockBranch.id, userId: mockUser.id, role: 'teacher' });
+    prismaMock.branchMember.findUnique.mockResolvedValue(membership as any);
+    prismaMock.branchMember.update.mockResolvedValue({ ...membership, isActive: false } as any);
+
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/members/${mockUser.id}`)
+      .set(adminToken);
+
+    expect(res.status).toBe(204);
+  });
+
+  test('DELETE returns 409 when removing last branch_admin', async () => {
+    const membership = createMockBranchMember({
+      branchId: mockBranch.id,
+      userId: mockUser.id,
+      role: 'branch_admin',
+    });
+    prismaMock.branchMember.findUnique.mockResolvedValue(membership as any);
+    prismaMock.branchMember.count.mockResolvedValue(0);
+
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/members/${mockUser.id}`)
+      .set(adminToken);
+
+    expect(res.status).toBe(409);
+  });
+
+  test('POST /admin/branches/:id/members/:userId/promote — promotes to admin', async () => {
+    const membership = createMockBranchMember({ branchId: mockBranch.id, userId: mockUser.id, role: 'teacher' });
+    prismaMock.branchMember.findUnique.mockResolvedValue(membership as any);
+    prismaMock.branchMember.findFirst.mockResolvedValue(null);
+    prismaMock.branchMember.update.mockResolvedValue({ ...membership, role: 'branch_admin' } as any);
+
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/members/${mockUser.id}/promote`)
+      .set(adminToken)
+      .send({ keepTeacherRole: true });
+
+    expect(res.status).toBe(200);
   });
 });

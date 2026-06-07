@@ -142,6 +142,14 @@ export interface MockBranchMember {
   id: string;
   branchId: string;
   userId: string;
+  role: 'branch_admin' | 'sub_admin' | 'management' | 'teacher' | 'parent';
+  isActive: boolean;
+  keepTeacherRole: boolean;
+  assignedById: string | null;
+  resignedAt: Date | null;
+  resignedInFavorOfId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface MockGroupMember {
@@ -356,10 +364,19 @@ export function createMockAcademicYearMember(overrides: Partial<MockAcademicYear
 }
 
 export function createMockBranchMember(overrides: Partial<MockBranchMember> = {}): MockBranchMember {
+  const now = new Date();
   return {
     id: unique('bm'),
     branchId: unique('branch'),
     userId: unique('user'),
+    role: 'teacher',
+    isActive: true,
+    keepTeacherRole: true,
+    assignedById: null,
+    resignedAt: null,
+    resignedInFavorOfId: null,
+    createdAt: now,
+    updatedAt: now,
     ...overrides,
   };
 }

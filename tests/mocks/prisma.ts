@@ -54,6 +54,14 @@ jest.mock('@prisma/client', () => ({
     secret: 'secret',
   },
 
+  BranchRole: {
+    branch_admin: 'branch_admin',
+    sub_admin: 'sub_admin',
+    management: 'management',
+    teacher: 'teacher',
+    parent: 'parent',
+  },
+
   AcademicYearStatus: {
     BUILD_STAGE: 'BUILD_STAGE',
     ACTIVE: 'ACTIVE',

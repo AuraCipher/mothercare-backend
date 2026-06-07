@@ -6,6 +6,7 @@
  *   2. AcademicCalendar "2025-2026" with start/end dates
  *   3. ACTIVE AcademicYear linked to branch + calendar
  *   4. 13 default groups (Playgroup → Class 10) with displayOrder 1-13
+ *   5. Super admin user (username: admin, password: admin123) + branch_admin assignment
  *
  * The seed is fully idempotent — running it multiple times produces
  * the same state without duplicates or errors.
@@ -15,6 +16,7 @@
  */
 
 import { PrismaClient, AcademicYearStatus } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
@@ -138,20 +140,47 @@ async function main() {
   console.log('\n🚀 MCS-App Database Seed v2.0\n');
 
   // Step 1: Branch
-  console.log('[1/4] Branch');
+  console.log('[1/5] Branch');
   const branch = await ensureBranch(DEFAULT_BRANCH_NAME, DEFAULT_BRANCH_CODE);
 
   // Step 2: AcademicCalendar
-  console.log('\n[2/4] AcademicCalendar');
+  console.log('\n[2/5] AcademicCalendar');
   const calendar = await ensureCalendar(CALENDAR_LABEL, CALENDAR_START, CALENDAR_END);
 
   // Step 3: AcademicYear
-  console.log('\n[3/4] AcademicYear');
+  console.log('\n[3/5] AcademicYear');
   const academicYear = await ensureAcademicYear(branch.id, calendar.id, 'ACTIVE');
 
   // Step 4: Default Groups
-  console.log('\n[4/4] Default Groups');
+  console.log('\n[4/5] Default Groups');
   await ensureGroups(academicYear.id);
+
+  // Step 5: Default Admin User
+  console.log('\n[5/5] Default Admin User');
+  const passwordHash = await bcrypt.hash('admin123', 12);
+  const adminUser = await prisma.user.upsert({
+    where: { username: 'admin' },
+    update: {},
+    create: {
+      name: 'Super Admin',
+      username: 'admin',
+      passwordHash,
+      role: 'super_admin',
+      status: 'active',
+    },
+  });
+  console.log(`  ✓ Super admin user created (username: admin)`);
+
+  await prisma.branchMember.upsert({
+    where: { branchId_userId: { branchId: branch.id, userId: adminUser.id } },
+    update: { role: 'branch_admin' },
+    create: {
+      branchId: branch.id,
+      userId: adminUser.id,
+      role: 'branch_admin',
+    },
+  });
+  console.log(`  ✓ Super admin assigned as branch_admin at "${branch.name}"`);
 
   // Summary
   console.log('\n─── Seed Summary ───────────────────────────────');

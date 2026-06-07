@@ -34,6 +34,15 @@ enum AccountStatus {
   suspended
 }
 
+// Branch-level roles for hierarchical access control
+enum BranchRole {
+  branch_admin  // Principal — full branch management
+  sub_admin     // Vice-Principal / Deputy
+  management    // Accountant, Admin Staff
+  teacher       // Teaching staff
+  parent        // Parent representative
+}
+
 // Academic Year lifecycle: BUILD_STAGE → ACTIVE → ARCHIVED
 enum AcademicYearStatus {
   BUILD_STAGE // Year being set up — only admins see it
@@ -106,6 +115,9 @@ model User {
 
   // New relations for Academic Year System
   branchMembers       BranchMember[]
+  // Reverse relations for BranchMember.assignedBy and BranchMember.resignedInFavorOf
+  assignedMembers     BranchMember[] @relation("AssignedBy")
+  resignedToMembers   BranchMember[] @relation("ResignedInFavorOf")
   academicYearMembers AcademicYearMember[]
   teacherAssignments  TeacherAssignment[]
   academicYearSnapshots AcademicYearSnapshot[] @relation("SnapshotTriggeredBy")
@@ -244,14 +256,25 @@ model AcademicYearMember {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model BranchMember {
-  id       String @id @default(uuid())
-  branchId String
-  userId   String
+  id                  String     @id @default(uuid())
+  branchId            String
+  userId              String
+  role                BranchRole @default(teacher)
+  isActive            Boolean    @default(true)
+  keepTeacherRole     Boolean    @default(true)
+  assignedById        String?
+  resignedAt          DateTime?
+  resignedInFavorOfId String?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 
-  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch            Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedBy        User?   @relation("AssignedBy", fields: [assignedById], references: [id])
+  resignedInFavorOf User?   @relation("ResignedInFavorOf", fields: [resignedInFavorOfId], references: [id])
 
   @@unique([branchId, userId])
+  @@index([userId])
   @@map("branch_members")
 }
 

@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import auth from '../../middleware/auth.middleware';
 import { roleMiddleware } from '../../middleware/role.middleware';
 import branchRoutes from './branch.routes';
+import branchMemberRoutes from './branch-member.routes';
 import calendarRoutes from './academic-calendar.routes';
 import academicYearRoutes from './academic-year.routes';
 import meRoutes from './me.routes';
@@ -18,6 +19,7 @@ router.use(roleMiddleware(['super_admin', 'management']));
 // ═══════════════════════════════════════════════════════════════════
 
 router.use('/branches', branchRoutes);
+router.use('/branches', branchMemberRoutes);
 router.use('/calendars', calendarRoutes);
 router.use(academicYearRoutes); // Contains /branches/:branchId/academic-years + /academic-years/:id + academic-year members
 

@@ -1,6 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { branchService } from './services/branch.service';
-import { academicYearService } from './services/academic-year.service';
 
 const router = Router();
 
@@ -67,27 +66,6 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
 router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   const result = await branchService.deactivate(req.params.id);
   res.json({ success: true, message: result.message, data: { action: result.action } });
-}));
-
-// ─── Branch Members (BA-022) ───────────────────────────────────
-
-// POST /admin/branches/:branchId/members — Add user to branch
-router.post('/:branchId/members', asyncHandler(async (req: Request, res: Response) => {
-  const { userId } = req.body;
-
-  if (!userId) {
-    res.status(400).json({ success: false, message: 'userId is required' });
-    return;
-  }
-
-  const member = await academicYearService.addBranchMember(req.params.branchId, userId);
-  res.status(201).json({ success: true, data: member });
-}));
-
-// DELETE /admin/branches/:branchId/members/:userId — Remove user from branch
-router.delete('/:branchId/members/:userId', asyncHandler(async (req: Request, res: Response) => {
-  await academicYearService.removeBranchMember(req.params.branchId, req.params.userId);
-  res.status(204).json({ success: true, message: 'Member removed' });
 }));
 
 export default router;

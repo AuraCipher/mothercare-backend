@@ -6,6 +6,7 @@ import fs from 'fs';
 import authRoutes from './modules/auth/auth.routes';
 import apiKeyRoutes from './modules/api-key/api-key.routes';
 import adminRoutes, { meRouter } from './modules/admin/admin.routes';
+import branchAdminRoutes from './modules/admin/branch-admin.routes';
 import errorHandler from './middleware/errorHandler';
 import requestLogger from './middlewares/requestLogger';
 import env from './config/env';
@@ -86,6 +87,7 @@ app.use('/auth', authRoutes);
 app.use('/api-keys', apiKeyRoutes);
 app.use('/admin', adminRoutes);
 app.use('/me', meRouter);
+app.use('/branches', branchAdminRoutes);
 
 // ─── 404 Handler ─────────────────────────────────────────────
 app.use('*', (_req, res) => {
