@@ -265,22 +265,43 @@ describe('Phase 02 — Branch CRUD', () => {
   });
 
   describe('DELETE /admin/branches/:id — Deactivate branch (BA-006)', () => {
-    test('soft-deletes a branch', async () => {
-      prismaMock.branch.findUnique.mockResolvedValue(mockBranch as any);
+    test('archives a branch that has linked data', async () => {
+      const branchWithData = {
+        ...mockBranch,
+        _count: { academicYears: 2, branchMembers: 5 },
+      };
+      prismaMock.branch.findUnique.mockResolvedValue(branchWithData as any);
       prismaMock.academicYear.findFirst
         .mockResolvedValueOnce(null) // no ACTIVE
         .mockResolvedValueOnce(null); // no BUILD_STAGE
-      const deactivated = { ...mockBranch, isActive: false };
-      prismaMock.branch.update.mockResolvedValue(deactivated as any);
+      prismaMock.branch.update.mockResolvedValue({ ...mockBranch, isActive: false } as any);
 
       const res = await request(app).delete(`/admin/branches/${mockBranch.id}`).set(adminToken);
 
       expect(res.status).toBe(200);
-      expect(res.body.message).toBe('Branch deactivated');
+      expect(res.body.data.action).toBe('archived');
+    });
+
+    test('hard-deletes an empty branch', async () => {
+      const emptyBranch = {
+        ...mockBranch,
+        _count: { academicYears: 0, branchMembers: 0 },
+      };
+      prismaMock.branch.findUnique.mockResolvedValue(emptyBranch as any);
+      prismaMock.academicYear.findFirst
+        .mockResolvedValueOnce(null) // no ACTIVE
+        .mockResolvedValueOnce(null); // no BUILD_STAGE
+      prismaMock.branch.delete.mockResolvedValue(emptyBranch as any);
+
+      const res = await request(app).delete(`/admin/branches/${mockBranch.id}`).set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.action).toBe('deleted');
     });
 
     test('returns 409 if branch has ACTIVE academic year', async () => {
-      prismaMock.branch.findUnique.mockResolvedValue(mockBranch as any);
+      const branchWithData = { ...mockBranch, _count: { academicYears: 0, branchMembers: 0 } };
+      prismaMock.branch.findUnique.mockResolvedValue(branchWithData as any);
       prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay-1', status: 'ACTIVE' } as any);
 
       const res = await request(app).delete(`/admin/branches/${mockBranch.id}`).set(adminToken);

@@ -82,7 +82,9 @@ class BranchService {
   async deactivate(id: string) {
     const branch = await prisma.branch.findUnique({
       where: { id },
-      include: { _count: { select: { academicYears: true } } },
+      include: {
+        _count: { select: { academicYears: true, branchMembers: true } },
+      },
     });
     if (!branch) {
       throw { status: 404, message: 'Branch not found' };
@@ -93,7 +95,7 @@ class BranchService {
       where: { branchId: id, status: 'ACTIVE' },
     });
     if (activeAy) {
-      throw { status: 409, message: 'Cannot deactivate branch: it has an active academic year' };
+      throw { status: 409, message: 'Cannot remove branch: it has an active academic year. Archive the year first.' };
     }
 
     // Check for BUILD_STAGE years
@@ -103,14 +105,27 @@ class BranchService {
     if (buildStageAy) {
       throw {
         status: 409,
-        message: 'Cannot deactivate branch: it has a BUILD_STAGE academic year. Delete or archive it first.',
+        message: 'Cannot remove branch: it has a BUILD_STAGE academic year. Publish and archive it first.',
       };
     }
 
-    return prisma.branch.update({
+    const totalLinked = (branch._count.academicYears || 0) + (branch._count.branchMembers || 0);
+
+    // ─── Empty branch → hard delete ────────────────────────────────
+    if (totalLinked === 0) {
+      await prisma.branch.delete({ where: { id } });
+      return { action: 'deleted', message: 'Branch permanently deleted (no linked data)' };
+    }
+
+    // ─── Has linked data → soft delete (archive) ───────────────────
+    await prisma.branch.update({
       where: { id },
       data: { isActive: false },
     });
+    return {
+      action: 'archived',
+      message: `Branch archived (${branch._count.academicYears} academic year(s), ${branch._count.branchMembers} member(s) preserved)`,
+    };
   }
 }
 

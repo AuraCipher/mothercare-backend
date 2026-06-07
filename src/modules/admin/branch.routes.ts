@@ -65,8 +65,8 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
 
 // DELETE /admin/branches/:id — Deactivate branch (BA-006)
 router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
-  const branch = await branchService.deactivate(req.params.id);
-  res.json({ success: true, message: 'Branch deactivated', data: { id: branch.id } });
+  const result = await branchService.deactivate(req.params.id);
+  res.json({ success: true, message: result.message, data: { action: result.action } });
 }));
 
 // ─── Branch Members (BA-022) ───────────────────────────────────
