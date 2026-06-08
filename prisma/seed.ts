@@ -186,29 +186,52 @@ async function main() {
   console.log(`  ✓ CEO assigned as branch_admin at "${branch.name}"`);
 
   // Seed a publishable API key for the frontend
-  const apiKeyPrefix = 'pk_mcs_global';
-  const existingKey = await prisma.apiKey.findFirst({ where: { prefix: apiKeyPrefix } });
+  // Use a known dev key so .env.local can be pre-configured
+  const devRawKey = 'pk_mcs_global_dev_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6';
+  const devPrefix = 'pk_mcs_global_dev';
+  const existingKey = await prisma.apiKey.findFirst({ where: { prefix: devPrefix } });
   if (!existingKey) {
-    const crypto = await import('crypto');
     const bcrypt = await import('bcryptjs');
-    const rand = crypto.randomBytes(32).toString('hex');
-    const rawKey = `pk_mcs_global_${rand}`;
-    const keyHash = await bcrypt.hash(rawKey, 12);
+    const keyHash = await bcrypt.hash(devRawKey, 12);
     await prisma.apiKey.create({
       data: {
         name: 'Default Frontend Key (Global)',
         type: 'publishable',
         keyHash,
-        prefix: apiKeyPrefix,
+        prefix: devPrefix,
         createdBy: 'system',
       },
     });
     console.log(`  ✓ Publishable API key created`);
-    console.log(`    Key: ${rawKey}`);
+    console.log(`    Key: ${devRawKey}`);
     console.log(`    Add to frontend .env.local:`);
-    console.log(`    NEXT_PUBLIC_PUBLISHABLE_KEY=${rawKey}`);
+    console.log(`    NEXT_PUBLIC_PUBLISHABLE_KEY=${devRawKey}`);
   } else {
     console.log(`  ✓ Publishable API key already exists`);
+  }
+
+  // Seed a secret API key for server-to-server admin calls
+  const devSecretKey = 'sk_mcs_global_dev_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6';
+  const devSecretPrefix = 'sk_mcs_global_dev';
+  const existingSecretKey = await prisma.apiKey.findFirst({ where: { prefix: devSecretPrefix } });
+  if (!existingSecretKey) {
+    const bcrypt2 = await import('bcryptjs');
+    const keyHash = await bcrypt2.hash(devSecretKey, 12);
+    await prisma.apiKey.create({
+      data: {
+        name: 'Default Secret Key (Global)',
+        type: 'secret',
+        keyHash,
+        prefix: devSecretPrefix,
+        createdBy: 'system',
+      },
+    });
+    console.log(`  ✓ Secret API key created`);
+    console.log(`    Key: ${devSecretKey}`);
+    console.log(`    Add to frontend .env.local (server-side only):`);
+    console.log(`    SECRET_KEY=${devSecretKey}`);
+  } else {
+    console.log(`  ✓ Secret API key already exists`);
   }
 
   // Step 6: Branch Admin (NOT super_admin — just branch_admin at Mother Care Sohan)
