@@ -77,8 +77,8 @@
       <div class="form-group"><label>Username / Phone / Email</label><input type="text" id="loginId" placeholder="admin" autocomplete="username" /></div>
       <div class="form-group"><label>Password</label><input type="password" id="loginPw" placeholder="••••••••" autocomplete="current-password" /></div>
       <div id="loginError" class="error-line"></div>
-      <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">Sign In</button>
-      <p class="hint">Default: admin / admin123 (branch admin) &bull; ceo@mothercareschool.com / Ceo@098765 (CEO)</p>
+      <button class="btn btn-primary" id="loginBtn">Sign In</button>
+      <p class="hint">CEO only: ceo@mothercareschool.com / Ceo@098765</p>
     </div>
   </div>
 
@@ -89,7 +89,7 @@
         <div class="form-group"><label>Name</label><input type="text" id="keyName" placeholder="e.g. Production Frontend" /></div>
         <div class="form-group" style="flex:0;min-width:150px;"><label>Type</label><select id="keyType"><option value="publishable">Publishable</option><option value="secret">Secret</option></select></div>
         <div class="form-group" style="flex:0;min-width:200px;"><label>Scope</label><select id="keyBranch"><option value="">All Branches (Global)</option></select></div>
-        <button class="btn btn-primary" id="generateBtn" onclick="doCreate()">Generate</button>
+        <button class="btn btn-primary" id="generateBtn">Generate</button>
       </div>
     </div>
     <div class="card">
@@ -107,8 +107,8 @@
     <p class="warn">⚠ Copy this key now — it will never be shown again.</p>
     <div id="modalKey" class="key-display"></div>
     <div class="modal-footer">
-      <button class="btn btn-primary" onclick="copyKey()">Copy</button>
-      <button class="btn btn-sm" style="background:var(--border);color:var(--text);" onclick="closeModal()">Done</button>
+      <button class="btn btn-primary" id="copyBtn">Copy</button>
+      <button class="btn btn-sm" id="doneBtn" style="background:var(--border);color:var(--text);">Done</button>
     </div>
   </div>
 </div>
@@ -119,11 +119,33 @@
   let newKeyValue = '';
 
   // ─── Boot ───────────────────────────────────────────────
+  document.getElementById('loginBtn').addEventListener('click', function() {
+    doLogin();
+  });
   document.getElementById('loginId').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') doLogin();
   });
   document.getElementById('loginPw').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') doLogin();
+  });
+
+  // Generate button
+  document.getElementById('generateBtn').addEventListener('click', function() {
+    doCreate();
+  });
+
+  // Modal buttons
+  document.getElementById('copyBtn').addEventListener('click', function() {
+    copyKey();
+  });
+  document.getElementById('doneBtn').addEventListener('click', function() {
+    closeModal();
+  });
+
+  // Event delegation for dynamically created revoke buttons
+  document.getElementById('keysList').addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-revoke-id]');
+    if (btn) doRevoke(btn.getAttribute('data-revoke-id'), btn.getAttribute('data-revoke-name'));
   });
 
   // Logout button
@@ -132,7 +154,13 @@
   });
 
   // Auto-login if token exists
-  if (jwt) { showManager(); loadKeys(); }
+  if (jwt) {
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('managerScreen').classList.remove('hidden');
+    document.getElementById('userInfo').classList.remove('hidden');
+    loadBranches();
+    loadKeys();
+  }
 
   // ─── Helpers ────────────────────────────────────────────
   function esc(str) {
@@ -189,19 +217,27 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier: id, password: pw, rememberMe: true }),
       });
+      console.log('Login response status:', res.status);
       const data = await res.json();
+      console.log('Login response data:', JSON.stringify(data));
 
       if (data.success && data.token) {
         jwt = data.token;
         localStorage.setItem('mcs_jwt', jwt);
+        // Show manager screen FIRST
+        document.getElementById('loginScreen').classList.add('hidden');
+        document.getElementById('managerScreen').classList.remove('hidden');
+        document.getElementById('userInfo').classList.remove('hidden');
         document.getElementById('userName').textContent = data.user?.name || id;
-        showManager();
+        // Then load data
+        loadBranches();
         loadKeys();
       } else {
         errEl.textContent = data.message || 'Login failed.';
       }
     } catch (err) {
-      errEl.textContent = 'Network error.';
+      console.error('Login error:', err);
+      errEl.textContent = 'Network error. Check console for details.';
     } finally {
       btn.disabled = false;
       btn.textContent = 'Sign In';
@@ -216,7 +252,6 @@
   }
 
   function logout() {
-    // Hit backend logout (best effort, ignore errors)
     if (jwt) {
       fetch('/auth/logout', { method: 'POST', headers: authHeaders() }).catch(function() {});
     }
@@ -282,7 +317,7 @@
           '</div>' +
           '<div>' +
             (!k.revokedAt
-              ? '<button class="btn btn-danger btn-sm" onclick="doRevoke(\'' + esc(k.id) + '\', \'' + esc(k.name) + '\')">Revoke</button>'
+              ? '<button class="btn btn-danger btn-sm" data-revoke-id="' + esc(k.id) + '" data-revoke-name="' + esc(k.name) + '">Revoke</button>'
               : '<span style="font-size:0.78rem;color:var(--muted);">Revoked</span>'
             ) +
           '</div>' +
