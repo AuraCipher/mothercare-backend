@@ -71,6 +71,29 @@ describe('AuthService.login', () => {
     expect(result.user.status).toBe(mockUser.status);
   });
 
+  test('login includes branchIds in JWT payload', async () => {
+    prismaMock.user.findFirst.mockResolvedValue(mockUser);
+    prismaMock.user.update.mockResolvedValue(mockUser);
+    prismaMock.branchMember.findMany.mockResolvedValue([
+      { branchId: 'branch-abc' },
+      { branchId: 'branch-xyz' },
+    ] as any);
+
+    const result = await authService.login({
+      identifier: mockUser.username!,
+      password: 'password123',
+      rememberMe: false,
+    });
+
+    // Decode JWT and check branchIds
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.decode(result.token);
+    expect(decoded.branchIds).toBeDefined();
+    expect(decoded.branchIds).toContain('branch-abc');
+    expect(decoded.branchIds).toContain('branch-xyz');
+    expect(decoded.branchIds).toHaveLength(2);
+  });
+
   // ─── Wrong password ────────────────────────────────
 
   test('error: wrong password throws 401', async () => {

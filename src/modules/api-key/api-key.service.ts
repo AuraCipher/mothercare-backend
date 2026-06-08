@@ -40,7 +40,7 @@ function extractBranchCode(key: string): string | null {
   // parts[1] = "mcs"
   // parts[2] = branchCode
   // parts[3+] = random hex
-  if (parts.length < 3) return null;
+  if (parts.length < 4) return null;
   return parts[2];
 }
 
