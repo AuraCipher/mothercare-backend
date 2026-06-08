@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import auth from '../../middleware/auth.middleware';
+import { branchScopeMiddleware } from '../../middleware/branch-scope.middleware';
 import { requireBranchAdmin, requireBranchRole } from '../../middleware/branch-role.middleware';
 import { branchMemberService } from './services/branch-member.service';
 import { branchAdminService } from './services/branch-admin.service';
@@ -13,6 +14,7 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
 
 // All routes require auth + branch membership
 router.use(auth);
+router.use(branchScopeMiddleware);
 
 // GET /branches/:branchId/staff — List staff (principal or sub_admin can view)
 router.get('/:branchId/staff', requireBranchRole('branch_admin', 'sub_admin'), asyncHandler(async (req: Request, res: Response) => {

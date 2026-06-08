@@ -44,6 +44,7 @@ describe('AuthService.login', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockUser = createMockUser({ role: 'super_admin' });
+    prismaMock.branchMember.findMany.mockResolvedValue([]);
   });
 
   // ─── Success ─────────────────────────────────────────

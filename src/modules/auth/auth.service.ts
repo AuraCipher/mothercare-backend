@@ -56,12 +56,20 @@ class AuthService {
       data: { lastLoginAt: new Date(), lastSeen: new Date() },
     });
 
-    // Generate token
+    // Query user's branch memberships
+    const branchMemberships = await prisma.branchMember.findMany({
+      where: { userId: user.id, isActive: true },
+      select: { branchId: true },
+    });
+    const branchIds = branchMemberships.map(bm => bm.branchId);
+
+    // Generate token with branchIds
     const tokenPayload = {
       id: user.id,
       role: user.role,
       name: user.name,
       schoolId: user.schoolId || undefined,
+      branchIds,
     };
     const token = signToken(tokenPayload);
 
@@ -193,11 +201,18 @@ class AuthService {
       data: { lastSeen: new Date() },
     });
 
+    const branchMemberships = await prisma.branchMember.findMany({
+      where: { userId: user.id, isActive: true },
+      select: { branchId: true },
+    });
+    const branchIds = branchMemberships.map(bm => bm.branchId);
+
     const token = signToken({
       id: user.id,
       role: user.role,
       name: user.name,
       schoolId: user.schoolId || undefined,
+      branchIds,
     });
 
     return {

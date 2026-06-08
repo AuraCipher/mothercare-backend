@@ -27,6 +27,7 @@ describe('POST /auth/login', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockUser = createMockUser({ role: 'super_admin' });
+    prismaMock.branchMember.findMany.mockResolvedValue([]);
   });
 
   test('returns 200 with token for valid credentials', async () => {

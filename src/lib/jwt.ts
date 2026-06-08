@@ -12,6 +12,7 @@ export function signToken(payload: {
   role: string;
   schoolId?: string;
   name: string;
+  branchIds?: string[];
 }): string {
   return jwt.sign(payload, env.JWT_SECRET, {
     expiresIn: env.JWT_EXPIRY as any,

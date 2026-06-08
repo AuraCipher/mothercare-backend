@@ -59,15 +59,29 @@ class ApiKeyService {
     return { message: 'API key revoked successfully' };
   }
 
-  // ─── Verify by key string ──────────────────────────────────────
-  async verifyByKey(key: string): Promise<{ id: string; name: string; type: ApiKeyType } | null> {
-    const allKeys = await prisma.apiKey.findMany({ where: { revokedAt: null } });
-    for (const ak of allKeys) {
-      if (await bcrypt.compare(key, ak.keyHash)) {
-        await prisma.apiKey.update({ where: { id: ak.id }, data: { lastUsedAt: new Date() } });
-        return { id: ak.id, name: ak.name, type: ak.type };
+  // ─── Verify by key string (two-phase: prefix index → bcrypt one) ──
+  async verifyByKey(key: string): Promise<{ id: string; name: string; type: ApiKeyType; branchId: string | null } | null> {
+    // Phase 1: Extract prefix from key (first 11 chars: "pk_mcs_xxxx")
+    const prefix = key.substring(0, 11);
+
+    // Phase 2: Look up by prefix (indexed, O(1))
+    const candidates = await prisma.apiKey.findMany({
+      where: { prefix, revokedAt: null },
+    });
+
+    // If multiple keys share the same prefix (rare), try each
+    for (const candidate of candidates) {
+      if (await bcrypt.compare(key, candidate.keyHash)) {
+        await prisma.apiKey.update({ where: { id: candidate.id }, data: { lastUsedAt: new Date() } });
+        return {
+          id: candidate.id,
+          name: candidate.name,
+          type: candidate.type,
+          branchId: (candidate as any).branchId || null,
+        };
       }
     }
+
     return null;
   }
 

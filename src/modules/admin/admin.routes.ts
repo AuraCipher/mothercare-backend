@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import auth from '../../middleware/auth.middleware';
 import { roleMiddleware } from '../../middleware/role.middleware';
+import { branchScopeMiddleware } from '../../middleware/branch-scope.middleware';
 import branchRoutes from './branch.routes';
 import branchMemberRoutes from './branch-member.routes';
 import calendarRoutes from './academic-calendar.routes';
@@ -13,6 +14,9 @@ const meRouter = Router();
 // All admin routes require super_admin or management
 router.use(auth);
 router.use(roleMiddleware(['super_admin', 'management']));
+
+// Branch scope enforcement on all admin routes
+router.use(branchScopeMiddleware);
 
 // ═══════════════════════════════════════════════════════════════════
 // Phase 02: Branch + Academic Year System Routes
