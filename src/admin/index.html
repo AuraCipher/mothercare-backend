@@ -78,7 +78,7 @@
       <div class="form-group"><label>Password</label><input type="password" id="loginPw" placeholder="••••••••" autocomplete="current-password" /></div>
       <div id="loginError" class="error-line"></div>
       <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">Sign In</button>
-      <p class="hint">Default: admin / Admin@1234</p>
+      <p class="hint">Default: admin / admin123 (branch admin) &bull; ceo@mothercareschool.com / Ceo@098765 (CEO)</p>
     </div>
   </div>
 
@@ -88,6 +88,7 @@
       <div class="form-row">
         <div class="form-group"><label>Name</label><input type="text" id="keyName" placeholder="e.g. Production Frontend" /></div>
         <div class="form-group" style="flex:0;min-width:150px;"><label>Type</label><select id="keyType"><option value="publishable">Publishable</option><option value="secret">Secret</option></select></div>
+        <div class="form-group" style="flex:0;min-width:200px;"><label>Scope</label><select id="keyBranch"><option value="">All Branches (Global)</option></select></div>
         <button class="btn btn-primary" id="generateBtn" onclick="doCreate()">Generate</button>
       </div>
     </div>
@@ -211,6 +212,7 @@
     document.getElementById('loginScreen').classList.add('hidden');
     document.getElementById('managerScreen').classList.remove('hidden');
     document.getElementById('userInfo').classList.remove('hidden');
+    loadBranches();
   }
 
   function logout() {
@@ -226,6 +228,21 @@
     document.getElementById('keysList').innerHTML = '';
     document.cookie = 'token=; path=/; max-age=0';
     toast('Logged out', 'success');
+  }
+
+  // ─── Load Branches ──────────────────────────────────────
+  async function loadBranches() {
+    try {
+      const res = await fetch('/admin/branches', { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) return;
+      const branches = data.data || [];
+      const sel = document.getElementById('keyBranch');
+      sel.innerHTML = '<option value="">All Branches (Global)</option>' +
+        branches.filter(function(b) { return b.isActive; }).map(function(b) {
+          return '<option value="' + esc(b.code) + '" data-id="' + esc(b.id) + '">' + esc(b.name) + ' (' + esc(b.code) + ')</option>';
+        }).join('');
+    } catch(e) {}
   }
 
   // ─── Load Keys ──────────────────────────────────────────
@@ -245,10 +262,18 @@
       if (!keys.length) { el.innerHTML = '<div class="empty">No keys yet.</div>'; return; }
 
       el.innerHTML = keys.map(function(k) {
+        // Extract branch info from prefix
+        var parts = (k.prefix || '').split('_');
+        var branchCode = parts.length >= 3 ? parts[2] : null;
+        var scopeHtml = branchCode && branchCode !== 'global'
+          ? ' <span class="badge badge-pub" style="font-size:0.6rem;">' + esc(branchCode) + '</span>'
+          : ' <span style="font-size:0.7rem;color:var(--muted);">🌐 Global</span>';
+
         return '<div class="key-card">' +
           '<div class="info">' +
             '<div class="key-name">' + esc(k.name) +
               ' <span class="badge ' + (k.type === 'publishable' ? 'badge-pub' : 'badge-sec') + '">' + esc(k.type) + '</span>' +
+              scopeHtml +
               (k.revokedAt ? ' <span class="badge badge-rev">Revoked</span>' : '') +
             '</div>' +
             '<div class="key-meta">Prefix: <strong>' + esc(k.prefix) + '…</strong> &bull; Created: ' + fmt(k.createdAt) +
@@ -274,15 +299,25 @@
     const type = document.getElementById('keyType').value;
     if (!name) { toast('Enter a name.', 'error'); return; }
 
+    const sel = document.getElementById('keyBranch');
+    const branchCode = sel.value || '';
+    // Get selected branch ID from option data attribute
+    const branchId = sel.options[sel.selectedIndex]?.getAttribute('data-id') || '';
+
     const btn = document.getElementById('generateBtn');
     btn.disabled = true;
     btn.textContent = 'Generating…';
 
     try {
+      var body = { name: name, type: type };
+      if (branchCode && branchId) {
+        body.branchCode = branchCode;
+        body.branchId = branchId;
+      }
       const res = await fetch('/api-keys', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ name: name, type: type }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) { handleApiError(res.status, data.message); return; }
