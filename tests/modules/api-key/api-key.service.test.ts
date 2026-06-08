@@ -253,7 +253,7 @@ describe('ApiKeyService.verifyByKey', () => {
     (bcrypt.compare as jest.Mock).mockResolvedValue(true);
     prismaMock.apiKey.update.mockResolvedValue(mockKey as any);
 
-    const result = await apiKeyService.verifyByKey('valid-key-value');
+    const result = await apiKeyService.verifyByKey('pk_mcs_global_a1b2c3d4e5');
 
     expect(result).toBeDefined();
     expect(result!.id).toBe(mockKey.id);
@@ -265,7 +265,7 @@ describe('ApiKeyService.verifyByKey', () => {
     prismaMock.apiKey.findMany.mockResolvedValue([mockKey] as any);
     (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
-    const result = await apiKeyService.verifyByKey('wrong-key-value');
+    const result = await apiKeyService.verifyByKey('pk_mcs_global_wrongkeyvalue');
 
     expect(result).toBeNull();
   });
@@ -275,7 +275,7 @@ describe('ApiKeyService.verifyByKey', () => {
     (bcrypt.compare as jest.Mock).mockResolvedValue(true);
     prismaMock.apiKey.update.mockResolvedValue(mockKey as any);
 
-    await apiKeyService.verifyByKey('valid-key');
+    await apiKeyService.verifyByKey('pk_mcs_global_a1b2c3d4e5');
 
     expect(prismaMock.apiKey.update).toHaveBeenCalledWith(
       expect.objectContaining({

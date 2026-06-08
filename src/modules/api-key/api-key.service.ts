@@ -4,26 +4,57 @@ import crypto from 'crypto';
 
 const prisma = new PrismaClient();
 
-function generateKey(type: 'publishable' | 'secret'): string {
-  const prefix = type === 'publishable' ? 'pk_mcs_' : 'sk_mcs_';
-  return prefix + crypto.randomBytes(32).toString('hex');
+/**
+ * Generate a key with branch code embedded in the string.
+ *
+ * Format: {prefix}_{branchCode}_{randomHex}
+ *   Global:  pk_mcs_global_a1b2c3d4...
+ *   Scoped:  pk_mcs_MCS-SOHAN_a1b2c3d4...
+ *   Secret:  sk_mcs_MCS-SOHAN_a1b2c3d4...
+ *
+ * The branch code allows FAST string-level branch matching
+ * before any bcrypt compare — if the branch code in the key
+ * doesn't match the target branch, reject immediately.
+ */
+function generateKey(type: 'publishable' | 'secret', branchCode?: string): string {
+  const typePrefix = type === 'publishable' ? 'pk_mcs_' : 'sk_mcs_';
+  const scope = branchCode || 'global';
+  return `${typePrefix}${scope}_${crypto.randomBytes(32).toString('hex')}`;
 }
 
-function generatePrefix(type: 'publishable' | 'secret'): string {
-  const prefix = type === 'publishable' ? 'pk_mcs_' : 'sk_mcs_';
-  return prefix + crypto.randomBytes(4).toString('hex').substring(0, 4);
+function generatePrefix(type: 'publishable' | 'secret', branchCode?: string): string {
+  const typePrefix = type === 'publishable' ? 'pk_mcs_' : 'sk_mcs_';
+  const scope = branchCode || 'global';
+  const shortHash = crypto.randomBytes(4).toString('hex').substring(0, 4);
+  return `${typePrefix}${scope}_${shortHash}`;
+}
+
+/**
+ * Extract the branch code from a key string.
+ * Key format: pk_mcs_{branchCode}_{randomHex}
+ * Returns: "MCS-SOHAN" or "global"
+ */
+function extractBranchCode(key: string): string | null {
+  const parts = key.split('_');
+  // parts[0] = "pk" or "sk"
+  // parts[1] = "mcs"
+  // parts[2] = branchCode
+  // parts[3+] = random hex
+  if (parts.length < 3) return null;
+  return parts[2];
 }
 
 class ApiKeyService {
   // ─── Create key (publishable or secret) ─────────────────────────
-  async createApiKey(name: string, type: ApiKeyType, createdBy: string) {
-    const plaintext = generateKey(type);
-    const prefix = generatePrefix(type);
+  async createApiKey(name: string, type: ApiKeyType, createdBy: string, branchCode?: string, branchId?: string) {
+    const plaintext = generateKey(type, branchCode);
+    const prefix = generatePrefix(type, branchCode);
     const keyHash = await bcrypt.hash(plaintext, 12);
 
-    const apiKey = await prisma.apiKey.create({
-      data: { name, type, keyHash, prefix, createdBy },
-    });
+    const data: any = { name, type, keyHash, prefix, createdBy };
+    if (branchId) data.branchId = branchId;
+
+    const apiKey = await prisma.apiKey.create({ data });
 
     return {
       key: {
@@ -59,17 +90,28 @@ class ApiKeyService {
     return { message: 'API key revoked successfully' };
   }
 
-  // ─── Verify by key string (two-phase: prefix index → bcrypt one) ──
-  async verifyByKey(key: string): Promise<{ id: string; name: string; type: ApiKeyType; branchId: string | null } | null> {
-    // Phase 1: Extract prefix from key (first 11 chars: "pk_mcs_xxxx")
-    const prefix = key.substring(0, 11);
+  // ─── Verify by key string (three-phase: branch code → prefix → bcrypt) ──
+  async verifyByKey(
+    key: string,
+    targetBranchCode?: string,
+  ): Promise<{ id: string; name: string; type: ApiKeyType; branchId: string | null } | null> {
+    // Phase 1: Extract branch code from key string
+    const keyBranchCode = extractBranchCode(key);
+    if (!keyBranchCode) return null;
 
-    // Phase 2: Look up by prefix (indexed, O(1))
+    // Phase 2: Fast string-level branch check — NO DB, NO bcrypt
+    if (keyBranchCode !== 'global' && targetBranchCode && keyBranchCode !== targetBranchCode) {
+      // Key is scoped to a different branch → reject immediately
+      return null;
+    }
+
+    // Phase 3: Look up by prefix (indexed, O(1))
+    const prefix = key.substring(0, key.lastIndexOf('_'));
     const candidates = await prisma.apiKey.findMany({
       where: { prefix, revokedAt: null },
     });
 
-    // If multiple keys share the same prefix (rare), try each
+    // Phase 4: bcrypt compare on the single matching key
     for (const candidate of candidates) {
       if (await bcrypt.compare(key, candidate.keyHash)) {
         await prisma.apiKey.update({ where: { id: candidate.id }, data: { lastUsedAt: new Date() } });

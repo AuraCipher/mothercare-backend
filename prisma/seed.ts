@@ -186,15 +186,17 @@ async function main() {
   console.log(`  ✓ CEO assigned as branch_admin at "${branch.name}"`);
 
   // Seed a publishable API key for the frontend
-  const apiKeyPrefix = 'pk_mcs_frontend';
+  const apiKeyPrefix = 'pk_mcs_global';
   const existingKey = await prisma.apiKey.findFirst({ where: { prefix: apiKeyPrefix } });
   if (!existingKey) {
-    const rawKey = 'pk_mcs_frontend_key_2026';
+    const crypto = await import('crypto');
     const bcrypt = await import('bcryptjs');
+    const rand = crypto.randomBytes(32).toString('hex');
+    const rawKey = `pk_mcs_global_${rand}`;
     const keyHash = await bcrypt.hash(rawKey, 12);
     await prisma.apiKey.create({
       data: {
-        name: 'Default Frontend Key',
+        name: 'Default Frontend Key (Global)',
         type: 'publishable',
         keyHash,
         prefix: apiKeyPrefix,
@@ -202,7 +204,9 @@ async function main() {
       },
     });
     console.log(`  ✓ Publishable API key created`);
-    console.log(`    Raw key (for .env.local): ${rawKey}`);
+    console.log(`    Key: ${rawKey}`);
+    console.log(`    Add to frontend .env.local:`);
+    console.log(`    NEXT_PUBLIC_PUBLISHABLE_KEY=${rawKey}`);
   } else {
     console.log(`  ✓ Publishable API key already exists`);
   }

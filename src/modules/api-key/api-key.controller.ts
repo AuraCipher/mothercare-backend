@@ -12,10 +12,16 @@ const asyncHandler =
   };
 
 export const createApiKey = asyncHandler(async (req, res) => {
-  const { name, type } = req.body;
+  const { name, type, branchCode, branchId } = req.body;
   // @ts-ignore
   const createdBy = req.user?.id || 'system';
-  const result = await apiKeyService.createApiKey(name, (type as ApiKeyType) || 'publishable', createdBy);
+  const result = await apiKeyService.createApiKey(
+    name,
+    (type as ApiKeyType) || 'publishable',
+    createdBy,
+    branchCode || undefined,
+    branchId || undefined,
+  );
   res.status(201).json({ success: true, ...result });
 });
 
