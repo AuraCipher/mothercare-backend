@@ -16,6 +16,13 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json(data);
 });
 
+export const refresh = asyncHandler(async (req: Request, res: Response) => {
+  // @ts-ignore: req.user is set by auth middleware
+  const userId = req.user?.id;
+  const data = await authService.refresh(userId);
+  res.status(200).json(data);
+});
+
 export const getMe = asyncHandler(async (req: Request, res: Response) => {
   // @ts-ignore: req.user is set by auth middleware
   const user = await authService.getMe(req.user.id);

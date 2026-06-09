@@ -130,11 +130,19 @@ class AuthService {
       throw { status: 404, message: 'User not found' };
     }
 
+    // Fetch current branch memberships
+    const memberships = await prisma.branchMember.findMany({
+      where: { userId: user.id, isActive: true },
+      select: { branchId: true },
+    });
+    const branchIds = memberships.map(bm => bm.branchId);
+
     // If management role, include permissions
     const managementPerms = user.role === 'management' ? user.managementPerms : null;
 
     return {
       ...user,
+      branchIds,
       managementPerms,
     };
   }
@@ -225,6 +233,51 @@ class AuthService {
         email: user.email,
         phone: user.phone,
         role: user.role,
+      },
+    };
+  }
+
+  // ─── REFRESH TOKEN ────────────────────────────────────────────────
+  async refresh(userId: string) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true, name: true, username: true, email: true, phone: true,
+        role: true, status: true, schoolId: true,
+      },
+    });
+
+    if (!user || user.status !== 'active') {
+      throw { status: 401, message: 'User not found or inactive' };
+    }
+
+    // Re-query current branch memberships
+    const memberships = await prisma.branchMember.findMany({
+      where: { userId: user.id, isActive: true },
+      select: { branchId: true },
+    });
+    const branchIds = memberships.map(bm => bm.branchId);
+
+    // Generate new token with fresh branchIds
+    const token = signToken({
+      id: user.id,
+      role: user.role,
+      name: user.name,
+      schoolId: user.schoolId || undefined,
+      branchIds,
+    });
+
+    return {
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        branchIds,
       },
     };
   }

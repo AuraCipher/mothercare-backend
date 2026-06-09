@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import authRoutes from './modules/auth/auth.routes';
 import apiKeyRoutes from './modules/api-key/api-key.routes';
+import setupRoutes from './modules/setup/setup.routes';
 import adminRoutes, { meRouter } from './modules/admin/admin.routes';
 import branchAdminRoutes from './modules/admin/branch-admin.routes';
 import errorHandler from './middleware/errorHandler';
@@ -70,6 +71,7 @@ app.get('/', (_req, res) => {
     name: 'Mother Care School',
     version: '1.0.0',
     endpoints: {
+      setup: '/setup/init',
       auth: '/auth',
       apiKeys: '/api-keys',
       admin: '/admin',
@@ -86,6 +88,7 @@ app.get('/health', (_req, res) => {
 // ─── API Routes ──────────────────────────────────────────────
 app.use('/auth', authRoutes);
 app.use('/api-keys', apiKeyRoutes);
+app.use('/setup', setupRoutes);
 app.use('/admin', adminRoutes);
 app.use('/me', meRouter);
 app.use('/branches', branchAdminRoutes);

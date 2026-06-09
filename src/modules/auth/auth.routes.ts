@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { login, getMe, changePassword, forgotPassword, verifyOTP, resetPassword, logout } from './auth.controller';
+import { login, getMe, changePassword, forgotPassword, verifyOTP, resetPassword, logout, refresh } from './auth.controller';
 import auth from '../../middleware/auth.middleware';
 import { validate } from '../../middleware/validate.middleware';
 import {
@@ -19,6 +19,7 @@ router.post('/verify-otp', validate(verifyOtpSchema), verifyOTP);
 router.post('/reset-password', validate(resetPasswordSchema), resetPassword);
 
 // Protected routes
+router.post('/refresh', auth, refresh);
 router.get('/me', auth, getMe);
 router.put('/password', auth, validate(changePasswordSchema), changePassword);
 router.post('/logout', auth, logout);

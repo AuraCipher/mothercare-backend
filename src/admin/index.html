@@ -33,7 +33,11 @@
     .btn-danger { background:var(--red); color:var(--bg); }
     .btn-sm { padding:0.35rem 0.7rem; font-size:0.78rem; }
     .login-wrap { max-width:360px; margin:4rem auto 0; }
-    .login-wrap h2 { text-align:center; margin-bottom:1.5rem; font-size:1.15rem; font-weight:500; }
+    .login-wrap h2, .setup-wrap h2 { text-align:center; margin-bottom:1.5rem; font-weight:500; }
+    .setup-wrap { max-width:400px; margin:2rem auto 0; }
+    .setup-wrap h2 { font-size:1.15rem; }
+    .setup-wrap .form-group { margin-bottom:1rem; }
+    .setup-wrap .btn-primary { width:100%; margin-top:0.5rem; padding:0.7rem; }
     .login-wrap .form-group { margin-bottom:1rem; }
     .login-wrap .btn-primary { width:100%; margin-top:0.5rem; padding:0.7rem; }
     .hint { text-align:center; color:var(--muted); font-size:0.78rem; margin-top:0.75rem; }
@@ -59,6 +63,7 @@
     .modal-footer { display:flex; gap:0.75rem; justify-content:flex-end; margin-top:1.25rem; }
     .empty,.loading { text-align:center; color:var(--muted); padding:2rem; font-size:0.9rem; }
     .hidden { display:none !important; }
+    .subtitle { text-align:center; color:var(--muted); font-size:0.83rem; margin-bottom:1.5rem; }
   </style>
 </head>
 <body>
@@ -71,17 +76,35 @@
     <div class="user-info hidden" id="userInfo">Logged in as <strong id="userName"></strong> <button id="logoutBtn">Logout</button></div>
   </header>
 
-  <div id="loginScreen">
+  <!-- ═══════ SETUP SCREEN — first-time only ═══════ -->
+  <div id="setupScreen">
+    <div class="card setup-wrap">
+      <h2>Set Up Your Account</h2>
+      <p class="subtitle">Create the CEO credentials to initialize the system.</p>
+      <div class="form-group"><label>Username</label><input type="text" id="setupUsername" placeholder="ceo" autocomplete="off" /></div>
+      <div class="form-group"><label>Full Name</label><input type="text" id="setupName" placeholder="CEO Mother Care" autocomplete="off" /></div>
+      <div class="form-group"><label>Email</label><input type="email" id="setupEmail" placeholder="ceo@school.com" autocomplete="off" /></div>
+      <div class="form-group"><label>Password</label><input type="password" id="setupPw" placeholder="Min 8 characters" autocomplete="new-password" /></div>
+      <div class="form-group"><label>Confirm Password</label><input type="password" id="setupPw2" placeholder="Repeat password" autocomplete="new-password" /></div>
+      <div id="setupError" class="error-line"></div>
+      <button class="btn btn-primary" id="setupBtn">Create Account</button>
+      <p class="hint">This is a one-time setup. You can modify details later from the CEO dashboard.</p>
+    </div>
+  </div>
+
+  <!-- ═══════ LOGIN SCREEN — after setup ═══════ -->
+  <div id="loginScreen" class="hidden">
     <div class="card login-wrap">
       <h2>Admin Login</h2>
       <div class="form-group"><label>Username / Phone / Email</label><input type="text" id="loginId" placeholder="admin" autocomplete="username" /></div>
       <div class="form-group"><label>Password</label><input type="password" id="loginPw" placeholder="••••••••" autocomplete="current-password" /></div>
       <div id="loginError" class="error-line"></div>
       <button class="btn btn-primary" id="loginBtn">Sign In</button>
-      <p class="hint">CEO only: ceo@mothercareschool.com / Ceo@098765</p>
+      <p class="hint">CEO credentials created during setup.</p>
     </div>
   </div>
 
+  <!-- ═══════ MANAGER SCREEN — key management ═══════ -->
   <div id="managerScreen" class="hidden">
     <div class="card">
       <div class="card-title">Generate New Key</div>
@@ -119,63 +142,67 @@
   let newKeyValue = '';
 
   // ─── Boot ───────────────────────────────────────────────
-  document.getElementById('loginBtn').addEventListener('click', function() {
-    doLogin();
-  });
-  document.getElementById('loginId').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') doLogin();
-  });
-  document.getElementById('loginPw').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') doLogin();
-  });
+  // Step 1: check if system is initialized
+  checkSystemStatus();
 
-  // Generate button
-  document.getElementById('generateBtn').addEventListener('click', function() {
-    doCreate();
-  });
+  async function checkSystemStatus() {
+    try {
+      const res = await fetch('/setup/status');
+      const data = await res.json();
+      if (data.success && data.initialized) {
+        // ── Already bootstrapped: check existing JWT or show login ──
+        if (jwt) {
+          showManager();
+        } else {
+          document.getElementById('setupScreen').classList.add('hidden');
+          document.getElementById('loginScreen').classList.remove('hidden');
+        }
+      } else {
+        // ── Fresh system: show setup screen ──
+        document.getElementById('setupScreen').classList.remove('hidden');
+        document.getElementById('loginScreen').classList.add('hidden');
+      }
+    } catch (err) {
+      // Backend unreachable — show login with fallback
+      console.error('Setup status check failed:', err);
+      if (jwt) {
+        showManager();
+      } else {
+        document.getElementById('setupScreen').classList.add('hidden');
+        document.getElementById('loginScreen').classList.remove('hidden');
+      }
+    }
+  }
 
-  // Modal buttons
-  document.getElementById('copyBtn').addEventListener('click', function() {
-    copyKey();
-  });
-  document.getElementById('doneBtn').addEventListener('click', function() {
-    closeModal();
-  });
+  // ─── Login Events ───────────────────────────────────────
+  document.getElementById('loginBtn').addEventListener('click', function() { doLogin(); });
+  document.getElementById('loginId').addEventListener('keydown', function(e) { if (e.key === 'Enter') doLogin(); });
+  document.getElementById('loginPw').addEventListener('keydown', function(e) { if (e.key === 'Enter') doLogin(); });
 
-  // Event delegation for dynamically created revoke buttons
+  // ─── Setup Events ──────────────────────────────────────
+  document.getElementById('setupBtn').addEventListener('click', function() { doSetup(); });
+  document.getElementById('setupUsername').addEventListener('keydown', function(e) { if (e.key === 'Enter') doSetup(); });
+  document.getElementById('setupName').addEventListener('keydown', function(e) { if (e.key === 'Enter') doSetup(); });
+  document.getElementById('setupEmail').addEventListener('keydown', function(e) { if (e.key === 'Enter') doSetup(); });
+  document.getElementById('setupPw').addEventListener('keydown', function(e) { if (e.key === 'Enter') doSetup(); });
+  document.getElementById('setupPw2').addEventListener('keydown', function(e) { if (e.key === 'Enter') doSetup(); });
+
+  // ─── Generate / Revoke / Modal Events ──────────────────
+  document.getElementById('generateBtn').addEventListener('click', function() { doCreate(); });
+  document.getElementById('copyBtn').addEventListener('click', function() { copyKey(); });
+  document.getElementById('doneBtn').addEventListener('click', function() { closeModal(); });
   document.getElementById('keysList').addEventListener('click', function(e) {
     var btn = e.target.closest('[data-revoke-id]');
     if (btn) doRevoke(btn.getAttribute('data-revoke-id'), btn.getAttribute('data-revoke-name'));
   });
-
-  // Logout button
-  document.getElementById('logoutBtn').addEventListener('click', function() {
-    logout();
-  });
-
-  // Auto-login if token exists
-  if (jwt) {
-    document.getElementById('loginScreen').classList.add('hidden');
-    document.getElementById('managerScreen').classList.remove('hidden');
-    document.getElementById('userInfo').classList.remove('hidden');
-    loadBranches();
-    loadKeys();
-  }
+  document.getElementById('logoutBtn').addEventListener('click', function() { logout(); });
+  document.getElementById('modal').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
 
   // ─── Helpers ────────────────────────────────────────────
-  function esc(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
+  function esc(str) { return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function fmt(d) { return d ? new Date(d).toLocaleDateString() : '—'; }
 
-  function authHeaders() {
-    return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt };
-  }
+  function authHeaders() { return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt }; }
 
   function toast(msg, type) {
     const el = document.getElementById('toast');
@@ -190,13 +217,82 @@
       localStorage.removeItem('mcs_jwt');
       jwt = '';
       document.getElementById('managerScreen').classList.add('hidden');
-      document.getElementById('loginScreen').classList.remove('hidden');
       document.getElementById('userInfo').classList.add('hidden');
-      document.getElementById('loginError').textContent = 'Session expired.';
+      document.getElementById('setupScreen').classList.add('hidden');
+      document.getElementById('loginScreen').classList.remove('hidden');
+      document.getElementById('loginError').textContent = 'Session expired. Please sign in again.';
       return;
     }
     if (status === 403) { toast('Access denied.', 'error'); return; }
     toast(message || 'Error', 'error');
+  }
+
+  // ─── Setup ──────────────────────────────────────────────
+  async function doSetup() {
+    const username = document.getElementById('setupUsername').value.trim();
+    const name     = document.getElementById('setupName').value.trim();
+    const email    = document.getElementById('setupEmail').value.trim();
+    const pw       = document.getElementById('setupPw').value;
+    const pw2      = document.getElementById('setupPw2').value;
+    const errEl    = document.getElementById('setupError');
+    errEl.textContent = '';
+
+    if (!username) { errEl.textContent = 'Enter a username.'; return; }
+    if (!name)     { errEl.textContent = 'Enter your name.'; return; }
+    if (!email)    { errEl.textContent = 'Enter an email.'; return; }
+    if (!pw || pw.length < 8) { errEl.textContent = 'Password must be at least 8 characters.'; return; }
+    if (pw !== pw2) { errEl.textContent = 'Passwords do not match.'; return; }
+
+    const btn = document.getElementById('setupBtn');
+    btn.disabled = true;
+    btn.textContent = 'Creating…';
+
+    try {
+      const res = await fetch('/setup/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username, name: name, email: email, password: pw, confirmPassword: pw2 }),
+      });
+      const data = await res.json();
+
+      if (data.success && data.token) {
+        // Show API keys in modal
+        var keyInfo = 'Publishable:\n' + data.apiKeys.publishable + '\n\nSecret:\n' + data.apiKeys.secret;
+        document.getElementById('modalKey').textContent = keyInfo;
+
+        // Don't auto-close — user must copy both keys
+        var origHtml = document.getElementById('modal').querySelector('.modal-footer').innerHTML;
+        document.getElementById('modal').querySelector('.modal-footer').innerHTML =
+          '<button class="btn btn-primary" id="copyKeysBtn" onclick="copySetupKeys()">Copy Both</button>' +
+          '<button class="btn btn-sm" id="setupDoneBtn" style="background:var(--border);color:var(--text);" onclick="completeSetup(\'' + data.token + '\',\'' + esc(data.user.name) + '\')">Done</button>';
+
+        document.getElementById('modal').classList.add('show');
+      } else {
+        errEl.textContent = data.message || 'Setup failed.';
+      }
+    } catch (err) {
+      errEl.textContent = 'Network error. Check console.';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Create Account';
+    }
+  }
+
+  var _setupKeys = '';
+  function copySetupKeys() {
+    var keyText = document.getElementById('modalKey').textContent.trim();
+    if (keyText) {
+      navigator.clipboard.writeText(keyText)
+        .then(function() { toast('Both keys copied!', 'success'); });
+    }
+  }
+
+  function completeSetup(token, name) {
+    closeModal();
+    jwt = token;
+    localStorage.setItem('mcs_jwt', jwt);
+    document.getElementById('userName').textContent = name;
+    showManager();
   }
 
   // ─── Login ──────────────────────────────────────────────
@@ -217,27 +313,18 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier: id, password: pw, rememberMe: true }),
       });
-      console.log('Login response status:', res.status);
       const data = await res.json();
-      console.log('Login response data:', JSON.stringify(data));
 
       if (data.success && data.token) {
         jwt = data.token;
         localStorage.setItem('mcs_jwt', jwt);
-        // Show manager screen FIRST
-        document.getElementById('loginScreen').classList.add('hidden');
-        document.getElementById('managerScreen').classList.remove('hidden');
-        document.getElementById('userInfo').classList.remove('hidden');
         document.getElementById('userName').textContent = data.user?.name || id;
-        // Then load data
-        loadBranches();
-        loadKeys();
+        showManager();
       } else {
         errEl.textContent = data.message || 'Login failed.';
       }
     } catch (err) {
-      console.error('Login error:', err);
-      errEl.textContent = 'Network error. Check console for details.';
+      errEl.textContent = 'Network error. Check console.';
     } finally {
       btn.disabled = false;
       btn.textContent = 'Sign In';
@@ -245,16 +332,16 @@
   }
 
   function showManager() {
+    document.getElementById('setupScreen').classList.add('hidden');
     document.getElementById('loginScreen').classList.add('hidden');
     document.getElementById('managerScreen').classList.remove('hidden');
     document.getElementById('userInfo').classList.remove('hidden');
     loadBranches();
+    loadKeys();
   }
 
   function logout() {
-    if (jwt) {
-      fetch('/auth/logout', { method: 'POST', headers: authHeaders() }).catch(function() {});
-    }
+    if (jwt) { fetch('/auth/logout', { method: 'POST', headers: authHeaders() }).catch(function() {}); }
     localStorage.removeItem('mcs_jwt');
     jwt = '';
     document.getElementById('loginScreen').classList.remove('hidden');
@@ -289,15 +376,12 @@
     try {
       const res = await fetch('/api-keys', { headers: authHeaders() });
       const data = await res.json();
-
       if (!res.ok) { handleApiError(res.status, data.message); return; }
-
       const keys = data.data || [];
       el.className = '';
       if (!keys.length) { el.innerHTML = '<div class="empty">No keys yet.</div>'; return; }
 
       el.innerHTML = keys.map(function(k) {
-        // Extract branch info from prefix
         var parts = (k.prefix || '').split('_');
         var branchCode = parts.length >= 3 ? parts[2] : null;
         var scopeHtml = branchCode && branchCode !== 'global'
@@ -336,7 +420,6 @@
 
     const sel = document.getElementById('keyBranch');
     const branchCode = sel.value || '';
-    // Get selected branch ID from option data attribute
     const branchId = sel.options[sel.selectedIndex]?.getAttribute('data-id') || '';
 
     const btn = document.getElementById('generateBtn');
@@ -345,10 +428,7 @@
 
     try {
       var body = { name: name, type: type };
-      if (branchCode && branchId) {
-        body.branchCode = branchCode;
-        body.branchId = branchId;
-      }
+      if (branchCode && branchId) { body.branchCode = branchCode; body.branchId = branchId; }
       const res = await fetch('/api-keys', {
         method: 'POST',
         headers: authHeaders(),
@@ -373,16 +453,13 @@
   // ─── Revoke Key ─────────────────────────────────────────
   async function doRevoke(id, name) {
     if (!confirm('Revoke "' + name + '"?')) return;
-
     try {
       const res = await fetch('/api-keys/' + id, { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
       if (!res.ok) { handleApiError(res.status, data.message); return; }
       toast('Revoked.', 'success');
       loadKeys();
-    } catch (err) {
-      toast('Failed.', 'error');
-    }
+    } catch (err) { toast('Failed.', 'error'); }
   }
 
   // ─── Modal ──────────────────────────────────────────────
@@ -393,14 +470,9 @@
 
   function copyKey() {
     if (newKeyValue) {
-      navigator.clipboard.writeText(newKeyValue)
-        .then(function() { toast('Copied!', 'success'); });
+      navigator.clipboard.writeText(newKeyValue).then(function() { toast('Copied!', 'success'); });
     }
   }
-
-  document.getElementById('modal').addEventListener('click', function(e) {
-    if (e.target === this) closeModal();
-  });
 </script>
 </body>
 </html>
