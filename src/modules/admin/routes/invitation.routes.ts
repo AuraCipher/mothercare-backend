@@ -43,18 +43,18 @@ router.get('/invitations/:token', asyncHandler(async (req: Request, res: Respons
 
 /**
  * POST /admin/invitations/:token/complete
- * Complete registration with name, password, phone.
+ * Complete registration with name, username, password, phone.
  */
 router.post('/invitations/:token/complete', asyncHandler(async (req: Request, res: Response) => {
   const { token } = req.params;
-  const { name, password, phone } = req.body;
+  const { name, username, password, phone } = req.body;
 
-  if (!name || !password) {
-    res.status(400).json({ success: false, message: 'Name and password are required' });
+  if (!name || !username || !password) {
+    res.status(400).json({ success: false, message: 'Name, username, and password are required' });
     return;
   }
 
-  const user = await invitationService.completeRegistration(token, { name, password, phone });
+  const user = await invitationService.completeRegistration(token, { name, username, password, phone });
   res.status(201).json({
     success: true,
     message: 'Admin registered successfully',

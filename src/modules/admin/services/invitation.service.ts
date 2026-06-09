@@ -85,7 +85,7 @@ class InvitationService {
    */
   async completeRegistration(
     token: string,
-    data: { name: string; password: string; phone?: string },
+    data: { name: string; username: string; password: string; phone?: string },
   ) {
     const invitation = await prisma.adminInvitation.findUnique({ where: { token } });
 
@@ -101,8 +101,8 @@ class InvitationService {
       throw Object.assign(new Error('This invitation has expired'), { status: 400 });
     }
 
-    if (!data.name || !data.password) {
-      throw Object.assign(new Error('Name and password are required'), { status: 400 });
+    if (!data.name || !data.password || !data.username) {
+      throw Object.assign(new Error('Name, username, and password are required'), { status: 400 });
     }
 
     if (data.password.length < 6) {
@@ -116,6 +116,7 @@ class InvitationService {
       const user = await tx.user.create({
         data: {
           name: data.name,
+          username: data.username,
           email: invitation.email,
           phone: data.phone || null,
           passwordHash,
@@ -141,7 +142,7 @@ class InvitationService {
         },
       });
 
-      return { id: user.id, name: user.name, email: user.email, role: user.role };
+      return { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role };
     });
 
     return result;
