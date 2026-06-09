@@ -173,6 +173,7 @@ model Branch {
 
   academicYears AcademicYear[]
   branchMembers BranchMember[]
+  adminInvitations AdminInvitation[]
 
   @@map("branches")
 }
@@ -742,4 +743,27 @@ model ApiKey {
   @@index([revokedAt])
   @@index([type])
   @@map("api_keys")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                     ADMIN INVITATIONS                           ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model AdminInvitation {
+  id        String   @id @default(uuid())
+  email     String
+  name      String?
+  phone     String?
+  branchId  String
+  token     String   @unique
+  usedAt    DateTime?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@index([token])
+  @@index([email])
+  @@index([branchId])
+  @@map("admin_invitations")
 }

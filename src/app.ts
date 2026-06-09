@@ -7,6 +7,7 @@ import authRoutes from './modules/auth/auth.routes';
 import apiKeyRoutes from './modules/api-key/api-key.routes';
 import setupRoutes from './modules/setup/setup.routes';
 import adminRoutes, { meRouter } from './modules/admin/routes/admin.routes';
+import invitationRoutes from './modules/admin/routes/invitation.routes';
 import branchAdminRoutes from './modules/admin/routes/branch-admin.routes';
 import errorHandler from './middleware/error/errorHandler';
 import requestLogger from './middleware/logging/requestLogger';
@@ -90,6 +91,7 @@ app.use('/auth', authRoutes);
 app.use('/api-keys', apiKeyRoutes);
 app.use('/setup', setupRoutes);
 app.use('/admin', adminRoutes);
+app.use('/admin', invitationRoutes);
 app.use('/me', meRouter);
 app.use('/branches', branchAdminRoutes);
 
