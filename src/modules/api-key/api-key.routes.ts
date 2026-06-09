@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { createApiKey, listApiKeys, revokeApiKey } from './api-key.controller';
-import auth from '../../middleware/auth.middleware';
-import { roleMiddleware } from '../../middleware/role.middleware';
+import auth from '../../middleware/auth/auth.middleware';
+import { roleMiddleware } from '../../middleware/auth/role.middleware';
 
 const router = Router();
 

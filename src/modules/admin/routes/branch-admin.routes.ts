@@ -1,9 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import auth from '../../middleware/auth.middleware';
-import { branchScopeMiddleware } from '../../middleware/branch-scope.middleware';
-import { requireBranchAdmin, requireBranchRole } from '../../middleware/branch-role.middleware';
-import { branchMemberService } from './services/branch-member.service';
-import { branchAdminService } from './services/branch-admin.service';
+import auth from '../../../middleware/auth/auth.middleware';
+import { branchScopeMiddleware } from '../../../middleware/auth/branch-scope.middleware';
+import { requireBranchAdmin, requireBranchRole } from '../../../middleware/auth/branch-role.middleware';
+import { branchMemberService } from '../services/branch-member.service';
+import { branchAdminService } from '../services/branch-admin.service';
 
 const router = Router();
 

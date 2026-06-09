@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import auth from '../../middleware/auth.middleware';
-import { roleMiddleware } from '../../middleware/role.middleware';
-import { branchScopeMiddleware } from '../../middleware/branch-scope.middleware';
+import auth from '../../../middleware/auth/auth.middleware';
+import { roleMiddleware } from '../../../middleware/auth/role.middleware';
+import { branchScopeMiddleware } from '../../../middleware/auth/branch-scope.middleware';
 import branchRoutes from './branch.routes';
 import branchMemberRoutes from './branch-member.routes';
 import calendarRoutes from './academic-calendar.routes';
@@ -37,7 +37,7 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
   };
 
 router.get('/users', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
+  const { prisma } = (await import('../../../lib/prisma'));
   const { role, status, search } = req.query;
 
   const where: any = {};
@@ -65,7 +65,7 @@ router.get('/users', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 router.get('/users/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
+  const { prisma } = (await import('../../../lib/prisma'));
   const user = await prisma.user.findUnique({
     where: { id: req.params.id },
     select: {
@@ -82,7 +82,7 @@ router.get('/users/:id', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 router.post('/users', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
+  const { prisma } = (await import('../../../lib/prisma'));
   const { name, username, email, phone, password, role, gender, dateOfBirth, address } = req.body;
 
   if (!name || !username || !password) {
@@ -112,7 +112,7 @@ router.post('/users', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
+  const { prisma } = (await import('../../../lib/prisma'));
   const user = await prisma.user.update({
     where: { id: req.params.id },
     data: { status: 'inactive' },
@@ -125,7 +125,7 @@ router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => 
 // ═══════════════════════════════════════════════════════════════════
 
 router.get('/groups', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
+  const { prisma } = (await import('../../../lib/prisma'));
   const { academicYearId, section } = req.query;
 
   const where: any = {};
@@ -145,7 +145,7 @@ router.get('/groups', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 router.get('/groups/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
+  const { prisma } = (await import('../../../lib/prisma'));
   const group = await prisma.group.findUnique({
     where: { id: req.params.id },
     include: {
@@ -162,7 +162,7 @@ router.get('/groups/:id', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 router.post('/groups', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
+  const { prisma } = (await import('../../../lib/prisma'));
   let { academicYearId, name, section, displayOrder, capacity } = req.body;
 
   // If no academicYearId provided, auto-assign to the current ACTIVE academic year
@@ -193,7 +193,7 @@ router.post('/groups', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 router.delete('/groups/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
+  const { prisma } = (await import('../../../lib/prisma'));
   await prisma.group.update({
     where: { id: req.params.id },
     data: { isActive: false },
@@ -206,7 +206,7 @@ router.delete('/groups/:id', asyncHandler(async (req: Request, res: Response) =>
 // ═══════════════════════════════════════════════════════════════════
 
 router.get('/students', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
+  const { prisma } = (await import('../../../lib/prisma'));
   const { groupId, isActive, academicYearId } = req.query;
   const where: any = {};
   if (groupId) where.groupId = groupId;
@@ -225,7 +225,7 @@ router.get('/students', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 router.get('/students/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
+  const { prisma } = (await import('../../../lib/prisma'));
   const student = await prisma.student.findUnique({
     where: { id: req.params.id },
     include: {
@@ -241,7 +241,7 @@ router.get('/students/:id', asyncHandler(async (req: Request, res: Response) => 
 }));
 
 router.post('/students', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
+  const { prisma } = (await import('../../../lib/prisma'));
   const { name, gender, dateOfBirth, groupId, academicYearId } = req.body;
 
   if (!name) {
@@ -277,7 +277,7 @@ router.post('/students', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 router.delete('/students/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
+  const { prisma } = (await import('../../../lib/prisma'));
   const student = await prisma.student.update({
     where: { id: req.params.id },
     data: { isActive: false },
@@ -290,7 +290,7 @@ router.delete('/students/:id', asyncHandler(async (req: Request, res: Response) 
 // ═══════════════════════════════════════════════════════════════════
 
 router.get('/stats', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../lib/prisma'));
+  const { prisma } = (await import('../../../lib/prisma'));
 
   const [users, groups, students, academicYears, branches, apiKeys] = await Promise.all([
     prisma.user.count({ where: { status: 'active' } }),

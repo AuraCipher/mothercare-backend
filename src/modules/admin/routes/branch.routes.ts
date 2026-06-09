@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { branchService } from './services/branch.service';
+import { branchService } from '../services/branch.service';
 
 const router = Router();
 

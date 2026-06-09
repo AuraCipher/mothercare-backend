@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { login, getMe, changePassword, forgotPassword, verifyOTP, resetPassword, logout, refresh } from './auth.controller';
-import auth from '../../middleware/auth.middleware';
-import { validate } from '../../middleware/validate.middleware';
+import auth from '../../middleware/auth/auth.middleware';
+import { validate } from '../../middleware/validation/validate.middleware';
 import {
   loginSchema,
   changePasswordSchema,

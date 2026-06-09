@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyToken, isBlacklisted } from '../lib/jwt';
-import apiKeyService from '../modules/api-key/api-key.service';
-import { prisma } from '../lib/prisma';
+import { verifyToken, isBlacklisted } from '../../lib/jwt';
+import apiKeyService from '../../modules/api-key/api-key.service';
+import { prisma } from '../../lib/prisma';
 
 async function resolveTargetBranchCode(req: Request): Promise<string | undefined> {
   const branchId = req.params.branchId || req.params.id || (req.query?.branchId as string);

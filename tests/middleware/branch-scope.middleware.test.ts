@@ -1,4 +1,4 @@
-import { branchScopeMiddleware } from '../../src/middleware/branch-scope.middleware';
+import { branchScopeMiddleware } from '../../src/middleware/auth/branch-scope.middleware';
 
 function mockReq(overrides: any = {}) {
   return {

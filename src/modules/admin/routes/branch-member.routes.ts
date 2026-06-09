@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { branchMemberService } from './services/branch-member.service';
-import { branchAdminService } from './services/branch-admin.service';
+import { branchMemberService } from '../services/branch-member.service';
+import { branchAdminService } from '../services/branch-admin.service';
 
 const router = Router();
 

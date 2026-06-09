@@ -6,10 +6,10 @@ import fs from 'fs';
 import authRoutes from './modules/auth/auth.routes';
 import apiKeyRoutes from './modules/api-key/api-key.routes';
 import setupRoutes from './modules/setup/setup.routes';
-import adminRoutes, { meRouter } from './modules/admin/admin.routes';
-import branchAdminRoutes from './modules/admin/branch-admin.routes';
-import errorHandler from './middleware/errorHandler';
-import requestLogger from './middlewares/requestLogger';
+import adminRoutes, { meRouter } from './modules/admin/routes/admin.routes';
+import branchAdminRoutes from './modules/admin/routes/branch-admin.routes';
+import errorHandler from './middleware/error/errorHandler';
+import requestLogger from './middleware/logging/requestLogger';
 import env from './config/env';
 
 const app = express();

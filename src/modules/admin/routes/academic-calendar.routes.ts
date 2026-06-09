@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { academicCalendarService } from './services/academic-calendar.service';
+import { academicCalendarService } from '../services/academic-calendar.service';
 
 const router = Router();
 

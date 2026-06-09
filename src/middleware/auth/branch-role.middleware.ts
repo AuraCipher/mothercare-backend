@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { prisma } from '../lib/prisma';
+import { prisma } from '../../lib/prisma';
 
 type BranchRole = 'branch_admin' | 'sub_admin' | 'management' | 'teacher' | 'parent';
 

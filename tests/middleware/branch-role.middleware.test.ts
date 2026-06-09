@@ -1,5 +1,5 @@
 import { prismaMock } from '../mocks/prisma';
-import { requireBranchRole } from '../../src/middleware/branch-role.middleware';
+import { requireBranchRole } from '../../src/middleware/auth/branch-role.middleware';
 import { createMockBranchMember } from '../helpers/factories';
 
 function mockReq(userId: string, branchId: string) {

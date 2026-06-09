@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import logger from '../lib/logger';
+import logger from '../../lib/logger';
 
 export default function errorHandler(err: any, req: Request, res: Response, _next: NextFunction) {
   const status = err.status || err.statusCode || 500;

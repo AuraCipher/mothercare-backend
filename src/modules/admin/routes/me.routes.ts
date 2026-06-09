@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { academicYearService } from './services/academic-year.service';
-import { branchMemberService } from './services/branch-member.service';
+import { academicYearService } from '../services/academic-year.service';
+import { branchMemberService } from '../services/branch-member.service';
 
 const router = Router();
 
