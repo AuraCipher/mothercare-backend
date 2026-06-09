@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { branchMemberService } from '../services/branch-member.service';
 import { branchAdminService } from '../services/branch-admin.service';
+import { prisma } from '../../../lib/prisma';
 
 const router = Router();
 
@@ -80,6 +81,40 @@ router.post('/:branchId/members/:userId/promote', asyncHandler(async (req: Reque
   );
 
   res.json({ success: true, data: result });
+}));
+
+// POST /admin/branches/:branchId/remove-admin/:userId — Soft-delete admin
+router.post('/:branchId/remove-admin/:userId', asyncHandler(async (req: Request, res: Response) => {
+  const { branchId, userId } = req.params;
+
+  // Only super_admin can remove admins
+  if ((req as any).user?.role !== 'super_admin') {
+    res.status(403).json({ success: false, message: 'Only super_admin can remove an admin' });
+    return;
+  }
+
+  // Transaction: deactivate user + remove branch membership
+  await prisma.$transaction(async (tx) => {
+    // Deactivate user (keeps all data intact, removes login ability)
+    await tx.user.update({
+      where: { id: userId },
+      data: { status: 'inactive' },
+    });
+
+    // Soft-remove branch membership
+    const membership = await tx.branchMember.findUnique({
+      where: { branchId_userId: { branchId, userId } },
+    });
+
+    if (membership) {
+      await tx.branchMember.update({
+        where: { branchId_userId: { branchId, userId } },
+        data: { isActive: false },
+      });
+    }
+  });
+
+  res.json({ success: true, message: 'Admin removed. Credentials deactivated, data preserved.' });
 }));
 
 export default router;

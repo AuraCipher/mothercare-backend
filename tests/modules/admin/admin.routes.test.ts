@@ -1327,3 +1327,82 @@ describe('Admin — Branch Stats (/admin/branches/:id/stats)', () => {
     expect(res.body.data.stats.totalStaff).toBe(0);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// REMOVE ADMIN (soft-delete)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Admin — Remove Admin (/admin/branches/:id/remove-admin/:userId)', () => {
+  const branchId = 'branch-1';
+  const userId = 'user-1';
+
+  beforeEach(() => jest.clearAllMocks());
+
+  test('POST removes admin and deactivates credentials', async () => {
+    const mockMembership = { branchId, userId, role: 'branch_admin', isActive: true };
+
+    // Mock $transaction to execute the callback with prismaMock
+    (prismaMock.$transaction as jest.Mock).mockImplementation(async (cb: any) => {
+      return cb(prismaMock);
+    });
+
+    prismaMock.user.update.mockResolvedValue({ id: userId, status: 'inactive' } as any);
+    prismaMock.branchMember.findUnique.mockResolvedValue(mockMembership as any);
+    prismaMock.branchMember.update.mockResolvedValue({ ...mockMembership, isActive: false } as any);
+
+    const res = await request(app)
+      .post(`/admin/branches/${branchId}/remove-admin/${userId}`)
+      .set(adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.message).toContain('Credentials deactivated');
+
+    // Verify user was deactivated
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: userId }, data: { status: 'inactive' } }),
+    );
+
+    // Verify membership was removed
+    expect(prismaMock.branchMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { branchId_userId: { branchId, userId } }, data: { isActive: false } }),
+    );
+  });
+
+  test('POST returns 403 for non-super_admin role', async () => {
+    const res = await request(app)
+      .post(`/admin/branches/${branchId}/remove-admin/${userId}`)
+      .set(managementToken);
+
+    expect(res.status).toBe(403);
+    expect(prismaMock.user.update).not.toHaveBeenCalled();
+  });
+
+  test('POST returns 401 without token', async () => {
+    const res = await request(app)
+      .post(`/admin/branches/${branchId}/remove-admin/${userId}`);
+
+    expect(res.status).toBe(401);
+    expect(prismaMock.user.update).not.toHaveBeenCalled();
+  });
+
+  test('POST handles missing membership gracefully', async () => {
+    (prismaMock.$transaction as jest.Mock).mockImplementation(async (cb: any) => {
+      return cb(prismaMock);
+    });
+
+    prismaMock.user.update.mockResolvedValue({ id: userId, status: 'inactive' } as any);
+    prismaMock.branchMember.findUnique.mockResolvedValue(null);
+
+    const res = await request(app)
+      .post(`/admin/branches/${branchId}/remove-admin/${userId}`)
+      .set(adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    // User still deactivated even if membership doesn't exist
+    expect(prismaMock.user.update).toHaveBeenCalled();
+    expect(prismaMock.branchMember.update).not.toHaveBeenCalled();
+  });
+});
