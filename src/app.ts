@@ -46,25 +46,28 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // ─── Request / Response Logger (development only) ──────────────
 app.use(requestLogger);
 
-// ─── Admin HTML Page (served from src/admin/) ────────────────
+// ─── Admin HTML Pages (served from src/admin/) ──────────────
 // Resolve relative to this file so it works in both dev (src/) and
 // production (dist/) — the HTML lives in src/admin/ and is NOT
 // compiled by tsc, so we always step up one level from __dirname.
-const adminHtmlPath = path.resolve(__dirname, '..', 'src', 'admin', 'index.html');
-app.get('/key-manager', (_req, res) => {
-  fs.readFile(adminHtmlPath, 'utf8', (err, data) => {
-    if (err) {
-      console.error('[key-manager] Failed to read HTML:', adminHtmlPath, err.message);
-      return res.status(500).send('Failed to load key manager page');
-    }
+const adminHtmlDir = path.resolve(__dirname, '..', 'src', 'admin');
 
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    res.send(data);
+function serveHtml(route: string, fileName: string) {
+  const filePath = path.join(adminHtmlDir, fileName);
+  app.get(route, (_req, res) => {
+    fs.readFile(filePath, 'utf8', (err, data) => {
+      if (err) {
+        console.error(`[${fileName}] Failed to read:`, filePath, err.message);
+        return res.status(500).send('Failed to load page');
+      }
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.send(data);
+    });
   });
-});
+}
+
+serveHtml('/key-manager', 'index.html');
 
 // ─── Public Routes ─────────────────────────────────────────────
 app.get('/', (_req, res) => {

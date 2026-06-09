@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../../lib/prisma';
+import env from '../../../config/env';
 
 const INVITATION_EXPIRY_DAYS = 7;
 const BCRYPT_ROUNDS = 12;
@@ -195,9 +196,7 @@ class InvitationService {
   }
 
   private getBaseUrl(): string {
-    const frontendUrl = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_FRONTEND_URL;
-    if (frontendUrl) return frontendUrl.replace(/\/+$/, '');
-    return 'http://localhost:3000';
+    return env.FRONTEND_URL || 'http://localhost:3000';
   }
 }
 

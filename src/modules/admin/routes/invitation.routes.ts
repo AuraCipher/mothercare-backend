@@ -2,6 +2,8 @@ import { Router, Request, Response, NextFunction } from 'express';
 import auth from '../../../middleware/auth/auth.middleware';
 import { roleMiddleware } from '../../../middleware/auth/role.middleware';
 import invitationService from '../services/invitation.service';
+import { adminInvitationEmailHtml } from '../../../emails/templates';
+import env from '../../../config/env';
 
 const router = Router();
 
@@ -15,10 +17,27 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
 /**
  * GET /admin/invitations/:token
  * Validate an invitation token — returns email + branch info.
+ * Supports ?html=1 to return the full email template as HTML.
  */
 router.get('/invitations/:token', asyncHandler(async (req: Request, res: Response) => {
   const { token } = req.params;
   const result = await invitationService.validateInvitation(token);
+
+  // If ?html=1, render the email template
+  if (req.query.html === '1') {
+    const frontendUrl = env.FRONTEND_URL || 'http://localhost:3000';
+    const html = adminInvitationEmailHtml(
+      token,
+      result.email,
+      result.branchName,
+      result.branchCode,
+      { frontendUrl, schoolName: env.SCHOOL_NAME },
+    );
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+    return;
+  }
+
   res.json({ success: true, data: result });
 }));
 
