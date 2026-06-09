@@ -1276,15 +1276,24 @@ describe('Admin — Branch Stats (/admin/branches/:id/stats)', () => {
 
   test('GET /admin/branches/:id/stats returns per-branch stats and admins', async () => {
     prismaMock.branch.findUnique.mockResolvedValue(mockBranch as any);
-    (prismaMock.branchMember.groupBy as jest.Mock).mockResolvedValue([
-      { role: 'branch_admin', _count: 1 },
-      { role: 'teacher', _count: 5 },
-      { role: 'management', _count: 2 },
-    ]);
     prismaMock.student.count.mockResolvedValue(150);
     prismaMock.group.count.mockResolvedValue(12);
-    prismaMock.branchMember.findMany.mockResolvedValue([
-      { user: { id: 'u-1', name: 'Admin One', email: 'admin@test.com', phone: null, status: 'active' }, createdAt: new Date('2025-01-01') },
+
+    // First findMany: all members (staff count) — excludes super_admin users
+    prismaMock.branchMember.findMany.mockResolvedValueOnce([
+      { role: 'branch_admin', user: { role: 'super_admin' } },  // filtered out
+      { role: 'branch_admin', user: { role: 'management' } },    // kept
+      { role: 'teacher', user: { role: 'teacher' } },           // kept
+      { role: 'teacher', user: { role: 'teacher' } },
+      { role: 'teacher', user: { role: 'teacher' } },
+      { role: 'management', user: { role: 'management' } },
+      { role: 'management', user: { role: 'management' } },
+      { role: 'teacher', user: { role: 'teacher' } },
+    ] as any);
+
+    // Second findMany: admin info (branch_admin only, excludes super_admin)
+    prismaMock.branchMember.findMany.mockResolvedValueOnce([
+      { user: { id: 'u-2', name: 'Admin One', email: 'admin@test.com', phone: null, status: 'active', role: 'management' }, createdAt: new Date('2025-01-01') },
     ] as any);
 
     const res = await request(app).get(`/admin/branches/${mockBranch.id}/stats`).set(adminToken);
@@ -1294,7 +1303,7 @@ describe('Admin — Branch Stats (/admin/branches/:id/stats)', () => {
     expect(res.body.data).toMatchObject({
       name: 'Test Branch',
       code: 'TST',
-      stats: { totalStaff: 8, totalTeachers: 5, totalStudents: 150, totalClasses: 12, totalAcademicYears: 2 },
+      stats: { totalStaff: 7, totalTeachers: 4, totalStudents: 150, totalClasses: 12, totalAcademicYears: 2 },
     });
     expect(res.body.data.admins).toHaveLength(1);
     expect(res.body.data.admins[0].name).toBe('Admin One');
@@ -1318,7 +1327,8 @@ describe('Admin — Branch Stats (/admin/branches/:id/stats)', () => {
     (prismaMock.branchMember.groupBy as jest.Mock).mockResolvedValue([]);
     prismaMock.student.count.mockResolvedValue(0);
     prismaMock.group.count.mockResolvedValue(0);
-    prismaMock.branchMember.findMany.mockResolvedValue([]);
+    prismaMock.branchMember.findMany.mockResolvedValueOnce([]);
+    prismaMock.branchMember.findMany.mockResolvedValueOnce([]);
 
     const res = await request(app).get(`/admin/branches/${mockBranch.id}/stats`).set(adminToken);
 

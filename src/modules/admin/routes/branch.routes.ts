@@ -73,7 +73,7 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
 router.get('/:id/stats', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
 
-  const [branch, memberCounts, studentCount, groupCount] = await Promise.all([
+  const [branch, allMembers, studentCount, groupCount] = await Promise.all([
     prisma.branch.findUnique({
       where: { id },
       select: {
@@ -81,10 +81,12 @@ router.get('/:id/stats', asyncHandler(async (req: Request, res: Response) => {
         _count: { select: { academicYears: true, branchMembers: true } },
       },
     }),
-    prisma.branchMember.groupBy({
-      by: ['role'],
+    prisma.branchMember.findMany({
       where: { branchId: id, isActive: true },
-      _count: true,
+      select: {
+        role: true,
+        user: { select: { role: true } },
+      },
     }),
     prisma.student.count({
       where: {
@@ -103,18 +105,20 @@ router.get('/:id/stats', asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-  // Count teachers from branch members
-  const totalStaff = memberCounts.reduce((sum, r) => sum + r._count, 0);
-  const teacherCount = memberCounts.find(r => r.role === 'teacher')?._count || 0;
+  // Exclude super_admin users from staff counts (CEO oversight, not branch staff)
+  const staffMembers = allMembers.filter(m => m.user.role !== 'super_admin');
+  const totalStaff = staffMembers.length;
+  const teacherCount = staffMembers.filter(m => m.role === 'teacher').length;
 
-  // Get admin info
+  // Get admin info (exclude super_admin — CEO oversight, not branch staff)
   const admins = await prisma.branchMember.findMany({
     where: { branchId: id, role: 'branch_admin', isActive: true },
     select: {
-      user: { select: { id: true, name: true, email: true, phone: true, status: true } },
+      user: { select: { id: true, name: true, email: true, phone: true, status: true, role: true } },
       createdAt: true,
     },
   });
+  const filteredAdmins = admins.filter(a => a.user.role !== 'super_admin');
 
   res.json({
     success: true,
@@ -127,7 +131,7 @@ router.get('/:id/stats', asyncHandler(async (req: Request, res: Response) => {
         totalClasses: groupCount,
         totalAcademicYears: branch._count.academicYears,
       },
-      admins: admins.map(a => ({
+      admins: filteredAdmins.map(a => ({
         id: a.user.id,
         name: a.user.name,
         email: a.user.email,
