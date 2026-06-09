@@ -236,3 +236,154 @@ describe('Unimplemented endpoints (501)', () => {
     expect(res.body.message).toBe('Not implemented');
   });
 });
+
+// ─── POST /auth/refresh ─────────────────────────────────────
+
+describe('POST /auth/refresh', () => {
+  let mockUser: MockUser;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockUser = createMockUser({ role: 'super_admin' });
+  });
+
+  test('returns 200 with new token for valid JWT', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: mockUser.id,
+      name: mockUser.name,
+      username: mockUser.username,
+      email: mockUser.email,
+      phone: mockUser.phone,
+      role: mockUser.role,
+      status: 'active',
+      schoolId: null,
+    } as any);
+    prismaMock.branchMember.findMany.mockResolvedValue([]);
+
+    const token = generateTestToken(mockUser.id, 'super_admin', { name: mockUser.name });
+    const res = await request(app)
+      .post('/auth/refresh')
+      .set(getAuthHeader(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.token).toBeDefined();
+    expect(typeof res.body.token).toBe('string');
+    expect(res.body.token).not.toBe(token);
+    expect(res.body.user.id).toBe(mockUser.id);
+    expect(res.body.user.role).toBe('super_admin');
+  });
+
+  test('returns 401 without token', async () => {
+    const res = await request(app).post('/auth/refresh');
+    expect(res.status).toBe(401);
+    expect(res.body.success).toBe(false);
+  });
+
+  test('returns 401 for expired token', async () => {
+    const token = generateExpiredToken(mockUser.id);
+    const res = await request(app)
+      .post('/auth/refresh')
+      .set(getAuthHeader(token));
+
+    expect(res.status).toBe(401);
+    expect(res.body.success).toBe(false);
+  });
+
+  test('returns 401 for inactive user', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: mockUser.id,
+      status: 'inactive',
+    } as any);
+
+    const token = generateTestToken(mockUser.id, 'super_admin', { name: mockUser.name });
+    const res = await request(app)
+      .post('/auth/refresh')
+      .set(getAuthHeader(token));
+
+    expect(res.status).toBe(401);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/inactive/i);
+  });
+});
+
+// ─── GET /auth/me — branchIds ────────────────────────────────
+
+describe('GET /auth/me includes branchIds', () => {
+  let mockUser: MockUser;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockUser = createMockUser({ role: 'management' });
+  });
+
+  test('returns branchIds array from current memberships', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: mockUser.id,
+      name: mockUser.name,
+      username: mockUser.username,
+      email: mockUser.email,
+      phone: mockUser.phone,
+      role: mockUser.role,
+      gender: null,
+      dateOfBirth: null,
+      address: null,
+      profilePhoto: null,
+      status: 'active',
+      managementPerms: [],
+      lastLoginAt: null,
+      lastSeen: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
+
+    prismaMock.branchMember.findMany.mockResolvedValue([
+      { branchId: 'branch-1' },
+      { branchId: 'branch-2' },
+    ] as any);
+
+    const token = generateTestToken(mockUser.id, 'management', { name: mockUser.name });
+    const res = await request(app)
+      .get('/auth/me')
+      .set(getAuthHeader(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.user.branchIds).toBeDefined();
+    expect(res.body.user.branchIds).toHaveLength(2);
+    expect(res.body.user.branchIds).toContain('branch-1');
+    expect(res.body.user.branchIds).toContain('branch-2');
+  });
+
+  test('returns empty branchIds array when user has no memberships', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: mockUser.id,
+      name: mockUser.name,
+      username: mockUser.username,
+      email: mockUser.email,
+      phone: mockUser.phone,
+      role: 'super_admin',
+      gender: null,
+      dateOfBirth: null,
+      address: null,
+      profilePhoto: null,
+      status: 'active',
+      managementPerms: [],
+      lastLoginAt: null,
+      lastSeen: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
+
+    prismaMock.branchMember.findMany.mockResolvedValue([]);
+
+    const token = generateTestToken(mockUser.id, 'super_admin', { name: mockUser.name });
+    const res = await request(app)
+      .get('/auth/me')
+      .set(getAuthHeader(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.branchIds).toBeDefined();
+    expect(res.body.user.branchIds).toHaveLength(0);
+  });
+});
