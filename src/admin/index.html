@@ -126,12 +126,24 @@
 
 <div class="modal-overlay" id="modal">
   <div class="modal">
-    <h3>Key Generated</h3>
-    <p class="warn">⚠ Copy this key now — it will never be shown again.</p>
-    <div id="modalKey" class="key-display"></div>
-    <div class="modal-footer">
-      <button class="btn btn-primary" id="copyBtn">Copy</button>
-      <button class="btn btn-sm" id="doneBtn" style="background:var(--border);color:var(--text);">Done</button>
+    <!-- Key generated view -->
+    <div id="keyGenView">
+      <h3>Key Generated</h3>
+      <p class="warn">⚠ Copy this key now — it will never be shown again.</p>
+      <div id="modalKey" class="key-display"></div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="copyBtn">Copy</button>
+        <button class="btn btn-sm" id="doneBtn" style="background:var(--border);color:var(--text);">Done</button>
+      </div>
+    </div>
+    <!-- Confirm revoke view -->
+    <div id="revokeConfirmView" style="display:none;">
+      <h3 id="revokeTitle">Revoke API Key?</h3>
+      <p class="warn" id="revokeMessage" style="margin-bottom:0.75rem;">This action cannot be undone.</p>
+      <div class="modal-footer">
+        <button class="btn btn-sm" id="revokeCancelBtn" style="background:var(--border);color:var(--text);">Cancel</button>
+        <button class="btn btn-sm" id="revokeConfirmBtn" style="background:#c77a7a;color:#1a1614;">Revoke</button>
+      </div>
     </div>
   </div>
 </div>
@@ -193,7 +205,7 @@
   document.getElementById('doneBtn').addEventListener('click', function() { closeModal(); });
   document.getElementById('keysList').addEventListener('click', function(e) {
     var btn = e.target.closest('[data-revoke-id]');
-    if (btn) doRevoke(btn.getAttribute('data-revoke-id'), btn.getAttribute('data-revoke-name'));
+    if (btn) showRevokeConfirm(btn.getAttribute('data-revoke-id'), btn.getAttribute('data-revoke-name'));
   });
   document.getElementById('logoutBtn').addEventListener('click', function() { logout(); });
   document.getElementById('modal').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
@@ -451,8 +463,21 @@
   }
 
   // ─── Revoke Key ─────────────────────────────────────────
-  async function doRevoke(id, name) {
-    if (!confirm('Revoke "' + name + '"?')) return;
+  let revokeTargetId = null;
+
+  function showRevokeConfirm(id, name) {
+    revokeTargetId = id;
+    document.getElementById('keyGenView').style.display = 'none';
+    document.getElementById('revokeConfirmView').style.display = 'block';
+    document.getElementById('revokeTitle').textContent = 'Revoke "' + name + '"?';
+    document.getElementById('revokeMessage').textContent = 'This will permanently disable this key. This cannot be undone.';
+    document.getElementById('modal').classList.add('show');
+  }
+
+  async function doRevoke() {
+    const id = revokeTargetId;
+    revokeTargetId = null;
+    closeModal();
     try {
       const res = await fetch('/api-keys/' + id, { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -465,7 +490,10 @@
   // ─── Modal ──────────────────────────────────────────────
   function closeModal() {
     document.getElementById('modal').classList.remove('show');
+    document.getElementById('keyGenView').style.display = 'block';
+    document.getElementById('revokeConfirmView').style.display = 'none';
     newKeyValue = '';
+    revokeTargetId = null;
   }
 
   function copyKey() {
@@ -473,6 +501,12 @@
       navigator.clipboard.writeText(newKeyValue).then(function() { toast('Copied!', 'success'); });
     }
   }
+
+  // Wire revoke modal buttons
+  document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('revokeConfirmBtn').addEventListener('click', doRevoke);
+    document.getElementById('revokeCancelBtn').addEventListener('click', closeModal);
+  });
 </script>
 </body>
 </html>

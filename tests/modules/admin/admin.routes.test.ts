@@ -1264,3 +1264,66 @@ describe('Phase 04 — Branch Member Management', () => {
     expect(res.status).toBe(200);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// BRANCH STATS ENDPOINT
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Admin — Branch Stats (/admin/branches/:id/stats)', () => {
+  const mockBranch = { id: 'branch-1', name: 'Test Branch', code: 'TST', address: 'Test', phone: null, email: null, isActive: true, _count: { academicYears: 2, branchMembers: 10 } };
+
+  beforeEach(() => jest.clearAllMocks());
+
+  test('GET /admin/branches/:id/stats returns per-branch stats and admins', async () => {
+    prismaMock.branch.findUnique.mockResolvedValue(mockBranch as any);
+    (prismaMock.branchMember.groupBy as jest.Mock).mockResolvedValue([
+      { role: 'branch_admin', _count: 1 },
+      { role: 'teacher', _count: 5 },
+      { role: 'management', _count: 2 },
+    ]);
+    prismaMock.student.count.mockResolvedValue(150);
+    prismaMock.group.count.mockResolvedValue(12);
+    prismaMock.branchMember.findMany.mockResolvedValue([
+      { user: { id: 'u-1', name: 'Admin One', email: 'admin@test.com', phone: null, status: 'active' }, createdAt: new Date('2025-01-01') },
+    ] as any);
+
+    const res = await request(app).get(`/admin/branches/${mockBranch.id}/stats`).set(adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toMatchObject({
+      name: 'Test Branch',
+      code: 'TST',
+      stats: { totalStaff: 8, totalTeachers: 5, totalStudents: 150, totalClasses: 12, totalAcademicYears: 2 },
+    });
+    expect(res.body.data.admins).toHaveLength(1);
+    expect(res.body.data.admins[0].name).toBe('Admin One');
+  });
+
+  test('GET /admin/branches/:id/stats returns 404 for unknown branch', async () => {
+    prismaMock.branch.findUnique.mockResolvedValue(null);
+
+    const res = await request(app).get('/admin/branches/unknown/stats').set(adminToken);
+
+    expect(res.status).toBe(404);
+  });
+
+  test('GET /admin/branches/:id/stats returns 401 without token', async () => {
+    const res = await request(app).get(`/admin/branches/${mockBranch.id}/stats`);
+    expect(res.status).toBe(401);
+  });
+
+  test('GET /admin/branches/:id/stats returns empty admins array when no branch_admin', async () => {
+    prismaMock.branch.findUnique.mockResolvedValue(mockBranch as any);
+    (prismaMock.branchMember.groupBy as jest.Mock).mockResolvedValue([]);
+    prismaMock.student.count.mockResolvedValue(0);
+    prismaMock.group.count.mockResolvedValue(0);
+    prismaMock.branchMember.findMany.mockResolvedValue([]);
+
+    const res = await request(app).get(`/admin/branches/${mockBranch.id}/stats`).set(adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.admins).toHaveLength(0);
+    expect(res.body.data.stats.totalStaff).toBe(0);
+  });
+});
