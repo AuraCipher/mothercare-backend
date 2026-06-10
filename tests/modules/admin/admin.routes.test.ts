@@ -1416,3 +1416,442 @@ describe('Admin — Remove Admin (/admin/branches/:id/remove-admin/:userId)', ()
     expect(prismaMock.branchMember.update).not.toHaveBeenCalled();
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// TEACHER PROFILE CRUD (Phase 14)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
+  const mockUser = { id: 'teacher-u-1', name: 'Ms. Sarah', email: 'sarah@school.com', phone: null, role: 'teacher', status: 'active' };
+  const mockProfile = {
+    id: 'tp-1', userId: 'teacher-u-1', employeeId: 'TCH-001', qualification: 'M.Sc. Mathematics',
+    specialization: 'Mathematics', joiningDate: new Date('2024-01-15'), salary: null,
+    phone: '1234567890', emergencyContact: null, address: '123 School St', dateOfBirth: null,
+    gender: 'female', bloodGroup: null, createdAt: new Date(), updatedAt: new Date(),
+    user: mockUser,
+  };
+
+  beforeEach(() => jest.clearAllMocks());
+
+  // TC-011: POST /admin/teachers — Create teacher profile
+  describe('POST /admin/teachers', () => {
+    test('creates teacher profile with all fields', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(null); // No existing profile
+      prismaMock.user.findUnique.mockResolvedValue(mockUser as any);
+      prismaMock.teacherProfile.create.mockResolvedValue(mockProfile as any);
+
+      const res = await request(app)
+        .post('/admin/teachers')
+        .send({
+          userId: 'teacher-u-1', employeeId: 'TCH-001', qualification: 'M.Sc. Mathematics',
+          specialization: 'Mathematics', joiningDate: '2024-01-15', phone: '1234567890',
+          address: '123 School St', gender: 'female',
+        })
+        .set(adminToken);
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.employeeId).toBe('TCH-001');
+      expect(res.body.data.user.name).toBe('Ms. Sarah');
+    });
+
+    test('returns 400 when userId is missing', async () => {
+      const res = await request(app)
+        .post('/admin/teachers')
+        .send({ qualification: 'M.Sc.' })
+        .set(adminToken);
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+    });
+
+    test('returns 400 when user role is not teacher', async () => {
+      prismaMock.user.findUnique.mockResolvedValue({ ...mockUser, role: 'parent' } as any);
+
+      const res = await request(app)
+        .post('/admin/teachers')
+        .send({ userId: 'teacher-u-1', employeeId: 'TCH-001' })
+        .set(adminToken);
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('role=teacher');
+    });
+
+    test('returns 409 if profile already exists', async () => {
+      prismaMock.user.findUnique.mockResolvedValue(mockUser as any);
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(mockProfile as any);
+
+      const res = await request(app)
+        .post('/admin/teachers')
+        .send({ userId: 'teacher-u-1' })
+        .set(adminToken);
+
+      expect(res.status).toBe(409);
+      expect(res.body.message).toContain('already exists');
+    });
+
+    test('returns 409 if employeeId is taken', async () => {
+      prismaMock.teacherProfile.findUnique
+        .mockResolvedValueOnce(null)  // No existing profile by userId
+        .mockResolvedValueOnce({ id: 'other', employeeId: 'TCH-001' } as any);  // EmployeeId taken
+
+      prismaMock.user.findUnique.mockResolvedValue(mockUser as any);
+
+      const res = await request(app)
+        .post('/admin/teachers')
+        .send({ userId: 'teacher-u-1', employeeId: 'TCH-001' })
+        .set(adminToken);
+
+      expect(res.status).toBe(409);
+      expect(res.body.message).toContain('already in use');
+    });
+  });
+
+  // TC-012: GET /admin/teachers — List teachers
+  describe('GET /admin/teachers', () => {
+    test('lists teachers with pagination', async () => {
+      prismaMock.teacherProfile.findMany.mockResolvedValue([mockProfile] as any);
+      prismaMock.teacherProfile.count.mockResolvedValue(1);
+      prismaMock.teacherAssignment.count.mockResolvedValue(2);
+
+      const res = await request(app)
+        .get('/admin/teachers')
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.meta.total).toBe(1);
+      expect(res.body.data[0]._count.assignments).toBe(2);
+    });
+
+    test('applies search filter by name', async () => {
+      prismaMock.teacherProfile.findMany.mockResolvedValue([]);
+      prismaMock.teacherProfile.count.mockResolvedValue(0);
+
+      await request(app)
+        .get('/admin/teachers?search=Sarah')
+        .set(adminToken);
+
+      expect(prismaMock.teacherProfile.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: expect.arrayContaining([
+              expect.objectContaining({ user: expect.objectContaining({ name: expect.objectContaining({ contains: 'Sarah' }) }) }),
+            ]),
+          }),
+        }),
+      );
+    });
+  });
+
+  // TC-013: GET /admin/teachers/:id — Get teacher detail
+  describe('GET /admin/teachers/:id', () => {
+    test('returns teacher profile with assignments', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(mockProfile as any);
+      prismaMock.teacherAssignment.findMany.mockResolvedValue([]);
+
+      const res = await request(app)
+        .get('/admin/teachers/tp-1')
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.employeeId).toBe('TCH-001');
+      expect(res.body.data.assignments).toEqual([]);
+    });
+
+    test('returns 404 for unknown teacher', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(null);
+
+      const res = await request(app)
+        .get('/admin/teachers/unknown')
+        .set(adminToken);
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // TC-014: PUT /admin/teachers/:id — Update teacher
+  describe('PUT /admin/teachers/:id', () => {
+    test('updates teacher profile fields', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(mockProfile as any);
+      prismaMock.teacherProfile.update.mockResolvedValue({ ...mockProfile, qualification: 'B.Ed' } as any);
+
+      const res = await request(app)
+        .put('/admin/teachers/tp-1')
+        .send({ qualification: 'B.Ed' })
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.qualification).toBe('B.Ed');
+    });
+
+    test('returns 404 for missing teacher', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(null);
+
+      const res = await request(app)
+        .put('/admin/teachers/unknown')
+        .send({ qualification: 'B.Ed' })
+        .set(adminToken);
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // TC-015: DELETE /admin/teachers/:id — Delete teacher
+  describe('DELETE /admin/teachers/:id', () => {
+    test('soft deletes teacher with no assignments', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(mockProfile as any);
+      prismaMock.teacherAssignment.count.mockResolvedValue(0);
+      prismaMock.user.update.mockResolvedValue(mockUser as any);
+
+      const res = await request(app)
+        .delete('/admin/teachers/tp-1')
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.message).toContain('deactivated');
+      expect(prismaMock.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'teacher-u-1' }, data: { status: 'inactive' } }),
+      );
+    });
+
+    test('returns 409 if teacher has active assignments', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(mockProfile as any);
+      prismaMock.teacherAssignment.count.mockResolvedValue(3);
+
+      const res = await request(app)
+        .delete('/admin/teachers/tp-1')
+        .set(adminToken);
+
+      expect(res.status).toBe(409);
+      expect(res.body.message).toContain('3 active assignment(s)');
+    });
+
+    test('returns 404 for unknown teacher', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(null);
+
+      const res = await request(app)
+        .delete('/admin/teachers/unknown')
+        .set(adminToken);
+
+      expect(res.status).toBe(404);
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// TEACHER ASSIGNMENTS (Phase 14)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Admin — Teacher Assignments', () => {
+  const mockTeacher = { id: 'teacher-u-1', name: 'Ms. Sarah', role: 'teacher', status: 'active' };
+  const mockAy = { id: 'ay-1' };
+  const mockGroup = { id: 'group-1', name: 'Class 1-A', section: null };
+  const mockSubject = { id: 'subj-1', name: 'Mathematics', code: 'MATH' };
+  const mockAssignment = {
+    id: 'assign-1', academicYearId: 'ay-1', teacherId: 'teacher-u-1',
+    groupId: 'group-1', subjectId: 'subj-1', isClassTeacher: false,
+    teacher: { id: 'teacher-u-1', name: 'Ms. Sarah' },
+    group: { id: 'group-1', name: 'Class 1-A', section: null },
+    subject: { id: 'subj-1', name: 'Mathematics', code: 'MATH' },
+    academicYear: { id: 'ay-1' },
+  };
+
+  beforeEach(() => jest.clearAllMocks());
+
+  // TC-017: POST /admin/assignments — Create assignment
+  describe('POST /admin/assignments', () => {
+    test('creates assignment successfully', async () => {
+      prismaMock.user.findUnique.mockResolvedValue(mockTeacher as any);
+      prismaMock.academicYear.findUnique.mockResolvedValue(mockAy as any);
+      prismaMock.group.findUnique.mockResolvedValue(mockGroup as any);
+      prismaMock.subject.findUnique.mockResolvedValue(mockSubject as any);
+      prismaMock.teacherAssignment.findUnique.mockResolvedValue(null);
+      prismaMock.teacherAssignment.create.mockResolvedValue(mockAssignment as any);
+
+      const res = await request(app)
+        .post('/admin/assignments')
+        .send({ academicYearId: 'ay-1', teacherId: 'teacher-u-1', groupId: 'group-1', subjectId: 'subj-1' })
+        .set(adminToken);
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.teacher.name).toBe('Ms. Sarah');
+      expect(res.body.data.group.name).toBe('Class 1-A');
+    });
+
+    test('returns 400 when required fields missing', async () => {
+      const res = await request(app)
+        .post('/admin/assignments')
+        .send({})
+        .set(adminToken);
+
+      expect(res.status).toBe(400);
+    });
+
+    test('returns 409 for duplicate assignment', async () => {
+      prismaMock.user.findUnique.mockResolvedValue(mockTeacher as any);
+      prismaMock.academicYear.findUnique.mockResolvedValue(mockAy as any);
+      prismaMock.group.findUnique.mockResolvedValue(mockGroup as any);
+      prismaMock.subject.findUnique.mockResolvedValue(mockSubject as any);
+      prismaMock.teacherAssignment.findUnique.mockResolvedValue(mockAssignment as any);
+
+      const res = await request(app)
+        .post('/admin/assignments')
+        .send({ academicYearId: 'ay-1', teacherId: 'teacher-u-1', groupId: 'group-1', subjectId: 'subj-1' })
+        .set(adminToken);
+
+      expect(res.status).toBe(409);
+      expect(res.body.message).toContain('already assigned');
+    });
+  });
+
+  // TC-016: GET /admin/teachers/:id/assignments — Get teacher's assignments
+  describe('GET /admin/teachers/:id/assignments', () => {
+    test('returns assignments for a teacher', async () => {
+      prismaMock.teacherAssignment.findMany.mockResolvedValue([mockAssignment] as any);
+
+      const res = await request(app)
+        .get('/admin/teachers/teacher-u-1/assignments')
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].subject.name).toBe('Mathematics');
+    });
+
+    test('returns empty array when no assignments', async () => {
+      prismaMock.teacherAssignment.findMany.mockResolvedValue([]);
+
+      const res = await request(app)
+        .get('/admin/teachers/teacher-u-1/assignments')
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([]);
+    });
+  });
+
+  // TC-018: GET /admin/groups/:groupId/assignments — Get group's assignments
+  describe('GET /admin/groups/:groupId/assignments', () => {
+    test('returns all teachers assigned to a group', async () => {
+      prismaMock.teacherAssignment.findMany.mockResolvedValue([mockAssignment] as any);
+
+      const res = await request(app)
+        .get('/admin/groups/group-1/assignments')
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].teacher.name).toBe('Ms. Sarah');
+    });
+  });
+
+  // TC-019: PUT /admin/assignments/:id — Update assignment
+  describe('PUT /admin/assignments/:id', () => {
+    test('updates isClassTeacher flag', async () => {
+      prismaMock.teacherAssignment.findUnique.mockResolvedValue(mockAssignment as any);
+      prismaMock.teacherAssignment.updateMany.mockResolvedValue({ count: 0 } as any);
+      prismaMock.teacherAssignment.update.mockResolvedValue({ ...mockAssignment, isClassTeacher: true } as any);
+
+      const res = await request(app)
+        .put('/admin/assignments/assign-1')
+        .send({ isClassTeacher: true })
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.isClassTeacher).toBe(true);
+    });
+
+    test('un-sets previous class teacher when setting new one', async () => {
+      prismaMock.teacherAssignment.findUnique
+        .mockResolvedValueOnce(mockAssignment as any);
+      // Second call in update — must also exist
+      prismaMock.teacherAssignment.update.mockResolvedValue({ ...mockAssignment, isClassTeacher: true } as any);
+      prismaMock.teacherAssignment.updateMany.mockResolvedValue({ count: 1 } as any);
+
+      await request(app)
+        .put('/admin/assignments/assign-1')
+        .send({ isClassTeacher: true })
+        .set(adminToken);
+
+      // Verify old class teacher was unset
+      expect(prismaMock.teacherAssignment.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            groupId: 'group-1',
+            isClassTeacher: true,
+            id: { not: 'assign-1' },
+          }),
+          data: { isClassTeacher: false },
+        }),
+      );
+    });
+
+    test('returns 404 for unknown assignment', async () => {
+      prismaMock.teacherAssignment.findUnique.mockResolvedValue(null);
+
+      const res = await request(app)
+        .put('/admin/assignments/unknown')
+        .send({ isClassTeacher: true })
+        .set(adminToken);
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // TC-020: DELETE /admin/assignments/:id
+  describe('DELETE /admin/assignments/:id', () => {
+    test('deletes assignment successfully', async () => {
+      prismaMock.teacherAssignment.findUnique.mockResolvedValue(mockAssignment as any);
+      prismaMock.teacherAssignment.delete.mockResolvedValue(mockAssignment as any);
+
+      const res = await request(app)
+        .delete('/admin/assignments/assign-1')
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.message).toContain('removed');
+    });
+
+    test('returns 404 for unknown assignment', async () => {
+      prismaMock.teacherAssignment.findUnique.mockResolvedValue(null);
+
+      const res = await request(app)
+        .delete('/admin/assignments/unknown')
+        .set(adminToken);
+
+      expect(res.status).toBe(404);
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// AUTH ENFORCEMENT — Teacher Routes
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Phase 14 — Auth Enforcement (Teacher Routes)', () => {
+  test('POST /admin/teachers returns 401 without token', async () => {
+    const res = await request(app).post('/admin/teachers').send({ userId: 'test' });
+    expect(res.status).toBe(401);
+  });
+
+  test('GET /admin/teachers returns 401 without token', async () => {
+    const res = await request(app).get('/admin/teachers');
+    expect(res.status).toBe(401);
+  });
+
+  test('POST /admin/assignments returns 401 without token', async () => {
+    const res = await request(app).post('/admin/assignments').send({ academicYearId: 'ay-1', teacherId: 't-1', groupId: 'g-1', subjectId: 's-1' });
+    expect(res.status).toBe(401);
+  });
+
+  test('Teacher role cannot access teacher admin routes', async () => {
+    const res = await request(app).get('/admin/teachers').set(teacherToken);
+    expect(res.status).toBe(403);
+  });
+
+  test('Parent role cannot access teacher admin routes', async () => {
+    const res = await request(app).get('/admin/teachers').set(parentToken);
+    expect(res.status).toBe(403);
+  });
+});

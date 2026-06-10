@@ -7,6 +7,7 @@ import branchMemberRoutes from './branch-member.routes';
 import calendarRoutes from './academic-calendar.routes';
 import academicYearRoutes from './academic-year.routes';
 import meRoutes from './me.routes';
+import teacherRoutes from './teacher.routes';
 
 const router = Router();
 const meRouter = Router();
@@ -26,6 +27,12 @@ router.use('/branches', branchRoutes);
 router.use('/branches', branchMemberRoutes);
 router.use('/calendars', calendarRoutes);
 router.use(academicYearRoutes); // Contains /branches/:branchId/academic-years + /academic-years/:id + academic-year members
+
+// ═══════════════════════════════════════════════════════════════════
+// Phase 14: Backend Teachers — Profile + Assignments
+// ═══════════════════════════════════════════════════════════════════
+
+router.use(teacherRoutes); // Contains /teachers, /teachers/:id, /assignments, /groups/:groupId/assignments
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)

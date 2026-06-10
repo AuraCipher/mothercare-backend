@@ -1,0 +1,336 @@
+import { prisma } from '../../../lib/prisma';
+
+// ═══════════════════════════════════════════════════════════════════
+// TYPES
+// ═══════════════════════════════════════════════════════════════════
+
+export interface CreateTeacherProfileInput {
+  userId: string;
+  employeeId?: string;
+  qualification?: string;
+  specialization?: string;
+  joiningDate?: string;
+  salary?: number;
+  phone?: string;
+  emergencyContact?: string;
+  address?: string;
+  dateOfBirth?: string;
+  gender?: 'male' | 'female' | 'other';
+  bloodGroup?: string;
+}
+
+export interface UpdateTeacherProfileInput {
+  employeeId?: string;
+  qualification?: string;
+  specialization?: string;
+  joiningDate?: string;
+  salary?: number;
+  phone?: string;
+  emergencyContact?: string;
+  address?: string;
+  dateOfBirth?: string;
+  gender?: 'male' | 'female' | 'other';
+  bloodGroup?: string;
+}
+
+export interface CreateAssignmentInput {
+  academicYearId: string;
+  teacherId: string;
+  groupId: string;
+  subjectId: string;
+  isClassTeacher?: boolean;
+}
+
+export interface UpdateAssignmentInput {
+  isClassTeacher?: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TEACHER PROFILE SERVICE
+// ═══════════════════════════════════════════════════════════════════
+
+class TeacherProfileService {
+  // TC-001: Create teacher profile
+  async create(data: CreateTeacherProfileInput) {
+    // Verify user exists and has role=teacher
+    const user = await prisma.user.findUnique({ where: { id: data.userId } });
+    if (!user) throw { status: 404, message: 'User not found' };
+    if (user.role !== 'teacher') throw { status: 400, message: 'User must have role=teacher' };
+
+    // Check for existing profile (one per user)
+    const existingProfile = await prisma.teacherProfile.findUnique({ where: { userId: data.userId } });
+    if (existingProfile) throw { status: 409, message: 'Teacher profile already exists for this user' };
+
+    // Check employeeId uniqueness if provided
+    if (data.employeeId) {
+      const existingEmpId = await prisma.teacherProfile.findUnique({ where: { employeeId: data.employeeId } });
+      if (existingEmpId) throw { status: 409, message: `Employee ID "${data.employeeId}" is already in use` };
+    }
+
+    return prisma.teacherProfile.create({
+      data: {
+        userId: data.userId,
+        employeeId: data.employeeId,
+        qualification: data.qualification,
+        specialization: data.specialization,
+        joiningDate: data.joiningDate ? new Date(data.joiningDate) : null,
+        salary: data.salary !== undefined ? data.salary : null,
+        phone: data.phone,
+        emergencyContact: data.emergencyContact,
+        address: data.address,
+        dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null,
+        gender: data.gender as any,
+        bloodGroup: data.bloodGroup,
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true, role: true, status: true } },
+      },
+    });
+  }
+
+  // TC-002: List all teachers with search + filter
+  async findAll(params: { search?: string; qualification?: string; page?: number; limit?: number }) {
+    const { search, qualification, page = 1, limit = 20 } = params;
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+      user: { role: 'teacher' },
+    };
+
+    // Search by teacher name or employeeId
+    if (search) {
+      where.OR = [
+        { user: { name: { contains: search, mode: 'insensitive' } } },
+        { employeeId: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    // Filter by qualification
+    if (qualification) {
+      where.qualification = { contains: qualification, mode: 'insensitive' };
+    }
+
+    const [profiles, total] = await Promise.all([
+      prisma.teacherProfile.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: { select: { id: true, name: true, email: true, phone: true, role: true, status: true } },
+        },
+      }),
+      prisma.teacherProfile.count({ where }),
+    ]);
+
+    // Enrich with assignment count (TeacherProfile has no direct relation to TeacherAssignment)
+    const enriched = await Promise.all(profiles.map(async (profile) => {
+      const assignmentCount = await prisma.teacherAssignment.count({
+        where: { teacherId: profile.userId },
+      });
+      return { ...profile, _count: { assignments: assignmentCount } };
+    }));
+
+    return {
+      data: enriched,
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  // TC-003: Find teacher by ID with assignments
+  async findById(id: string) {
+    const profile = await prisma.teacherProfile.findUnique({
+      where: { id },
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true, role: true, status: true } },
+      },
+    });
+
+    if (!profile) throw { status: 404, message: 'Teacher profile not found' };
+
+    // Fetch assignments separately (TeacherProfile has no direct relation)
+    const assignments = await prisma.teacherAssignment.findMany({
+      where: { teacherId: profile.userId },
+      include: {
+        group: { select: { id: true, name: true, section: true } },
+        subject: { select: { id: true, name: true, code: true } },
+        academicYear: { select: { id: true } },
+      },
+    });
+
+    return { ...profile, assignments };
+  }
+
+  // TC-004: Update teacher profile
+  async update(id: string, data: UpdateTeacherProfileInput) {
+    const existing = await prisma.teacherProfile.findUnique({ where: { id } });
+    if (!existing) throw { status: 404, message: 'Teacher profile not found' };
+
+    // Check employeeId uniqueness if being changed
+    if (data.employeeId && data.employeeId !== existing.employeeId) {
+      const conflict = await prisma.teacherProfile.findUnique({ where: { employeeId: data.employeeId } });
+      if (conflict) throw { status: 409, message: `Employee ID "${data.employeeId}" is already in use` };
+    }
+
+    return prisma.teacherProfile.update({
+      where: { id },
+      data: {
+        employeeId: data.employeeId,
+        qualification: data.qualification,
+        specialization: data.specialization,
+        joiningDate: data.joiningDate ? new Date(data.joiningDate) : undefined,
+        salary: data.salary !== undefined ? data.salary : undefined,
+        phone: data.phone,
+        emergencyContact: data.emergencyContact,
+        address: data.address,
+        dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : undefined,
+        gender: data.gender as any,
+        bloodGroup: data.bloodGroup,
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true, role: true, status: true } },
+      },
+    });
+  }
+
+  // TC-005: Soft delete teacher profile (with assignment guard)
+  async delete(id: string) {
+    const profile = await prisma.teacherProfile.findUnique({
+      where: { id },
+    });
+    if (!profile) throw { status: 404, message: 'Teacher profile not found' };
+
+    // Count assignments through User relation
+    const assignmentCount = await prisma.teacherAssignment.count({
+      where: { teacherId: profile.userId },
+    });
+
+    // Block deletion if teacher has active assignments
+    if (assignmentCount > 0) {
+      throw {
+        status: 409,
+        message: `${assignmentCount} active assignment(s) found. Remove assignments before deleting this teacher.`,
+      };
+    }
+
+    // Soft delete: deactivate the user
+    await prisma.user.update({
+      where: { id: profile.userId },
+      data: { status: 'inactive' },
+    });
+
+    return { message: 'Teacher profile deactivated. User credentials preserved.' };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TEACHER ASSIGNMENT SERVICE
+// ═══════════════════════════════════════════════════════════════════
+
+class TeacherAssignmentService {
+  // TC-006: Create assignment with unique constraint
+  async create(data: CreateAssignmentInput) {
+    // Verify teacher exists and is active
+    const teacher = await prisma.user.findUnique({ where: { id: data.teacherId } });
+    if (!teacher || teacher.role !== 'teacher') throw { status: 400, message: 'Valid teacher user not found' };
+    if (teacher.status !== 'active') throw { status: 400, message: 'Teacher is not active' };
+
+    // Verify academic year exists
+    const ay = await prisma.academicYear.findUnique({ where: { id: data.academicYearId } });
+    if (!ay) throw { status: 404, message: 'Academic year not found' };
+
+    // Verify group exists
+    const group = await prisma.group.findUnique({ where: { id: data.groupId } });
+    if (!group) throw { status: 404, message: 'Group not found' };
+
+    // Verify subject exists
+    const subject = await prisma.subject.findUnique({ where: { id: data.subjectId } });
+    if (!subject) throw { status: 404, message: 'Subject not found' };
+
+    // Check unique constraint [groupId, subjectId, teacherId]
+    const existing = await prisma.teacherAssignment.findUnique({
+      where: { groupId_subjectId_teacherId: { groupId: data.groupId, subjectId: data.subjectId, teacherId: data.teacherId } },
+    });
+    if (existing) throw { status: 409, message: 'This teacher is already assigned to this subject in this group' };
+
+    return prisma.teacherAssignment.create({
+      data: {
+        academicYearId: data.academicYearId,
+        teacherId: data.teacherId,
+        groupId: data.groupId,
+        subjectId: data.subjectId,
+        isClassTeacher: data.isClassTeacher ?? false,
+      },
+      include: {
+        teacher: { select: { id: true, name: true } },
+        group: { select: { id: true, name: true, section: true } },
+        subject: { select: { id: true, name: true, code: true } },
+        academicYear: { select: { id: true } },
+      },
+    });
+  }
+
+  // TC-007: Get all assignments for a teacher
+  async findByTeacher(teacherId: string) {
+    const assignments = await prisma.teacherAssignment.findMany({
+      where: { teacherId },
+      include: {
+        group: { select: { id: true, name: true, section: true, displayOrder: true } },
+        subject: { select: { id: true, name: true, code: true } },
+        academicYear: { select: { id: true } },
+      },
+    });
+
+    return assignments;
+  }
+
+  // TC-008: Get all assignments for a group
+  async findByGroup(groupId: string) {
+    const assignments = await prisma.teacherAssignment.findMany({
+      where: { groupId },
+      include: {
+        teacher: { select: { id: true, name: true } },
+        subject: { select: { id: true, name: true, code: true } },
+        academicYear: { select: { id: true } },
+      },
+    });
+
+    return assignments;
+  }
+
+  // TC-009: Update assignment (isClassTeacher toggle)
+  async update(id: string, data: UpdateAssignmentInput) {
+    const existing = await prisma.teacherAssignment.findUnique({ where: { id } });
+    if (!existing) throw { status: 404, message: 'Assignment not found' };
+
+    // If setting isClassTeacher=true, unset any existing class teacher for this group
+    if (data.isClassTeacher === true) {
+      await prisma.teacherAssignment.updateMany({
+        where: { groupId: existing.groupId, isClassTeacher: true, id: { not: id } },
+        data: { isClassTeacher: false },
+      });
+    }
+
+    return prisma.teacherAssignment.update({
+      where: { id },
+      data: { isClassTeacher: data.isClassTeacher },
+      include: {
+        teacher: { select: { id: true, name: true } },
+        group: { select: { id: true, name: true, section: true } },
+        subject: { select: { id: true, name: true, code: true } },
+      },
+    });
+  }
+
+  // TC-010: Delete assignment
+  async delete(id: string) {
+    const existing = await prisma.teacherAssignment.findUnique({ where: { id } });
+    if (!existing) throw { status: 404, message: 'Assignment not found' };
+
+    await prisma.teacherAssignment.delete({ where: { id } });
+    return { message: 'Assignment removed' };
+  }
+}
+
+export const teacherProfileService = new TeacherProfileService();
+export const teacherAssignmentService = new TeacherAssignmentService();
