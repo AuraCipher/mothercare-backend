@@ -8,7 +8,7 @@ import calendarRoutes from './academic-calendar.routes';
 import academicYearRoutes from './academic-year.routes';
 import meRoutes from './me.routes';
 import teacherRoutes from './teacher.routes';
-import groupRoutes from './group.routes';
+import sectionRoutes from './section.routes';
 
 const router = Router();
 const meRouter = Router();
@@ -34,12 +34,7 @@ router.use(academicYearRoutes); // Contains /branches/:branchId/academic-years +
 // ═══════════════════════════════════════════════════════════════════
 
 router.use(teacherRoutes); // Contains /teachers, /teachers/:id, /assignments, /groups/:groupId/assignments
-
-// ═══════════════════════════════════════════════════════════════════
-// Phase 10: Backend Groups — Scoped under Academic Year
-// ═══════════════════════════════════════════════════════════════════
-
-router.use(groupRoutes); // Contains /academic-years/:ayId/groups, /groups/:id
+router.use(sectionRoutes); // Contains /branches/:branchId/academic-years/:ayId/sections, /branches/:branchId/sections/:id
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
@@ -132,6 +127,87 @@ router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => 
     data: { status: 'inactive' },
   });
   res.json({ success: true, message: 'User deactivated', data: { id: user.id } });
+}));
+
+// ═══════════════════════════════════════════════════════════════════
+// GROUPS / CLASSES (Create, Read, Delete) — Updated for AcademicYear
+// ═══════════════════════════════════════════════════════════════════
+
+router.get('/groups', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = (await import('../../../lib/prisma'));
+  const { academicYearId, section } = req.query;
+
+  const where: any = {};
+  if (academicYearId) where.academicYearId = academicYearId;
+  if (section) where.section = section;
+
+  const groups = await prisma.group.findMany({
+    where,
+    orderBy: { displayOrder: 'asc' },
+    include: {
+      _count: { select: { members: true, students: true } },
+      academicYear: { select: { id: true } },
+    },
+  });
+
+  res.json({ success: true, data: groups });
+}));
+
+router.get('/groups/:id', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = (await import('../../../lib/prisma'));
+  const group = await prisma.group.findUnique({
+    where: { id: req.params.id },
+    include: {
+      members: { include: { user: { select: { id: true, name: true, role: true } } } },
+      students: true,
+      academicYear: { select: { id: true } },
+    },
+  });
+  if (!group) {
+    res.status(404).json({ success: false, message: 'Group not found' });
+    return;
+  }
+  res.json({ success: true, data: group });
+}));
+
+router.post('/groups', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = (await import('../../../lib/prisma'));
+  let { academicYearId, name, section, displayOrder, capacity } = req.body;
+
+  // If no academicYearId provided, auto-assign to the current ACTIVE academic year
+  if (!academicYearId) {
+    const activeAy = await prisma.academicYear.findFirst({
+      where: { status: 'ACTIVE' },
+      select: { id: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!activeAy) {
+      res.status(400).json({ success: false, message: 'No active academic year found. Create and publish an academic year first.' });
+      return;
+    }
+    academicYearId = activeAy.id;
+  }
+
+  const group = await prisma.group.create({
+    data: {
+      academicYearId,
+      name,
+      section: section || undefined,
+      displayOrder: displayOrder || 1,
+      capacity: capacity || 30,
+    },
+  });
+
+  res.status(201).json({ success: true, data: group });
+}));
+
+router.delete('/groups/:id', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = (await import('../../../lib/prisma'));
+  await prisma.group.update({
+    where: { id: req.params.id },
+    data: { isActive: false },
+  });
+  res.json({ success: true, message: 'Group deactivated' });
 }));
 
 // ═══════════════════════════════════════════════════════════════════
