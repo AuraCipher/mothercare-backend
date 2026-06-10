@@ -85,6 +85,16 @@ router.put('/branches/:branchId/academic-years/:id', requireNotArchived, asyncHa
 }));
 
 // PATCH /admin/branches/:branchId/academic-years/:id/publish — Publish AY (BA-019)
+router.patch('/branches/:branchId/academic-years/:id/pause', requireNotArchived, asyncHandler(async (req: Request, res: Response) => {
+  const result = await academicYearService.pause(req.params.id);
+  res.json({ success: true, data: result });
+}));
+
+router.patch('/branches/:branchId/academic-years/:id/resume', asyncHandler(async (req: Request, res: Response) => {
+  const result = await academicYearService.resume(req.params.id);
+  res.json({ success: true, data: result });
+}));
+
 router.patch('/branches/:branchId/academic-years/:id/publish', requireNotArchived, asyncHandler(async (req: Request, res: Response) => {
   const academicYear = await academicYearService.publish(req.params.id);
   res.json({ success: true, data: academicYear });

@@ -148,6 +148,28 @@ class AcademicYearService {
     });
   }
 
+  async pause(id: string) {
+    const ay = await prisma.academicYear.findUnique({ where: { id }, select: { status: true } });
+    if (!ay) throw { status: 404, message: 'Academic year not found' };
+    if (ay.status !== 'ACTIVE') throw { status: 400, message: 'Only ACTIVE years can be paused' };
+
+    return prisma.academicYear.update({
+      where: { id },
+      data: { status: 'ON_HOLD' },
+    });
+  }
+
+  async resume(id: string) {
+    const ay = await prisma.academicYear.findUnique({ where: { id }, select: { status: true } });
+    if (!ay) throw { status: 404, message: 'Academic year not found' };
+    if (ay.status !== 'ON_HOLD') throw { status: 400, message: 'Only ON_HOLD years can be resumed' };
+
+    return prisma.academicYear.update({
+      where: { id },
+      data: { status: 'ACTIVE' },
+    });
+  }
+
   async publish(id: string) {
     const ay = await prisma.academicYear.findUnique({
       where: { id },

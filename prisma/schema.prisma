@@ -47,6 +47,7 @@ enum BranchRole {
 enum AcademicYearStatus {
   BUILD_STAGE // Year being set up — only admins see it
   ACTIVE      // Current operational year — everyone sees it
+  ON_HOLD     // Temporarily paused (e.g. summer break) — resume to ACTIVE
   ARCHIVED    // Closed year — admins can still edit data
 }
 
