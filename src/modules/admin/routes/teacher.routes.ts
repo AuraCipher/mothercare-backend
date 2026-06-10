@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { teacherProfileService, teacherAssignmentService } from '../services/teacher.service';
+import { passwordSetLimiter } from '../../../middleware/security/rateLimiter';
 
 const router = Router();
 
@@ -13,16 +14,17 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
 // ═══════════════════════════════════════════════════════════════════
 
 // TC-011: POST /admin/teachers — Create teacher profile
+// Accepts either: userId (existing user) OR name+username+password (auto-create user)
 router.post('/teachers', asyncHandler(async (req: Request, res: Response) => {
-  const { userId, employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup } = req.body;
+  const { userId, name, username, password, email, employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup } = req.body;
 
-  if (!userId) {
-    res.status(400).json({ success: false, message: 'userId is required' });
+  if (!userId && (!name || !username)) {
+    res.status(400).json({ success: false, message: 'Provide either userId (existing user) or name+username (create new user)' });
     return;
   }
 
   const profile = await teacherProfileService.create({
-    userId, employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup,
+    userId, name, username, password, email, employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup,
   });
 
   res.status(201).json({ success: true, data: profile });
@@ -62,6 +64,20 @@ router.put('/teachers/:id', asyncHandler(async (req: Request, res: Response) => 
 // TC-015: DELETE /admin/teachers/:id — Soft delete (blocks if has assignments)
 router.delete('/teachers/:id', asyncHandler(async (req: Request, res: Response) => {
   const result = await teacherProfileService.delete(req.params.id);
+  res.json({ success: true, message: result.message });
+}));
+
+// POST /admin/teachers/:id/set-password — Set teacher password (admin must verify)
+router.post('/teachers/:id/set-password', passwordSetLimiter, asyncHandler(async (req: Request, res: Response) => {
+  const { newPassword, adminPassword } = req.body;
+  const adminId = (req as any).user?.id;
+
+  if (!newPassword || !adminPassword) {
+    res.status(400).json({ success: false, message: 'newPassword and adminPassword are required' });
+    return;
+  }
+
+  const result = await teacherProfileService.setPassword(req.params.id, newPassword, adminId, adminPassword, req.ip);
   res.json({ success: true, message: result.message });
 }));
 

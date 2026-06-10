@@ -5,7 +5,11 @@ import { prisma } from '../../../lib/prisma';
 // ═══════════════════════════════════════════════════════════════════
 
 export interface CreateTeacherProfileInput {
-  userId: string;
+  userId?: string;
+  name?: string;       // For auto-creating User
+  username?: string;   // For auto-creating User
+  password?: string;   // For auto-creating User
+  email?: string;      // For auto-creating User
   employeeId?: string;
   qualification?: string;
   specialization?: string;
@@ -52,13 +56,47 @@ export interface UpdateAssignmentInput {
 class TeacherProfileService {
   // TC-001: Create teacher profile
   async create(data: CreateTeacherProfileInput) {
-    // Verify user exists and has role=teacher
-    const user = await prisma.user.findUnique({ where: { id: data.userId } });
-    if (!user) throw { status: 404, message: 'User not found' };
-    if (user.role !== 'teacher') throw { status: 400, message: 'User must have role=teacher' };
+    let userId: string;
+
+    // Option A: Use existing user by userId
+    if (data.userId) {
+      const user = await prisma.user.findUnique({ where: { id: data.userId } });
+      if (!user) throw { status: 404, message: 'User not found' };
+      if (user.role !== 'teacher') throw { status: 400, message: 'User must have role=teacher' };
+      userId = data.userId;
+    }
+    // Option B: Auto-create User with role=teacher
+    else if (data.name && data.username) {
+      const bc = await import('bcryptjs');
+      const password = data.password || 'teacher123'; // Default password if not provided
+      const passwordHash = await bc.hash(password, 12);
+
+      try {
+        const user = await prisma.user.create({
+          data: {
+            name: data.name,
+            username: data.username,
+            email: data.email || null,  // normalize empty string to null (unique constraint)
+            passwordHash,
+            role: 'teacher',
+            status: 'active',
+          },
+        });
+        userId = user.id;
+      } catch (err: any) {
+        // Handle Prisma unique constraint violations (P2002)
+        if (err?.code === 'P2002') {
+          const field = err.meta?.target?.[0] || 'field';
+          throw { status: 409, message: `A user with this ${field} already exists` };
+        }
+        throw err;
+      }
+    } else {
+      throw { status: 400, message: 'Provide either userId or name+username to create a teacher' };
+    }
 
     // Check for existing profile (one per user)
-    const existingProfile = await prisma.teacherProfile.findUnique({ where: { userId: data.userId } });
+    const existingProfile = await prisma.teacherProfile.findUnique({ where: { userId } });
     if (existingProfile) throw { status: 409, message: 'Teacher profile already exists for this user' };
 
     // Check employeeId uniqueness if provided
@@ -69,7 +107,7 @@ class TeacherProfileService {
 
     return prisma.teacherProfile.create({
       data: {
-        userId: data.userId,
+        userId,
         employeeId: data.employeeId,
         qualification: data.qualification,
         specialization: data.specialization,
@@ -83,7 +121,7 @@ class TeacherProfileService {
         bloodGroup: data.bloodGroup,
       },
       include: {
-        user: { select: { id: true, name: true, email: true, phone: true, role: true, status: true } },
+        user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true } },
       },
     });
   }
@@ -117,7 +155,7 @@ class TeacherProfileService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          user: { select: { id: true, name: true, email: true, phone: true, role: true, status: true } },
+          user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true } },
         },
       }),
       prisma.teacherProfile.count({ where }),
@@ -142,7 +180,7 @@ class TeacherProfileService {
     const profile = await prisma.teacherProfile.findUnique({
       where: { id },
       include: {
-        user: { select: { id: true, name: true, email: true, phone: true, role: true, status: true } },
+        user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true } },
       },
     });
 
@@ -188,9 +226,78 @@ class TeacherProfileService {
         bloodGroup: data.bloodGroup,
       },
       include: {
-        user: { select: { id: true, name: true, email: true, phone: true, role: true, status: true } },
+        user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true } },
       },
     });
+  }
+
+  // Set password for teacher (admin verifies own password first)
+  async setPassword(profileId: string, newPassword: string, adminId: string, adminPassword: string, ipAddress?: string) {
+    const bc = await import('bcryptjs');
+
+    // Find the teacher profile with user info
+    const profile = await prisma.teacherProfile.findUnique({
+      where: { id: profileId },
+      select: {
+        userId: true,
+        user: { select: { username: true, name: true } },
+      },
+    });
+    if (!profile) throw { status: 404, message: 'Teacher profile not found' };
+
+    // Verify admin's password
+    const admin = await prisma.user.findUnique({ where: { id: adminId } });
+    if (!admin) throw { status: 404, message: 'Admin user not found' };
+
+    const isMatch = await bc.compare(adminPassword, admin.passwordHash);
+    if (!isMatch) throw { status: 403, message: 'Admin password is incorrect' };
+
+    // ── Password history check (V6) ─────────────────────────
+    // Check last 3 password hashes from AuditLog to prevent reuse
+    const recentChanges = await prisma.auditLog.findMany({
+      where: { entity: 'TeacherProfile', entityId: profileId, action: 'password_reset' },
+      orderBy: { createdAt: 'desc' },
+      take: 3,
+      select: { newValue: true },
+    });
+    for (const entry of recentChanges) {
+      const prevHash = (entry.newValue as any)?.passwordHash;
+      if (prevHash && typeof prevHash === 'string') {
+        const isReused = await bc.compare(newPassword, prevHash);
+        if (isReused) {
+          throw { status: 409, message: 'This password was used recently. Please choose a different one.' };
+        }
+      }
+    }
+
+    // Hash the new password and update the teacher's user record
+    const newHash = await bc.hash(newPassword, 12);
+    await prisma.user.update({
+      where: { id: profile.userId },
+      data: { passwordHash: newHash },
+    });
+
+    // ── Audit trail (V2) ────────────────────────────────────
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId: adminId,
+          action: 'password_reset',
+          entity: 'TeacherProfile',
+          entityId: profileId,
+          newValue: {
+            username: profile.user.username || profile.user.name,
+            passwordHash: newHash, // stored for history check (V6)
+          },
+          ipAddress,
+        },
+      });
+    } catch (logErr: any) {
+      // Log failure is non-critical — password was already changed
+      console.warn('[AuditLog] Failed to record password change:', logErr.message);
+    }
+
+    return { message: 'Password updated successfully' };
   }
 
   // TC-005: Soft delete teacher profile (with assignment guard)

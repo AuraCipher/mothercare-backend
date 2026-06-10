@@ -1,4 +1,5 @@
 import express from 'express';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import cors from 'cors';
 import path from 'path';
@@ -42,6 +43,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(cookieParser());
 
 // ─── Request / Response Logger (development only) ──────────────
 app.use(requestLogger);
