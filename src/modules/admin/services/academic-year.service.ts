@@ -5,6 +5,7 @@ export interface CreateAcademicYearInput {
   branchId: string;
   calendarId: string;
   previousAcademicYearId?: string;
+  directToArchived?: boolean; // Skip BUILD_STAGE, create directly as ARCHIVED (for historical import)
 }
 
 export interface UpdateAcademicYearInput {
@@ -36,15 +37,17 @@ class AcademicYearService {
       };
     }
 
-    // Verify no other BUILD_STAGE for this branch
-    const existingBuildStage = await prisma.academicYear.findFirst({
-      where: { branchId: data.branchId, status: 'BUILD_STAGE' },
-    });
-    if (existingBuildStage) {
-      throw {
-        status: 409,
-        message: 'A BUILD_STAGE academic year already exists for this branch. Publish or delete it first.',
-      };
+    // Skip BUILD_STAGE uniqueness check for historical imports
+    if (!data.directToArchived) {
+      const existingBuildStage = await prisma.academicYear.findFirst({
+        where: { branchId: data.branchId, status: 'BUILD_STAGE' },
+      });
+      if (existingBuildStage) {
+        throw {
+          status: 409,
+          message: 'A BUILD_STAGE academic year already exists for this branch. Publish or delete it first.',
+        };
+      }
     }
 
     // If previousAcademicYearId is provided, verify it exists
@@ -60,6 +63,8 @@ class AcademicYearService {
       }
     }
 
+    // Historical years are still created as BUILD_STAGE so the admin can add data.
+    // They manually click Archive when done, or Publish if it should be the active year.
     return prisma.academicYear.create({
       data: {
         branchId: data.branchId,

@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { academicYearService } from '../services/academic-year.service';
+import { prisma } from '../../../lib/prisma';
 
 const router = Router();
 
@@ -8,13 +9,38 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
     fn(req, res, next).catch(next);
   };
 
+/** Middleware: reject mutations on ARCHIVED academic years */
+async function requireNotArchived(req: Request, res: Response, next: NextFunction) {
+  try {
+    const ayId = req.params.id || req.params.ayId;
+    if (!ayId) return next();
+
+    const ay = await prisma.academicYear.findUnique({
+      where: { id: ayId },
+      select: { status: true },
+    });
+
+    if (!ay) {
+      return res.status(404).json({ success: false, message: 'Academic year not found' });
+    }
+
+    if (ay.status === 'ARCHIVED') {
+      return res.status(400).json({ success: false, message: 'Cannot modify an archived academic year' });
+    }
+
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Academic Year CRUD (scoped under branch)
 // ═══════════════════════════════════════════════════════════════════
 
 // POST /admin/branches/:branchId/academic-years — Create AY (BA-015)
 router.post('/branches/:branchId/academic-years', asyncHandler(async (req: Request, res: Response) => {
-  const { calendarId, previousAcademicYearId } = req.body;
+  const { calendarId, previousAcademicYearId, directToArchived } = req.body;
 
   if (!calendarId) {
     res.status(400).json({ success: false, message: 'calendarId is required' });
@@ -25,6 +51,7 @@ router.post('/branches/:branchId/academic-years', asyncHandler(async (req: Reque
     branchId: req.params.branchId,
     calendarId,
     previousAcademicYearId,
+    directToArchived: directToArchived === true,
   });
 
   res.status(201).json({ success: true, data: academicYear });
@@ -41,46 +68,46 @@ router.get('/branches/:branchId/academic-years', asyncHandler(async (req: Reques
 }));
 
 // ═══════════════════════════════════════════════════════════════════
-// Academic Year CRUD (by ID)
+// Academic Year CRUD (by ID) — Branch-scoped for RBAC
 // ═══════════════════════════════════════════════════════════════════
 
-// GET /admin/academic-years/:id — Full detail (BA-017)
-router.get('/academic-years/:id', asyncHandler(async (req: Request, res: Response) => {
+// GET /admin/branches/:branchId/academic-years/:id — Full detail (BA-017)
+router.get('/branches/:branchId/academic-years/:id', asyncHandler(async (req: Request, res: Response) => {
   const academicYear = await academicYearService.findById(req.params.id);
   res.json({ success: true, data: academicYear });
 }));
 
-// PUT /admin/academic-years/:id — Update AY (BA-018)
-router.put('/academic-years/:id', asyncHandler(async (req: Request, res: Response) => {
+// PUT /admin/branches/:branchId/academic-years/:id — Update AY (BA-018)
+router.put('/branches/:branchId/academic-years/:id', requireNotArchived, asyncHandler(async (req: Request, res: Response) => {
   const { previousAcademicYearId } = req.body;
   const academicYear = await academicYearService.update(req.params.id, { previousAcademicYearId });
   res.json({ success: true, data: academicYear });
 }));
 
-// PATCH /admin/academic-years/:id/publish — Publish AY (BA-019)
-router.patch('/academic-years/:id/publish', asyncHandler(async (req: Request, res: Response) => {
+// PATCH /admin/branches/:branchId/academic-years/:id/publish — Publish AY (BA-019)
+router.patch('/branches/:branchId/academic-years/:id/publish', requireNotArchived, asyncHandler(async (req: Request, res: Response) => {
   const academicYear = await academicYearService.publish(req.params.id);
   res.json({ success: true, data: academicYear });
 }));
 
-// PATCH /admin/academic-years/:id/archive — Archive AY
-router.patch('/academic-years/:id/archive', asyncHandler(async (req: Request, res: Response) => {
+// PATCH /admin/branches/:branchId/academic-years/:id/archive — Archive AY
+router.patch('/branches/:branchId/academic-years/:id/archive', requireNotArchived, asyncHandler(async (req: Request, res: Response) => {
   const academicYear = await academicYearService.archive(req.params.id);
   res.json({ success: true, data: academicYear });
 }));
 
-// DELETE /admin/academic-years/:id — Delete AY (BA-020)
-router.delete('/academic-years/:id', asyncHandler(async (req: Request, res: Response) => {
+// DELETE /admin/branches/:branchId/academic-years/:id — Delete AY (BA-020)
+router.delete('/branches/:branchId/academic-years/:id', requireNotArchived, asyncHandler(async (req: Request, res: Response) => {
   await academicYearService.delete(req.params.id);
   res.status(204).json({ success: true, message: 'Academic year deleted' });
 }));
 
 // ═══════════════════════════════════════════════════════════════════
-// AcademicYear Members (BA-021)
+// AcademicYear Members (BA-021) — Branch-scoped
 // ═══════════════════════════════════════════════════════════════════
 
-// POST /admin/academic-years/:ayId/members — Add member
-router.post('/academic-years/:ayId/members', asyncHandler(async (req: Request, res: Response) => {
+// POST /admin/branches/:branchId/academic-years/:ayId/members — Add member
+router.post('/branches/:branchId/academic-years/:ayId/members', requireNotArchived, asyncHandler(async (req: Request, res: Response) => {
   const { userId, role } = req.body;
 
   if (!userId) {
@@ -92,8 +119,8 @@ router.post('/academic-years/:ayId/members', asyncHandler(async (req: Request, r
   res.status(201).json({ success: true, data: member });
 }));
 
-// DELETE /admin/academic-years/:ayId/members/:userId — Remove member
-router.delete('/academic-years/:ayId/members/:userId', asyncHandler(async (req: Request, res: Response) => {
+// DELETE /admin/branches/:branchId/academic-years/:ayId/members/:userId — Remove member
+router.delete('/branches/:branchId/academic-years/:ayId/members/:userId', requireNotArchived, asyncHandler(async (req: Request, res: Response) => {
   await academicYearService.removeMember(req.params.ayId, req.params.userId);
   res.status(204).json({ success: true, message: 'Member removed' });
 }));

@@ -546,6 +546,27 @@ describe('Phase 02 — AcademicYear CRUD', () => {
     });
   });
 
+  describe('POST with directToArchived flag', () => {
+    test('creates as BUILD_STAGE and bypasses existing BUILD_STAGE check when directToArchived=true', async () => {
+      prismaMock.branch.findUnique.mockResolvedValue(mockBranch as any);
+      prismaMock.academicCalendar.findUnique.mockResolvedValue(mockCalendar as any);
+      // Simulate existing BUILD_STAGE
+      prismaMock.academicYear.findFirst
+        .mockResolvedValueOnce(null) // no duplicate AY
+        .mockResolvedValueOnce({ id: 'existing-build' } as any); // existing BUILD_STAGE
+      prismaMock.academicYear.create.mockResolvedValue(mockAcademicYear as any);
+
+      const res = await request(app)
+        .post(`/admin/branches/${mockBranch.id}/academic-years`)
+        .set(adminToken)
+        .send({ calendarId: mockCalendar.id, directToArchived: true });
+
+      expect(res.status).toBe(201);
+      // Should have bypassed the BUILD_STAGE uniqueness check (would have thrown 409 otherwise)
+      expect(prismaMock.academicYear.create).toHaveBeenCalled();
+    });
+  });
+
   describe('GET /admin/branches/:branchId/academic-years — List AYs (BA-016)', () => {
     test('returns academic years for a branch', async () => {
       prismaMock.academicYear.findMany.mockResolvedValue([mockAcademicYear] as any);
@@ -590,7 +611,7 @@ describe('Phase 02 — AcademicYear CRUD', () => {
       prismaMock.academicYear.findUnique.mockResolvedValue(ayDetail as any);
 
       const res = await request(app)
-        .get(`/admin/academic-years/${mockAcademicYear.id}`)
+        .get(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}`)
         .set(adminToken);
 
       expect(res.status).toBe(200);
@@ -601,13 +622,16 @@ describe('Phase 02 — AcademicYear CRUD', () => {
 
     test('returns 404 when not found', async () => {
       prismaMock.academicYear.findUnique.mockResolvedValue(null);
-      const res = await request(app).get('/admin/academic-years/non-existent').set(adminToken);
+      const res = await request(app).get(`/admin/branches/${mockBranch.id}/academic-years/non-existent`).set(adminToken);
       expect(res.status).toBe(404);
     });
   });
 
   describe('PATCH /admin/academic-years/:id/publish — Publish AY (BA-019, BA-013)', () => {
     test('publishes BUILD_STAGE → ACTIVE', async () => {
+      prismaMock.academicYear.findUnique.mockReset();
+      prismaMock.academicYear.findFirst.mockReset();
+      prismaMock.academicYear.update.mockReset();
       prismaMock.academicYear.findUnique.mockResolvedValue({
         ...mockAcademicYear,
         branch: { id: mockBranch.id, name: mockBranch.name },
@@ -619,7 +643,7 @@ describe('Phase 02 — AcademicYear CRUD', () => {
       } as any);
 
       const res = await request(app)
-        .patch(`/admin/academic-years/${mockAcademicYear.id}/publish`)
+        .patch(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}/publish`)
         .set(adminToken);
 
       expect(res.status).toBe(200);
@@ -636,7 +660,7 @@ describe('Phase 02 — AcademicYear CRUD', () => {
       prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'other-active' } as any);
 
       const res = await request(app)
-        .patch(`/admin/academic-years/${mockAcademicYear.id}/publish`)
+        .patch(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}/publish`)
         .set(adminToken);
 
       expect(res.status).toBe(409);
@@ -651,27 +675,27 @@ describe('Phase 02 — AcademicYear CRUD', () => {
       } as any);
 
       const res = await request(app)
-        .patch(`/admin/academic-years/${mockAcademicYear.id}/publish`)
+        .patch(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}/publish`)
         .set(adminToken);
 
       expect(res.status).toBe(400);
+      expect(prismaMock.academicYear.update).not.toHaveBeenCalled();
     });
   });
 
   describe('DELETE /admin/academic-years/:id — Delete AY (BA-020, BA-014)', () => {
-    test('deletes an ARCHIVED year', async () => {
+    test('rejects deleting an ARCHIVED year (read-only guard)', async () => {
       prismaMock.academicYear.findUnique.mockResolvedValue({
         ...mockAcademicYear,
         status: 'ARCHIVED',
-        _count: { groups: 0, students: 0, members: 0 },
       } as any);
-      prismaMock.academicYear.delete.mockResolvedValue(mockAcademicYear as any);
 
       const res = await request(app)
-        .delete(`/admin/academic-years/${mockAcademicYear.id}`)
+        .delete(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}`)
         .set(adminToken);
 
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('archived');
     });
 
     test('returns 409 when deleting ACTIVE year', async () => {
@@ -682,7 +706,7 @@ describe('Phase 02 — AcademicYear CRUD', () => {
       } as any);
 
       const res = await request(app)
-        .delete(`/admin/academic-years/${mockAcademicYear.id}`)
+        .delete(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}`)
         .set(adminToken);
 
       expect(res.status).toBe(409);
@@ -697,7 +721,7 @@ describe('Phase 02 — AcademicYear CRUD', () => {
       } as any);
 
       const res = await request(app)
-        .delete(`/admin/academic-years/${mockAcademicYear.id}`)
+        .delete(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}`)
         .set(adminToken);
 
       expect(res.status).toBe(409);
@@ -711,12 +735,14 @@ describe('Phase 02 — AcademicYear CRUD', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('Phase 02 — AcademicYear Members (BA-021)', () => {
+  let mockBranch: MockBranch;
   let mockAcademicYear: MockAcademicYear;
   let mockUser: MockUser;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockAcademicYear = createMockAcademicYear();
+    mockBranch = createMockBranch();
+    mockAcademicYear = createMockAcademicYear({ branchId: mockBranch.id });
     mockUser = createMockUser({ role: 'teacher' });
   });
 
@@ -732,7 +758,7 @@ describe('Phase 02 — AcademicYear Members (BA-021)', () => {
     } as any);
 
     const res = await request(app)
-      .post(`/admin/academic-years/${mockAcademicYear.id}/members`)
+      .post(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}/members`)
       .set(adminToken)
       .send({ userId: mockUser.id, role: 'teacher' });
 
@@ -749,7 +775,7 @@ describe('Phase 02 — AcademicYear Members (BA-021)', () => {
     } as any);
 
     const res = await request(app)
-      .post(`/admin/academic-years/${mockAcademicYear.id}/members`)
+      .post(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}/members`)
       .set(adminToken)
       .send({ userId: mockUser.id });
 
@@ -765,7 +791,7 @@ describe('Phase 02 — AcademicYear Members (BA-021)', () => {
     prismaMock.academicYearMember.delete.mockResolvedValue({} as any);
 
     const res = await request(app)
-      .delete(`/admin/academic-years/${mockAcademicYear.id}/members/${mockUser.id}`)
+      .delete(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}/members/${mockUser.id}`)
       .set(adminToken);
 
     expect(res.status).toBe(204);
@@ -775,7 +801,7 @@ describe('Phase 02 — AcademicYear Members (BA-021)', () => {
     prismaMock.academicYearMember.findUnique.mockResolvedValue(null);
 
     const res = await request(app)
-      .delete(`/admin/academic-years/${mockAcademicYear.id}/members/${mockUser.id}`)
+      .delete(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}/members/${mockUser.id}`)
       .set(adminToken);
 
     expect(res.status).toBe(404);
