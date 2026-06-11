@@ -683,6 +683,76 @@ describe('Phase 02 — AcademicYear CRUD', () => {
     });
   });
 
+  describe('PATCH /admin/academic-years/:id/pause — Pause AY', () => {
+    test('pauses ACTIVE → ON_HOLD', async () => {
+      prismaMock.academicYear.findUnique.mockResolvedValue({
+        ...mockAcademicYear,
+        status: 'ACTIVE',
+      } as any);
+      prismaMock.academicYear.update.mockResolvedValue({
+        ...mockAcademicYear,
+        status: 'ON_HOLD',
+      } as any);
+
+      const res = await request(app)
+        .patch(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}/pause`)
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(prismaMock.academicYear.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: mockAcademicYear.id }, data: { status: 'ON_HOLD' } }),
+      );
+    });
+
+    test('returns 400 when pausing non-ACTIVE year', async () => {
+      prismaMock.academicYear.findUnique.mockResolvedValue({
+        ...mockAcademicYear,
+        status: 'BUILD_STAGE',
+      } as any);
+
+      const res = await request(app)
+        .patch(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}/pause`)
+        .set(adminToken);
+
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('PATCH /admin/academic-years/:id/resume — Resume AY', () => {
+    test('resumes ON_HOLD → ACTIVE', async () => {
+      prismaMock.academicYear.findUnique.mockResolvedValue({
+        ...mockAcademicYear,
+        status: 'ON_HOLD',
+      } as any);
+      prismaMock.academicYear.update.mockResolvedValue({
+        ...mockAcademicYear,
+        status: 'ACTIVE',
+      } as any);
+
+      const res = await request(app)
+        .patch(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}/resume`)
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(prismaMock.academicYear.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: mockAcademicYear.id }, data: { status: 'ACTIVE' } }),
+      );
+    });
+
+    test('returns 400 when resuming non-ON_HOLD year', async () => {
+      prismaMock.academicYear.findUnique.mockResolvedValue({
+        ...mockAcademicYear,
+        status: 'ACTIVE',
+      } as any);
+
+      const res = await request(app)
+        .patch(`/admin/branches/${mockBranch.id}/academic-years/${mockAcademicYear.id}/resume`)
+        .set(adminToken);
+
+      expect(res.status).toBe(400);
+    });
+  });
+
   describe('DELETE /admin/academic-years/:id — Delete AY (BA-020, BA-014)', () => {
     test('rejects deleting an ARCHIVED year (read-only guard)', async () => {
       prismaMock.academicYear.findUnique.mockResolvedValue({
