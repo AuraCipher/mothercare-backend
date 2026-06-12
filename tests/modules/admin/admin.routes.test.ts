@@ -2215,3 +2215,139 @@ describe('Admin — Subjects (/admin/branches/:id/academic-years/:ayId/subjects)
     expect(res.body.data).toEqual([]);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// SECTIONS (Groups) CRUD
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Admin — Sections (/branches/:id/academic-years/:ayId/sections)', () => {
+  let mockBranch: MockBranch;
+  const mockAy = { id: 'ay-1', status: 'ACTIVE' };
+  const mockSection = { id: 'sec-1', academicYearId: 'ay-1', name: 'Class 1', section: 'A', displayOrder: 4, capacity: 30, isActive: true, _count: { members: 0, students: 0 } };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockBranch = createMockBranch();
+  });
+
+  test('POST creates a section', async () => {
+    prismaMock.academicYear.findUnique.mockResolvedValue(mockAy as any);
+    prismaMock.group.findFirst.mockResolvedValue(null);
+    prismaMock.group.create.mockResolvedValue(mockSection as any);
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/academic-years/ay-1/sections`)
+      .set(adminToken).send({ name: 'Class 1', section: 'A', displayOrder: 4 });
+    expect(res.status).toBe(201);
+    expect(res.body.data.name).toBe('Class 1');
+  });
+
+  test('POST returns 400 when name missing', async () => {
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/academic-years/ay-1/sections`)
+      .set(adminToken).send({ displayOrder: 4 });
+    expect(res.status).toBe(400);
+  });
+
+  test('GET lists sections for an AY', async () => {
+    prismaMock.group.findMany.mockResolvedValue([mockSection] as any);
+    const res = await request(app)
+      .get(`/admin/branches/${mockBranch.id}/academic-years/ay-1/sections`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+  });
+
+  test('PUT updates a section', async () => {
+    prismaMock.group.findUnique.mockResolvedValue(mockSection as any);
+    prismaMock.group.update.mockResolvedValue({ ...mockSection, name: 'Class One' } as any);
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/sections/sec-1`)
+      .set(adminToken).send({ name: 'Class One' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.name).toBe('Class One');
+  });
+
+  test('DELETE deactivates a section', async () => {
+    prismaMock.group.findUnique.mockResolvedValue({ ...mockSection, _count: { students: 0 } } as any);
+    prismaMock.group.update.mockResolvedValue(mockSection as any);
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/sections/sec-1`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+  });
+
+  test('DELETE returns 409 when section has students', async () => {
+    prismaMock.group.findUnique.mockResolvedValue({ ...mockSection, _count: { students: 5, groupSubjects: 0, teacherAssignments: 0 } } as any);
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/sections/sec-1`)
+      .set(adminToken);
+    expect(res.status).toBe(409);
+  });
+
+  test('DELETE returns 409 when section has linked subjects', async () => {
+    prismaMock.group.findUnique.mockResolvedValue({ ...mockSection, _count: { students: 0, groupSubjects: 3, teacherAssignments: 0 } } as any);
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/sections/sec-1`)
+      .set(adminToken);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain('subject link');
+  });
+
+  test('DELETE returns 409 when section has teacher assignments', async () => {
+    prismaMock.group.findUnique.mockResolvedValue({ ...mockSection, _count: { students: 0, groupSubjects: 0, teacherAssignments: 2 } } as any);
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/sections/sec-1`)
+      .set(adminToken);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain('teacher assignment');
+  });
+
+  test('DELETE returns combined message for multiple dependencies', async () => {
+    prismaMock.group.findUnique.mockResolvedValue({ ...mockSection, _count: { students: 5, groupSubjects: 2, teacherAssignments: 1 } } as any);
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/sections/sec-1`)
+      .set(adminToken);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain('student');
+    expect(res.body.message).toContain('subject link');
+    expect(res.body.message).toContain('teacher assignment');
+  });
+
+  test('DELETE returns 404 for unknown section', async () => {
+    prismaMock.group.findUnique.mockResolvedValue(null);
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/sections/unknown`)
+      .set(adminToken);
+    expect(res.status).toBe(404);
+  });
+
+  test('PUT returns 404 for unknown section', async () => {
+    prismaMock.group.findUnique.mockResolvedValue(null);
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/sections/unknown`)
+      .set(adminToken).send({ name: 'Test' });
+    expect(res.status).toBe(404);
+  });
+
+  test('GET section subjects returns linked subjects', async () => {
+    prismaMock.groupSubject.findMany.mockResolvedValue([
+      { subject: { id: 's-1', name: 'Math', code: 'MATH' } },
+      { subject: { id: 's-2', name: 'English', code: 'ENG' } },
+    ] as any);
+    const res = await request(app)
+      .get(`/admin/branches/${mockBranch.id}/sections/sec-1/subjects`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.data[0].name).toBe('Math');
+  });
+
+  test('GET section subjects returns empty when none linked', async () => {
+    prismaMock.groupSubject.findMany.mockResolvedValue([]);
+    const res = await request(app)
+      .get(`/admin/branches/${mockBranch.id}/sections/sec-1/subjects`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+});
