@@ -44,6 +44,7 @@ export interface CreateAssignmentInput {
   groupId: string;
   subjectId: string;
   isClassTeacher?: boolean;
+  role?: string; // "primary", "assistant", "hod"
 }
 
 export interface UpdateAssignmentInput {
@@ -425,12 +426,6 @@ class TeacherAssignmentService {
     const subject = await prisma.subject.findUnique({ where: { id: data.subjectId } });
     if (!subject) throw { status: 404, message: 'Subject not found' };
 
-    // Check unique constraint [groupId, subjectId, teacherId]
-    const existing = await prisma.teacherAssignment.findUnique({
-      where: { groupId_subjectId_teacherId: { groupId: data.groupId, subjectId: data.subjectId, teacherId: data.teacherId } },
-    });
-    if (existing) throw { status: 409, message: 'This teacher is already assigned to this subject in this group' };
-
     return prisma.teacherAssignment.create({
       data: {
         academicYearId: data.academicYearId,
@@ -438,6 +433,7 @@ class TeacherAssignmentService {
         groupId: data.groupId,
         subjectId: data.subjectId,
         isClassTeacher: data.isClassTeacher ?? false,
+        role: data.role || 'primary',
       },
       include: {
         teacher: { select: { id: true, name: true } },
