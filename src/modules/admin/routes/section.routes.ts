@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { sectionService } from '../services/section.service';
+import { prisma } from '../../../lib/prisma';
 
 const router = Router();
 
@@ -42,6 +43,15 @@ router.put('/branches/:branchId/sections/:id', asyncHandler(async (req: Request,
 router.delete('/branches/:branchId/sections/:id', asyncHandler(async (req: Request, res: Response) => {
   await sectionService.delete(req.params.id);
   res.json({ success: true, message: 'Section deactivated' });
+}));
+
+// GET /admin/branches/:branchId/sections/:sectionId/subjects — Get linked subjects
+router.get('/branches/:branchId/sections/:sectionId/subjects', asyncHandler(async (req: Request, res: Response) => {
+  const links = await prisma.groupSubject.findMany({
+    where: { groupId: req.params.sectionId },
+    include: { subject: { select: { id: true, name: true, code: true } } },
+  });
+  res.json({ success: true, data: links.map(l => l.subject) });
 }));
 
 export default router;

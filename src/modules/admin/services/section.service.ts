@@ -57,16 +57,24 @@ class SectionService {
     });
   }
 
-  // Soft delete a section (blocks if has students)
+  // Soft delete a section (blocks if linked to students, subjects, or teachers)
   async delete(id: string) {
     const existing = await prisma.group.findUnique({
       where: { id },
-      include: { _count: { select: { students: true } } },
+      include: { _count: { select: { students: true, groupSubjects: true, teacherAssignments: true } } },
     });
     if (!existing) throw { status: 404, message: 'Section not found' };
 
-    if (existing._count.students > 0) {
-      throw { status: 409, message: `Cannot delete: ${existing._count.students} student(s) are enrolled` };
+    const issues: string[] = [];
+    if (existing._count.students > 0) issues.push(`${existing._count.students} student(s)`);
+    if (existing._count.groupSubjects > 0) issues.push(`${existing._count.groupSubjects} subject link(s)`);
+    if (existing._count.teacherAssignments > 0) issues.push(`${existing._count.teacherAssignments} teacher assignment(s)`);
+
+    if (issues.length > 0) {
+      throw {
+        status: 409,
+        message: `Cannot delete: ${issues.join(', ')} depend on this section. Remove dependencies first or deactivate instead.`,
+      };
     }
 
     return prisma.group.update({
