@@ -1879,20 +1879,19 @@ describe('Admin — Teacher Assignments', () => {
       expect(res.status).toBe(400);
     });
 
-    test('returns 409 for duplicate assignment', async () => {
+    test('allows co-teaching with role assignment', async () => {
       prismaMock.user.findUnique.mockResolvedValue(mockTeacher as any);
       prismaMock.academicYear.findUnique.mockResolvedValue(mockAy as any);
       prismaMock.group.findUnique.mockResolvedValue(mockGroup as any);
       prismaMock.subject.findUnique.mockResolvedValue(mockSubject as any);
-      prismaMock.teacherAssignment.findUnique.mockResolvedValue(mockAssignment as any);
+      prismaMock.teacherAssignment.create.mockResolvedValue({ ...mockAssignment, role: 'assistant' } as any);
 
       const res = await request(app)
         .post('/admin/assignments')
-        .send({ academicYearId: 'ay-1', teacherId: 'teacher-u-1', groupId: 'group-1', subjectId: 'subj-1' })
+        .send({ academicYearId: 'ay-1', teacherId: 'teacher-u-1', groupId: 'group-1', subjectId: 'subj-1', role: 'assistant' })
         .set(adminToken);
 
-      expect(res.status).toBe(409);
-      expect(res.body.message).toContain('already assigned');
+      expect(res.status).toBe(201);
     });
   });
 
@@ -2044,5 +2043,175 @@ describe('Phase 14 — Auth Enforcement (Teacher Routes)', () => {
   test('Parent role cannot access teacher admin routes', async () => {
     const res = await request(app).get('/admin/teachers').set(parentToken);
     expect(res.status).toBe(403);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// SUBJECTS (Phase 12)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Admin — Subjects (/admin/branches/:id/academic-years/:ayId/subjects)', () => {
+  let mockBranch: MockBranch;
+  const mockSubject = { id: 'subj-1', academicYearId: 'ay-1', name: 'Mathematics', code: 'MATH', description: null, totalMarks: 100, passingMarks: 50, isElective: false, hodId: null, createdAt: new Date(), hod: null, _count: { groupSubjects: 0, teacherAssignments: 0 } };
+  const mockAy = { id: 'ay-1', status: 'ACTIVE' };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockBranch = createMockBranch();
+  });
+
+  test('POST creates a subject', async () => {
+    prismaMock.academicYear.findUnique.mockResolvedValue(mockAy as any);
+    prismaMock.subject.findUnique.mockResolvedValue(null); // no code conflict
+    prismaMock.subject.create.mockResolvedValue(mockSubject as any);
+
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/academic-years/ay-1/subjects`)
+      .set(adminToken)
+      .send({ name: 'Mathematics', code: 'MATH' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.name).toBe('Mathematics');
+  });
+
+  test('POST returns 400 when name missing', async () => {
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/academic-years/ay-1/subjects`)
+      .set(adminToken)
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  test('POST returns 404 for unknown AY', async () => {
+    prismaMock.academicYear.findUnique.mockResolvedValue(null);
+
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/academic-years/bad-ay/subjects`)
+      .set(adminToken)
+      .send({ name: 'Math' });
+    expect(res.status).toBe(404);
+  });
+
+  test('GET lists subjects for an AY', async () => {
+    prismaMock.subject.findMany.mockResolvedValue([mockSubject] as any);
+    const res = await request(app)
+      .get(`/admin/branches/${mockBranch.id}/academic-years/ay-1/subjects`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+  });
+
+  test('PUT updates a subject', async () => {
+    prismaMock.subject.findUnique.mockResolvedValue(mockSubject as any);
+    prismaMock.subject.update.mockResolvedValue({ ...mockSubject, name: 'Advanced Math' } as any);
+
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/subjects/subj-1`)
+      .set(adminToken)
+      .send({ name: 'Advanced Math' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.name).toBe('Advanced Math');
+  });
+
+  test('DELETE blocks subject linked to groups', async () => {
+    prismaMock.subject.findUnique.mockResolvedValue({
+      ...mockSubject,
+      _count: { groupSubjects: 2, teacherAssignments: 0 },
+    } as any);
+
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/subjects/subj-1`)
+      .set(adminToken);
+    expect(res.status).toBe(409);
+  });
+
+  test('DELETE deletes subject with no links', async () => {
+    prismaMock.subject.findUnique.mockResolvedValue(mockSubject as any);
+    prismaMock.subject.delete.mockResolvedValue(mockSubject as any);
+
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/subjects/subj-1`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+  });
+
+  test('POST /link links subject to groups', async () => {
+    prismaMock.subject.findUnique.mockResolvedValue(mockSubject as any);
+    prismaMock.groupSubject.create.mockResolvedValue({} as any);
+
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/subjects/subj-1/link`)
+      .set(adminToken)
+      .send({ groupIds: ['g-1', 'g-2'] });
+    expect(res.status).toBe(200);
+    expect(prismaMock.groupSubject.create).toHaveBeenCalledTimes(2);
+  });
+
+  test('DELETE /unlink removes subject from group', async () => {
+    prismaMock.groupSubject.findUnique.mockResolvedValue({} as any);
+    prismaMock.groupSubject.delete.mockResolvedValue({} as any);
+
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/subjects/subj-1/unlink/g-1`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+  });
+
+  test('POST returns 409 when code already exists in same AY', async () => {
+    prismaMock.academicYear.findUnique.mockResolvedValue(mockAy as any);
+    prismaMock.subject.findUnique.mockResolvedValue({ id: 'existing', code: 'MATH' } as any);
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/academic-years/ay-1/subjects`)
+      .set(adminToken).send({ name: 'Math', code: 'MATH' });
+    expect(res.status).toBe(409);
+  });
+
+  test('POST with valid hodId creates subject with HOD', async () => {
+    prismaMock.academicYear.findUnique.mockResolvedValue(mockAy as any);
+    prismaMock.subject.findUnique.mockResolvedValue(null);
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'hod-1', name: 'Dr. Khan' } as any);
+    prismaMock.subject.create.mockResolvedValue({ ...mockSubject, hodId: 'hod-1', hod: { id: 'hod-1', name: 'Dr. Khan' } } as any);
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/academic-years/ay-1/subjects`)
+      .set(adminToken).send({ name: 'Math', hodId: 'hod-1' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.hod.name).toBe('Dr. Khan');
+  });
+
+  test('POST returns 404 when hodId references non-existent user', async () => {
+    prismaMock.academicYear.findUnique.mockResolvedValue(mockAy as any);
+    prismaMock.subject.findUnique.mockResolvedValue(null);
+    prismaMock.user.findUnique.mockResolvedValue(null);
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/academic-years/ay-1/subjects`)
+      .set(adminToken).send({ name: 'Math', hodId: 'bad-hod' });
+    expect(res.status).toBe(404);
+  });
+
+  test('PUT with hodId=null clears the HOD', async () => {
+    prismaMock.subject.findUnique.mockResolvedValue({ ...mockSubject, hodId: 'hod-1' } as any);
+    prismaMock.subject.update.mockResolvedValue({ ...mockSubject, hodId: null } as any);
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/subjects/subj-1`)
+      .set(adminToken).send({ hodId: null });
+    expect(res.status).toBe(200);
+  });
+
+  test('DELETE /unlink returns 404 when link does not exist', async () => {
+    prismaMock.groupSubject.findUnique.mockResolvedValue(null);
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/subjects/subj-1/unlink/g-99`)
+      .set(adminToken);
+    expect(res.status).toBe(404);
+  });
+
+  test('Link with invalid groupId is handled gracefully', async () => {
+    prismaMock.subject.findUnique.mockResolvedValue(mockSubject as any);
+    prismaMock.groupSubject.create.mockRejectedValue(new Error('FK violation'));
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/subjects/subj-1/link`)
+      .set(adminToken).send({ groupIds: ['bad-group'] });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
   });
 });
