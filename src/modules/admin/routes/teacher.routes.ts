@@ -16,7 +16,7 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
 // TC-011: POST /admin/teachers — Create teacher profile
 // Accepts either: userId (existing user) OR name+username+password (auto-create user)
 router.post('/teachers', asyncHandler(async (req: Request, res: Response) => {
-  const { userId, name, username, password, email, employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup } = req.body;
+  const { userId, name, username, password, email, branchId, employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup } = req.body;
 
   if (!userId && (!name || !username)) {
     res.status(400).json({ success: false, message: 'Provide either userId (existing user) or name+username (create new user)' });
@@ -24,7 +24,7 @@ router.post('/teachers', asyncHandler(async (req: Request, res: Response) => {
   }
 
   const profile = await teacherProfileService.create({
-    userId, name, username, password, email, employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup,
+    userId, name, username, password, email, branchId, employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup,
   });
 
   res.status(201).json({ success: true, data: profile });
@@ -61,9 +61,21 @@ router.put('/teachers/:id', asyncHandler(async (req: Request, res: Response) => 
   res.json({ success: true, data: profile });
 }));
 
-// TC-015: DELETE /admin/teachers/:id — Soft delete (blocks if has assignments)
+// TC-015: DELETE /admin/teachers/:id — Hard delete (only if zero assignments ever)
 router.delete('/teachers/:id', asyncHandler(async (req: Request, res: Response) => {
   const result = await teacherProfileService.delete(req.params.id);
+  res.json({ success: true, message: result.message });
+}));
+
+// POST /admin/teachers/:id/deactivate — Deactivate (ends assignments, preserves history)
+router.post('/teachers/:id/deactivate', asyncHandler(async (req: Request, res: Response) => {
+  const result = await teacherProfileService.deactivate(req.params.id);
+  res.json({ success: true, message: result.message });
+}));
+
+// POST /admin/teachers/:id/reactivate — Reactivate a deactivated teacher
+router.post('/teachers/:id/reactivate', asyncHandler(async (req: Request, res: Response) => {
+  const result = await teacherProfileService.reactivate(req.params.id);
   res.json({ success: true, message: result.message });
 }));
 

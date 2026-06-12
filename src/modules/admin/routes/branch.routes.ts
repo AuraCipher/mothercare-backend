@@ -73,7 +73,7 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
 router.get('/:id/stats', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
 
-  const [branch, allMembers, studentCount, groupCount] = await Promise.all([
+  const [branch, allMembers, studentCount, groupCount, teacherCount] = await Promise.all([
     prisma.branch.findUnique({
       where: { id },
       select: {
@@ -98,6 +98,13 @@ router.get('/:id/stats', asyncHandler(async (req: Request, res: Response) => {
         academicYear: { branchId: id, status: 'ACTIVE' },
       },
     }),
+    prisma.user.count({
+      where: {
+        role: 'teacher',
+        status: 'active',
+        branchMembers: { some: { branchId: id, isActive: true } },
+      },
+    }),
   ]);
 
   if (!branch) {
@@ -108,7 +115,6 @@ router.get('/:id/stats', asyncHandler(async (req: Request, res: Response) => {
   // Exclude super_admin users from staff counts (CEO oversight, not branch staff)
   const staffMembers = allMembers.filter(m => m.user.role !== 'super_admin');
   const totalStaff = staffMembers.length;
-  const teacherCount = staffMembers.filter(m => m.role === 'teacher').length;
 
   // Get admin info (exclude super_admin — CEO oversight, not branch staff)
   const admins = await prisma.branchMember.findMany({
@@ -127,7 +133,7 @@ router.get('/:id/stats', asyncHandler(async (req: Request, res: Response) => {
       stats: {
         totalStaff,
         totalStudents: studentCount,
-        totalTeachers: teacherCount,
+        totalTeachers: teacherCount || 0,
         totalClasses: groupCount,
         totalAcademicYears: branch._count.academicYears,
       },

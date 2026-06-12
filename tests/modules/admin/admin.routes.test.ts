@@ -1374,6 +1374,7 @@ describe('Admin — Branch Stats (/admin/branches/:id/stats)', () => {
     prismaMock.branch.findUnique.mockResolvedValue(mockBranch as any);
     prismaMock.student.count.mockResolvedValue(150);
     prismaMock.group.count.mockResolvedValue(12);
+    prismaMock.user.count.mockResolvedValue(4); // teacher count from User table
 
     // First findMany: all members (staff count) — excludes super_admin users
     prismaMock.branchMember.findMany.mockResolvedValueOnce([
@@ -1698,18 +1699,22 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
     test('soft deletes teacher with no assignments', async () => {
       prismaMock.teacherProfile.findUnique.mockResolvedValue(mockProfile as any);
       prismaMock.teacherAssignment.count.mockResolvedValue(0);
-      prismaMock.user.update.mockResolvedValue(mockUser as any);
+      prismaMock.teacherProfile.delete.mockResolvedValue(mockProfile as any);
+      prismaMock.user.delete.mockResolvedValue(mockUser as any);
 
       const res = await request(app)
         .delete('/admin/teachers/tp-1')
         .set(adminToken);
 
       expect(res.status).toBe(200);
-      expect(res.body.message).toContain('deactivated');
-      expect(prismaMock.user.update).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'teacher-u-1' }, data: { status: 'inactive' } }),
+      expect(res.body.message).toContain('deleted');
+      expect(prismaMock.teacherProfile.delete).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'tp-1' } }),
       );
-    });
+      expect(prismaMock.user.delete).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'teacher-u-1' } }),
+      );
+      });
 
     test('returns 409 if teacher has active assignments', async () => {
       prismaMock.teacherProfile.findUnique.mockResolvedValue(mockProfile as any);
@@ -1720,7 +1725,7 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
         .set(adminToken);
 
       expect(res.status).toBe(409);
-      expect(res.body.message).toContain('3 active assignment(s)');
+      expect(res.body.message).toContain('historical');
     });
 
     test('returns 404 for unknown teacher', async () => {
@@ -1728,6 +1733,96 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
 
       const res = await request(app)
         .delete('/admin/teachers/unknown')
+        .set(adminToken);
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // ─── Deactivate / Reactivate ──────────────────────────
+
+  describe('POST /admin/teachers/:id/deactivate', () => {
+    test('deactivates active teacher', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue({
+        id: 'tp-1', userId: 'u-1',
+        user: { name: 'Ms. Sarah', status: 'active' },
+      } as any);
+      prismaMock.user.update.mockResolvedValue(mockUser as any);
+      prismaMock.branchMember.updateMany.mockResolvedValue({ count: 1 } as any);
+
+      const res = await request(app)
+        .post('/admin/teachers/tp-1/deactivate')
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.message).toContain('deactivated');
+      expect(prismaMock.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'u-1' }, data: { status: 'inactive' } }),
+      );
+    });
+
+    test('returns 400 if already inactive', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue({
+        id: 'tp-1', userId: 'u-1',
+        user: { name: 'Ms. Sarah', status: 'inactive' },
+      } as any);
+
+      const res = await request(app)
+        .post('/admin/teachers/tp-1/deactivate')
+        .set(adminToken);
+
+      expect(res.status).toBe(400);
+    });
+
+    test('returns 404 for unknown teacher', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(null);
+
+      const res = await request(app)
+        .post('/admin/teachers/unknown/deactivate')
+        .set(adminToken);
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe('POST /admin/teachers/:id/reactivate', () => {
+    test('reactivates inactive teacher', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue({
+        id: 'tp-1', userId: 'u-1',
+        user: { name: 'Ms. Sarah', status: 'inactive' },
+      } as any);
+      prismaMock.user.update.mockResolvedValue(mockUser as any);
+      prismaMock.branchMember.updateMany.mockResolvedValue({ count: 1 } as any);
+
+      const res = await request(app)
+        .post('/admin/teachers/tp-1/reactivate')
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.message).toContain('reactivated');
+      expect(prismaMock.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'u-1' }, data: { status: 'active' } }),
+      );
+    });
+
+    test('returns 400 if already active', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue({
+        id: 'tp-1', userId: 'u-1',
+        user: { name: 'Ms. Sarah', status: 'active' },
+      } as any);
+
+      const res = await request(app)
+        .post('/admin/teachers/tp-1/reactivate')
+        .set(adminToken);
+
+      expect(res.status).toBe(400);
+    });
+
+    test('returns 404 for unknown teacher', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(null);
+
+      const res = await request(app)
+        .post('/admin/teachers/unknown/reactivate')
         .set(adminToken);
 
       expect(res.status).toBe(404);

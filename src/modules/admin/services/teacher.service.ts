@@ -10,6 +10,7 @@ export interface CreateTeacherProfileInput {
   username?: string;   // For auto-creating User
   password?: string;   // For auto-creating User
   email?: string;      // For auto-creating User
+  branchId?: string;   // Add teacher as branch member (for stats)
   employeeId?: string;
   qualification?: string;
   specialization?: string;
@@ -105,7 +106,7 @@ class TeacherProfileService {
       if (existingEmpId) throw { status: 409, message: `Employee ID "${data.employeeId}" is already in use` };
     }
 
-    return prisma.teacherProfile.create({
+    const profile = await prisma.teacherProfile.create({
       data: {
         userId,
         employeeId: data.employeeId,
@@ -124,6 +125,29 @@ class TeacherProfileService {
         user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true } },
       },
     });
+
+    // Add teacher as BranchMember so branch-scoped stats work
+    if (data.branchId) {
+      try {
+        const existing = await prisma.branchMember.findUnique({
+          where: { branchId_userId: { branchId: data.branchId, userId } },
+        });
+        if (!existing) {
+          await prisma.branchMember.create({
+            data: {
+              branchId: data.branchId,
+              userId,
+              role: 'teacher',
+              isActive: true,
+            },
+          });
+        }
+      } catch (err: any) {
+        console.warn('[Teacher] Failed to create BranchMember:', err.message);
+      }
+    }
+
+    return profile;
   }
 
   // TC-002: List all teachers with search + filter
@@ -300,33 +324,80 @@ class TeacherProfileService {
     return { message: 'Password updated successfully' };
   }
 
-  // TC-005: Soft delete teacher profile (with assignment guard)
+  // Deactivate teacher: ends assignments, sets inactive, preserves history
+  async deactivate(id: string) {
+    const profile = await prisma.teacherProfile.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        userId: true,
+        user: { select: { name: true, status: true } },
+      },
+    });
+    if (!profile) throw { status: 404, message: 'Teacher profile not found' };
+    if (profile.user.status === 'inactive') throw { status: 400, message: 'Teacher is already inactive' };
+
+    // Deactivate user + branch member (assignments stay as historical records)
+    await prisma.user.update({
+      where: { id: profile.userId },
+      data: { status: 'inactive' },
+    });
+    await prisma.branchMember.updateMany({
+      where: { userId: profile.userId, isActive: true },
+      data: { isActive: false },
+    });
+
+    return { message: `"${profile.user.name}" deactivated. History preserved.` };
+  }
+
+  // Reactivate teacher: restore login + branch access
+  async reactivate(id: string) {
+    const profile = await prisma.teacherProfile.findUnique({
+      where: { id },
+      select: {
+        userId: true,
+        user: { select: { name: true, status: true } },
+      },
+    });
+    if (!profile) throw { status: 404, message: 'Teacher profile not found' };
+    if (profile.user.status === 'active') throw { status: 400, message: 'Teacher is already active' };
+
+    await prisma.user.update({
+      where: { id: profile.userId },
+      data: { status: 'active' },
+    });
+    await prisma.branchMember.updateMany({
+      where: { userId: profile.userId, isActive: false },
+      data: { isActive: true },
+    });
+
+    return { message: `"${profile.user.name}" reactivated.` };
+  }
+
+  // TC-005: Delete — only if teacher has ZERO assignments ever (safe to remove completely)
   async delete(id: string) {
     const profile = await prisma.teacherProfile.findUnique({
       where: { id },
     });
     if (!profile) throw { status: 404, message: 'Teacher profile not found' };
 
-    // Count assignments through User relation
+    // Count ALL assignments ever (not just active)
     const assignmentCount = await prisma.teacherAssignment.count({
       where: { teacherId: profile.userId },
     });
 
-    // Block deletion if teacher has active assignments
     if (assignmentCount > 0) {
       throw {
         status: 409,
-        message: `${assignmentCount} active assignment(s) found. Remove assignments before deleting this teacher.`,
+        message: `This teacher has ${assignmentCount} historical assignment(s). Deactivate instead to preserve records.`,
       };
     }
 
-    // Soft delete: deactivate the user
-    await prisma.user.update({
-      where: { id: profile.userId },
-      data: { status: 'inactive' },
-    });
+    // Hard delete: no assignments ever — safe to remove completely
+    await prisma.teacherProfile.delete({ where: { id } });
+    await prisma.user.delete({ where: { id: profile.userId } });
 
-    return { message: 'Teacher profile deactivated. User credentials preserved.' };
+    return { message: 'Teacher deleted permanently.' };
   }
 }
 
