@@ -123,6 +123,7 @@ model User {
   academicYearMembers AcademicYearMember[]
   teacherAssignments  TeacherAssignment[]
   academicYearSnapshots AcademicYearSnapshot[] @relation("SnapshotTriggeredBy")
+  timetableEntries        TimetableEntry[]     @relation("TimetableTeacher")
 
   @@index([username])
   @@index([email])
@@ -230,6 +231,7 @@ model AcademicYear {
   snapshots           AcademicYearSnapshot[]  @relation("SourceAcademicYear")
   newSnapshots        AcademicYearSnapshot[]  @relation("NewAcademicYear")
   announcements       Announcement[]
+  timetableSlots      TimetableSlot[]
 
   @@unique([branchId, calendarId])
   @@map("academic_years")
@@ -306,6 +308,7 @@ model Group {
   groupSubjects  GroupSubject[]
   teacherAssignments TeacherAssignment[]
   enrollments   Enrollment[]
+  timetableEntries TimetableEntry[]
 
   @@unique([academicYearId, name, section])
   @@map("groups")
@@ -348,6 +351,7 @@ model Subject {
   academicYear      AcademicYear      @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   groupSubjects     GroupSubject[]
   teacherAssignments TeacherAssignment[]
+  timetableEntries    TimetableEntry[]
   hod               User?             @relation("SubjectHOD", fields: [hodId], references: [id])
 
   @@unique([academicYearId, code])
@@ -770,4 +774,51 @@ model AdminInvitation {
   @@index([email])
   @@index([branchId])
   @@map("admin_invitations")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                   TIMETABLE SLOTS                               ║
+// ║  Universal time grid for all classes within an academic year.  ║
+// ║  Defines the lecture periods (start-end time) for each day.    ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model TimetableSlot {
+  id              String   @id @default(uuid())
+  academicYearId  String
+  timetableGroup  String   @default("default") // "default", "primary", "secondary"...
+  dayOfWeek       Int      // 1=Monday, 2=Tuesday ... 6=Saturday
+  lectureNumber   Int      // 1, 2, 3...
+  startTime       String   // "08:00"
+  endTime         String   // "08:40"
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  academicYear AcademicYear       @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  entries       TimetableEntry[]
+
+  @@unique([academicYearId, timetableGroup, dayOfWeek, lectureNumber])
+  @@map("timetable_slots")
+}
+
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                   TIMETABLE ENTRIES                             ║
+// ║  Links a slot → section → subject + teacher.                   ║
+// ║  One entry per slot per section.                               ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model TimetableEntry {
+  id        String @id @default(uuid())
+  slotId    String
+  groupId   String // FK → Group (section)
+  subjectId String? // Nullable — can be unassigned
+  teacherId String? // Nullable — can be unassigned
+
+  slot    TimetableSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  group   Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  subject Subject?      @relation(fields: [subjectId], references: [id])
+  teacher User?         @relation("TimetableTeacher", fields: [teacherId], references: [id])
+
+  @@unique([slotId, groupId])
+  @@map("timetable_entries")
 }

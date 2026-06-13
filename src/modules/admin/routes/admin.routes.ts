@@ -10,6 +10,7 @@ import meRoutes from './me.routes';
 import teacherRoutes from './teacher.routes';
 import sectionRoutes from './section.routes';
 import subjectRoutes from './subject.routes';
+import timetableRoutes from './timetable.routes';
 
 const router = Router();
 const meRouter = Router();
@@ -37,6 +38,7 @@ router.use(academicYearRoutes); // Contains /branches/:branchId/academic-years +
 router.use(teacherRoutes); // Contains /teachers, /teachers/:id, /assignments, /groups/:groupId/assignments
 router.use(sectionRoutes); // Contains /branches/:branchId/academic-years/:ayId/sections, /branches/:branchId/sections/:id
 router.use(subjectRoutes); // Contains /branches/:branchId/academic-years/:ayId/subjects, /branches/:branchId/subjects/:id
+router.use(timetableRoutes); // Contains /branches/:branchId/academic-years/:ayId/timetable/slots, /branches/:branchId/sections/:sectionId/timetable
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
