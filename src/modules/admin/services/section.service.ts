@@ -22,7 +22,7 @@ class SectionService {
         capacity: data.capacity || 30,
       },
       include: {
-        _count: { select: { members: true, students: true } },
+        _count: { select: { members: true, students: true, groupSubjects: true, teacherAssignments: true } },
       },
     });
   }
@@ -30,10 +30,10 @@ class SectionService {
   // List sections for an academic year
   async findAll(academicYearId: string) {
     return prisma.group.findMany({
-      where: { academicYearId },
+      where: { academicYearId, isActive: true },
       orderBy: { displayOrder: 'asc' },
       include: {
-        _count: { select: { members: true, students: true } },
+        _count: { select: { members: true, students: true, groupSubjects: true, teacherAssignments: true } },
       },
     });
   }
@@ -52,7 +52,7 @@ class SectionService {
         capacity: data.capacity,
       },
       include: {
-        _count: { select: { members: true, students: true } },
+        _count: { select: { members: true, students: true, groupSubjects: true, teacherAssignments: true } },
       },
     });
   }
@@ -73,14 +73,13 @@ class SectionService {
     if (issues.length > 0) {
       throw {
         status: 409,
-        message: `Cannot delete: ${issues.join(', ')} depend on this section. Remove dependencies first or deactivate instead.`,
+        message: `Cannot delete: ${issues.join(', ')} depend on this section. Remove all links first, then delete.`,
       };
     }
 
-    return prisma.group.update({
-      where: { id },
-      data: { isActive: false },
-    });
+    // Hard delete — no dependencies means safe to remove
+    await prisma.group.delete({ where: { id } });
+    return { message: 'Section deleted permanently.' };
   }
 }
 
