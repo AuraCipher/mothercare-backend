@@ -31,7 +31,7 @@ class SectionService {
   async findAll(academicYearId: string) {
     return prisma.group.findMany({
       where: { academicYearId, isActive: true },
-      orderBy: { displayOrder: 'asc' },
+      orderBy: [{ displayOrder: 'asc' }, { section: 'asc' }],
       include: {
         _count: { select: { members: true, students: true, groupSubjects: true, teacherAssignments: true } },
       },
