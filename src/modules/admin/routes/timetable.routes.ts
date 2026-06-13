@@ -17,12 +17,12 @@ router.get('/branches/:branchId/academic-years/:ayId/timetable/slots', asyncHand
 
 // POST /admin/branches/:branchId/academic-years/:ayId/timetable/slots
 router.post('/branches/:branchId/academic-years/:ayId/timetable/slots', asyncHandler(async (req: Request, res: Response) => {
-  const { dayOfWeek, startTime, endTime } = req.body;
+  const { dayOfWeek, startTime, endTime, timetableGroup } = req.body;
   if (!dayOfWeek || !startTime || !endTime) {
     res.status(400).json({ success: false, message: 'dayOfWeek, startTime, and endTime are required' });
     return;
   }
-  const slot = await timetableSlotService.create(req.params.ayId, { dayOfWeek, startTime, endTime });
+  const slot = await timetableSlotService.create(req.params.ayId, { dayOfWeek, startTime, endTime, timetableGroup });
   res.status(201).json({ success: true, data: slot });
 }));
 
