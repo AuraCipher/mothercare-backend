@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { timetableSlotService, timetableEntryService } from '../services/timetable.service';
+import { timetableDayConfigService, timetableSlotService, timetableEntryService } from '../services/timetable.service';
 
 const router = Router();
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
@@ -37,6 +37,24 @@ router.put('/branches/:branchId/timetable/slots/:id', asyncHandler(async (req: R
 router.delete('/branches/:branchId/timetable/slots/:id', asyncHandler(async (req: Request, res: Response) => {
   const result = await timetableSlotService.delete(req.params.id);
   res.json({ success: true, message: result.message });
+}));
+
+// ═══════════════════════════════════════════════════════════════════
+// TIMETABLE DAY CONFIG — Enable/disable days per timetable group
+// ═══════════════════════════════════════════════════════════════════
+
+// GET /admin/branches/:branchId/academic-years/:ayId/timetable/days
+router.get('/branches/:branchId/academic-years/:ayId/timetable/days', asyncHandler(async (req: Request, res: Response) => {
+  const group = (req.query.timetableGroup as string) || 'default';
+  const days = await timetableDayConfigService.getDays(req.params.ayId, group);
+  res.json({ success: true, data: days });
+}));
+
+// PUT /admin/branches/:branchId/academic-years/:ayId/timetable/days
+router.put('/branches/:branchId/academic-years/:ayId/timetable/days', asyncHandler(async (req: Request, res: Response) => {
+  const { timetableGroup, days } = req.body;
+  const result = await timetableDayConfigService.setDays(req.params.ayId, timetableGroup || 'default', days || []);
+  res.json({ success: true, data: result });
 }));
 
 // ═══════════════════════════════════════════════════════════════════

@@ -1,17 +1,44 @@
 import { prisma } from '../../../lib/prisma';
 
+class TimetableDayConfigService {
+  async getDays(academicYearId: string, timetableGroup = 'default') {
+    return prisma.timetableDayConfig.findMany({
+      where: { academicYearId, timetableGroup },
+      orderBy: { dayOfWeek: 'asc' },
+    });
+  }
+
+  async setDays(academicYearId: string, timetableGroup: string, days: { dayOfWeek: number; isActive: boolean }[]) {
+    for (const d of days) {
+      await prisma.timetableDayConfig.upsert({
+        where: { academicYearId_timetableGroup_dayOfWeek: { academicYearId, timetableGroup, dayOfWeek: d.dayOfWeek } },
+        create: { academicYearId, timetableGroup, dayOfWeek: d.dayOfWeek, isActive: d.isActive },
+        update: { isActive: d.isActive },
+      });
+    }
+    return this.getDays(academicYearId, timetableGroup);
+  }
+
+  async getActiveDays(academicYearId: string, timetableGroup = 'default'): Promise<number[]> {
+    const configs = await prisma.timetableDayConfig.findMany({
+      where: { academicYearId, timetableGroup, isActive: true },
+    });
+    return configs.map(c => c.dayOfWeek);
+  }
+}
+
 class TimetableSlotService {
-  async findAll(academicYearId: string) {
+  async findAll(academicYearId: string, timetableGroup?: string) {
     return prisma.timetableSlot.findMany({
-      where: { academicYearId, isActive: true },
+      where: { academicYearId, isActive: true, ...(timetableGroup ? { timetableGroup } : {}) },
       orderBy: [{ dayOfWeek: 'asc' }, { lectureNumber: 'asc' }],
     });
   }
 
-  async create(academicYearId: string, data: { dayOfWeek: number; startTime: string; endTime: string }) {
-    // Auto-assign lecture number (next available for this day)
+  async create(academicYearId: string, data: { dayOfWeek: number; startTime: string; endTime: string; timetableGroup?: string }) {
+    const group = data.timetableGroup || 'default';
     const lastSlot = await prisma.timetableSlot.findFirst({
-      where: { academicYearId, dayOfWeek: data.dayOfWeek },
+      where: { academicYearId, timetableGroup: group, dayOfWeek: data.dayOfWeek },
       orderBy: { lectureNumber: 'desc' },
     });
     const lectureNumber = (lastSlot?.lectureNumber ?? 0) + 1;
@@ -19,6 +46,7 @@ class TimetableSlotService {
     return prisma.timetableSlot.create({
       data: {
         academicYearId,
+        timetableGroup: group,
         dayOfWeek: data.dayOfWeek,
         lectureNumber,
         startTime: data.startTime,
@@ -72,5 +100,6 @@ class TimetableEntryService {
   }
 }
 
+export const timetableDayConfigService = new TimetableDayConfigService();
 export const timetableSlotService = new TimetableSlotService();
 export const timetableEntryService = new TimetableEntryService();

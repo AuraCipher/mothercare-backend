@@ -232,6 +232,7 @@ model AcademicYear {
   newSnapshots        AcademicYearSnapshot[]  @relation("NewAcademicYear")
   announcements       Announcement[]
   timetableSlots      TimetableSlot[]
+  timetableDayConfigs TimetableDayConfig[]
 
   @@unique([branchId, calendarId])
   @@map("academic_years")
@@ -821,4 +822,24 @@ model TimetableEntry {
 
   @@unique([slotId, groupId])
   @@map("timetable_entries")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║              TIMETABLE DAY CONFIG                               ║
+// ║  Stores which days are active per timetable group.             ║
+// ║  If no config exists, all days are assumed active.             ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model TimetableDayConfig {
+  id             String  @id @default(uuid())
+  academicYearId String
+  timetableGroup String  @default("default")
+  dayOfWeek      Int     // 1=Mon ... 6=Sat
+  isActive       Boolean @default(true)
+  createdAt      DateTime @default(now())
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+
+  @@unique([academicYearId, timetableGroup, dayOfWeek])
+  @@map("timetable_day_configs")
 }
