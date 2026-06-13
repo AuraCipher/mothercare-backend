@@ -2267,13 +2267,14 @@ describe('Admin — Sections (/branches/:id/academic-years/:ayId/sections)', () 
     expect(res.body.data.name).toBe('Class One');
   });
 
-  test('DELETE deactivates a section', async () => {
-    prismaMock.group.findUnique.mockResolvedValue({ ...mockSection, _count: { students: 0 } } as any);
-    prismaMock.group.update.mockResolvedValue(mockSection as any);
+  test('DELETE hard deletes section with no dependencies', async () => {
+    prismaMock.group.findUnique.mockResolvedValue({ ...mockSection, _count: { students: 0, groupSubjects: 0, teacherAssignments: 0 } } as any);
+    prismaMock.group.delete.mockResolvedValue(mockSection as any);
     const res = await request(app)
       .delete(`/admin/branches/${mockBranch.id}/sections/sec-1`)
       .set(adminToken);
     expect(res.status).toBe(200);
+    expect(prismaMock.group.delete).toHaveBeenCalled();
   });
 
   test('DELETE returns 409 when section has students', async () => {
