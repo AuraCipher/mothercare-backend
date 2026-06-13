@@ -1,91 +1,97 @@
 import { prisma } from '../../../lib/prisma';
 
-class TimetableDayConfigService {
-  async getGroups(academicYearId: string) {
-    const configGroups = await prisma.timetableDayConfig.findMany({
-      where: { academicYearId },
-      select: { timetableGroup: true },
-      distinct: ['timetableGroup'],
+class TimetableService {
+  // Create a new timetable
+  async create(academicYearId: string, name: string, type: string = 'timetable') {
+    const existing = await prisma.timetable.findUnique({
+      where: { academicYearId_name: { academicYearId, name } },
     });
-    const slotGroups = await prisma.timetableSlot.findMany({
-      where: { academicYearId },
-      select: { timetableGroup: true },
-      distinct: ['timetableGroup'],
+    if (existing) throw { status: 409, message: `Timetable "${name}" already exists` };
+
+    const tt = await prisma.timetable.create({
+      data: { academicYearId, name, type },
     });
-    const all = new Set<string>();
-    for (const g of configGroups) all.add(g.timetableGroup);
-    for (const g of slotGroups) all.add(g.timetableGroup);
 
-    // Count active days per group
-    const dayCounts = await prisma.timetableDayConfig.groupBy({
-      by: ['timetableGroup'],
-      where: { academicYearId, isActive: true },
-      _count: { id: true },
-    });
-    const dayCountMap: Record<string, number> = {};
-    for (const d of dayCounts) dayCountMap[d.timetableGroup] = d._count.id;
-
-    return [...all].map(name => ({ name, slotCount: 0, activeDays: dayCountMap[name] || 0 }));
-  }
-
-  async getDays(academicYearId: string, timetableGroup = 'default') {
-    return prisma.timetableDayConfig.findMany({
-      where: { academicYearId, timetableGroup },
-      orderBy: { dayOfWeek: 'asc' },
-    });
-  }
-
-  async setDays(academicYearId: string, timetableGroup: string, days: { dayOfWeek: number; isActive: boolean }[]) {
-    for (const d of days) {
-      await prisma.timetableDayConfig.upsert({
-        where: { academicYearId_timetableGroup_dayOfWeek: { academicYearId, timetableGroup, dayOfWeek: d.dayOfWeek } },
-        create: { academicYearId, timetableGroup, dayOfWeek: d.dayOfWeek, isActive: d.isActive },
-        update: { isActive: d.isActive },
+    // Create day configs (all days active by default)
+    for (let d = 1; d <= 6; d++) {
+      await prisma.timetableDayConfig.create({
+        data: { timetableId: tt.id, dayOfWeek: d, isActive: true },
       });
     }
-    return this.getDays(academicYearId, timetableGroup);
+    return tt;
   }
 
-  async getActiveDays(academicYearId: string, timetableGroup = 'default'): Promise<number[]> {
-    const configs = await prisma.timetableDayConfig.findMany({
-      where: { academicYearId, timetableGroup, isActive: true },
+  // List all timetables for an AY
+  async findAll(academicYearId: string) {
+    const timetables = await prisma.timetable.findMany({
+      where: { academicYearId },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        _count: { select: { slots: true } },
+        dayConfigs: { select: { dayOfWeek: true, isActive: true } },
+      },
     });
-    return configs.map(c => c.dayOfWeek);
+    return timetables.map(t => ({
+      id: t.id,
+      name: t.name,
+      type: t.type,
+      isActive: t.isActive,
+      slotCount: t._count.slots,
+      activeDays: t.dayConfigs.filter(d => d.isActive).length,
+    }));
+  }
+
+  // Rename
+  async rename(id: string, newName: string) {
+    const tt = await prisma.timetable.findUnique({ where: { id } });
+    if (!tt) throw { status: 404, message: 'Timetable not found' };
+    return prisma.timetable.update({ where: { id }, data: { name: newName } });
+  }
+
+  // Delete (blocks if entries exist)
+  async delete(id: string) {
+    const slots = await prisma.timetableSlot.findMany({ where: { timetableId: id }, select: { id: true } });
+    const slotIds = slots.map(s => s.id);
+
+    if (slotIds.length > 0) {
+      const entryCount = await prisma.timetableEntry.count({
+        where: { slotId: { in: slotIds } },
+      });
+      if (entryCount > 0) {
+        throw { status: 409, message: `${entryCount} timetable entr${entryCount !== 1 ? 'ies' : 'y'} depend on this timetable. Remove them first.` };
+      }
+    }
+
+    await prisma.timetableDayConfig.deleteMany({ where: { timetableId: id } });
+    await prisma.timetableSlot.deleteMany({ where: { timetableId: id } });
+    await prisma.timetable.delete({ where: { id } });
+    return { message: 'Timetable deleted' };
   }
 }
 
 class TimetableSlotService {
-  async findAll(academicYearId: string, timetableGroup?: string) {
+  async findAll(timetableId: string) {
     return prisma.timetableSlot.findMany({
-      where: { academicYearId, isActive: true, ...(timetableGroup ? { timetableGroup } : {}) },
+      where: { timetableId, isActive: true },
       orderBy: [{ dayOfWeek: 'asc' }, { lectureNumber: 'asc' }],
     });
   }
 
-  async create(academicYearId: string, data: { dayOfWeek: number; startTime: string; endTime: string; timetableGroup?: string }) {
-    const group = data.timetableGroup || 'default';
+  async create(timetableId: string, data: { startTime: string; endTime: string }) {
     const lastSlot = await prisma.timetableSlot.findFirst({
-      where: { academicYearId, timetableGroup: group, dayOfWeek: data.dayOfWeek },
+      where: { timetableId },
       orderBy: { lectureNumber: 'desc' },
     });
     const lectureNumber = (lastSlot?.lectureNumber ?? 0) + 1;
 
     return prisma.timetableSlot.create({
       data: {
-        academicYearId,
-        timetableGroup: group,
-        dayOfWeek: data.dayOfWeek,
+        timetableId,
         lectureNumber,
         startTime: data.startTime,
         endTime: data.endTime,
       },
     });
-  }
-
-  async update(id: string, data: { startTime?: string; endTime?: string; dayOfWeek?: number }) {
-    const existing = await prisma.timetableSlot.findUnique({ where: { id } });
-    if (!existing) throw { status: 404, message: 'Slot not found' };
-    return prisma.timetableSlot.update({ where: { id }, data });
   }
 
   async delete(id: string) {
@@ -94,44 +100,6 @@ class TimetableSlotService {
     await prisma.timetableSlot.delete({ where: { id } });
     return { message: 'Slot deleted' };
   }
-
-  // Rename a timetable group (updates all slots + day configs)
-  async renameGroup(academicYearId: string, oldName: string, newName: string) {
-    await prisma.timetableDayConfig.updateMany({
-      where: { academicYearId, timetableGroup: oldName },
-      data: { timetableGroup: newName },
-    });
-    await prisma.timetableSlot.updateMany({
-      where: { academicYearId, timetableGroup: oldName },
-      data: { timetableGroup: newName },
-    });
-    return { message: `Timetable renamed to "${newName}"` };
-  }
-
-  // Delete an entire timetable group (all slots + day configs)
-  async deleteGroup(academicYearId: string, timetableGroup: string) {
-    // Check if any entries exist for this group's slots
-    const slots = await prisma.timetableSlot.findMany({
-      where: { academicYearId, timetableGroup },
-      select: { id: true },
-    });
-    const slotIds = slots.map(s => s.id);
-    const entryCount = slotIds.length > 0 ? await prisma.timetableEntry.count({
-      where: { slotId: { in: slotIds } },
-    }) : 0;
-
-    if (entryCount > 0) {
-      throw {
-        status: 409,
-        message: `${entryCount} timetable entr${entryCount !== 1 ? 'ies' : 'y'} depend on this timetable. Remove or unlink them first.`,
-      };
-    }
-
-    // Delete day configs + slots
-    await prisma.timetableDayConfig.deleteMany({ where: { academicYearId, timetableGroup } });
-    await prisma.timetableSlot.deleteMany({ where: { academicYearId, timetableGroup } });
-    return { message: `Timetable "${timetableGroup}" deleted` };
-  }
 }
 
 class TimetableEntryService {
@@ -139,11 +107,10 @@ class TimetableEntryService {
     return prisma.timetableEntry.findMany({
       where: { groupId },
       include: {
-        slot: { select: { dayOfWeek: true, startTime: true, endTime: true, lectureNumber: true } },
+        slot: { select: { dayOfWeek: true, startTime: true, endTime: true, lectureNumber: true, timetableId: true } },
         subject: { select: { id: true, name: true, code: true } },
         teacher: { select: { id: true, name: true } },
       },
-      orderBy: { slot: { lectureNumber: 'asc' } },
     });
   }
 
@@ -152,19 +119,11 @@ class TimetableEntryService {
       where: { slotId_groupId: { slotId, groupId } },
       create: { slotId, groupId, subjectId: data.subjectId, teacherId: data.teacherId },
       update: { subjectId: data.subjectId, teacherId: data.teacherId },
-      include: {
-        subject: { select: { id: true, name: true } },
-        teacher: { select: { id: true, name: true } },
-      },
+      include: { subject: { select: { id: true, name: true } }, teacher: { select: { id: true, name: true } } },
     });
-  }
-
-  async remove(slotId: string, groupId: string) {
-    await prisma.timetableEntry.delete({ where: { slotId_groupId: { slotId, groupId } } });
-    return { message: 'Entry removed' };
   }
 }
 
-export const timetableDayConfigService = new TimetableDayConfigService();
+export const timetableService = new TimetableService();
 export const timetableSlotService = new TimetableSlotService();
 export const timetableEntryService = new TimetableEntryService();
