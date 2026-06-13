@@ -2012,6 +2012,87 @@ describe('Admin — Teacher Assignments', () => {
 
       expect(res.status).toBe(404);
     });
+
+    test('PUT updates assignment role', async () => {
+      prismaMock.teacherAssignment.findUnique.mockResolvedValue(mockAssignment as any);
+      prismaMock.teacherAssignment.updateMany.mockResolvedValue({ count: 0 } as any);
+      prismaMock.teacherAssignment.update.mockResolvedValue({ ...mockAssignment, role: 'assistant' } as any);
+      const res = await request(app)
+        .put('/admin/assignments/assign-1')
+        .set(adminToken).send({ isClassTeacher: false });
+      expect(res.status).toBe(200);
+    });
+
+    test('PUT returns 404 for unknown assignment', async () => {
+      prismaMock.teacherAssignment.findUnique.mockResolvedValue(null);
+      const res = await request(app)
+        .put('/admin/assignments/unknown')
+        .set(adminToken).send({ isClassTeacher: true });
+      expect(res.status).toBe(404);
+    });
+
+    test('POST requires groupId', async () => {
+      const res = await request(app)
+        .post('/admin/assignments')
+        .set(adminToken).send({ academicYearId: 'ay-1', teacherId: 't-1', subjectId: 's-1' });
+      expect(res.status).toBe(400);
+    });
+
+    test('POST rejects inactive teacher', async () => {
+      prismaMock.user.findUnique.mockResolvedValue({ id: 't-1', role: 'teacher', status: 'inactive' } as any);
+      const res = await request(app)
+        .post('/admin/assignments')
+        .set(adminToken).send({ academicYearId: 'ay-1', teacherId: 't-1', groupId: 'g-1', subjectId: 's-1' });
+      expect(res.status).toBe(400);
+    });
+
+    test('POST returns 404 for missing academic year', async () => {
+      prismaMock.user.findUnique.mockResolvedValue(mockTeacher as any);
+      prismaMock.academicYear.findUnique.mockResolvedValue(null);
+      const res = await request(app)
+        .post('/admin/assignments')
+        .set(adminToken).send({ academicYearId: 'bad-ay', teacherId: 'teacher-u-1', groupId: 'g-1', subjectId: 's-1' });
+      expect(res.status).toBe(404);
+    });
+
+    test('GET teachers/:id/assignments returns role field', async () => {
+      prismaMock.teacherAssignment.findMany.mockResolvedValue([{ ...mockAssignment, role: 'hod' }] as any);
+      const res = await request(app)
+        .get('/admin/teachers/teacher-u-1/assignments')
+        .set(adminToken);
+      expect(res.status).toBe(200);
+      expect(res.body.data[0].role).toBe('hod');
+    });
+
+    test('GET groups/:id/assignments returns teacher info', async () => {
+      prismaMock.teacherAssignment.findMany.mockResolvedValue([mockAssignment] as any);
+      const res = await request(app)
+        .get('/admin/groups/group-1/assignments')
+        .set(adminToken);
+      expect(res.status).toBe(200);
+      expect(res.body.data[0].teacher.name).toBe('Ms. Sarah');
+    });
+
+    test('POST assignment with role=hod saves correctly', async () => {
+      prismaMock.user.findUnique.mockResolvedValue(mockTeacher as any);
+      prismaMock.academicYear.findUnique.mockResolvedValue(mockAy as any);
+      prismaMock.group.findUnique.mockResolvedValue(mockGroup as any);
+      prismaMock.subject.findUnique.mockResolvedValue(mockSubject as any);
+      prismaMock.teacherAssignment.create.mockResolvedValue({ ...mockAssignment, role: 'hod' } as any);
+      const res = await request(app)
+        .post('/admin/assignments')
+        .set(adminToken).send({ academicYearId: 'ay-1', teacherId: 'teacher-u-1', groupId: 'group-1', subjectId: 'subj-1', role: 'hod' });
+      expect(res.status).toBe(201);
+    });
+
+    test('DELETE /admin/assignments/:id returns 200', async () => {
+      prismaMock.teacherAssignment.findUnique.mockResolvedValue(mockAssignment as any);
+      prismaMock.teacherAssignment.delete.mockResolvedValue(mockAssignment as any);
+      const res = await request(app)
+        .delete('/admin/assignments/assign-1')
+        .set(adminToken);
+      expect(res.status).toBe(200);
+    });
   });
 });
 
