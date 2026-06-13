@@ -77,12 +77,12 @@ router.get('/branches/:branchId/timetables/:id/slots', asyncHandler(async (req: 
 
 // POST /admin/branches/:branchId/timetables/:id/slots
 router.post('/branches/:branchId/timetables/:id/slots', asyncHandler(async (req: Request, res: Response) => {
-  const { startTime, endTime } = req.body;
+  const { dayOfWeek, startTime, endTime } = req.body;
   if (!startTime || !endTime) {
     res.status(400).json({ success: false, message: 'startTime and endTime are required' });
     return;
   }
-  const slot = await timetableSlotService.create(req.params.id, { startTime, endTime });
+  const slot = await timetableSlotService.create(req.params.id, { dayOfWeek: dayOfWeek ?? null, startTime, endTime });
   res.status(201).json({ success: true, data: slot });
 }));
 

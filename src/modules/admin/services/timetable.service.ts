@@ -77,7 +77,7 @@ class TimetableSlotService {
     });
   }
 
-  async create(timetableId: string, data: { startTime: string; endTime: string }) {
+  async create(timetableId: string, data: { dayOfWeek?: number | null; startTime: string; endTime: string }) {
     const lastSlot = await prisma.timetableSlot.findFirst({
       where: { timetableId },
       orderBy: { lectureNumber: 'desc' },
@@ -88,6 +88,7 @@ class TimetableSlotService {
       data: {
         timetableId,
         lectureNumber,
+        dayOfWeek: data.dayOfWeek ?? null,
         startTime: data.startTime,
         endTime: data.endTime,
       },
