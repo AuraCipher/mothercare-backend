@@ -67,6 +67,31 @@ class TimetableSlotService {
     await prisma.timetableSlot.delete({ where: { id } });
     return { message: 'Slot deleted' };
   }
+
+  // Delete an entire timetable group (all slots + day configs)
+  async deleteGroup(academicYearId: string, timetableGroup: string) {
+    // Check if any entries exist for this group's slots
+    const slots = await prisma.timetableSlot.findMany({
+      where: { academicYearId, timetableGroup },
+      select: { id: true },
+    });
+    const slotIds = slots.map(s => s.id);
+    const entryCount = slotIds.length > 0 ? await prisma.timetableEntry.count({
+      where: { slotId: { in: slotIds } },
+    }) : 0;
+
+    if (entryCount > 0) {
+      throw {
+        status: 409,
+        message: `${entryCount} timetable entr${entryCount !== 1 ? 'ies' : 'y'} depend on this timetable. Remove or unlink them first.`,
+      };
+    }
+
+    // Delete day configs + slots
+    await prisma.timetableDayConfig.deleteMany({ where: { academicYearId, timetableGroup } });
+    await prisma.timetableSlot.deleteMany({ where: { academicYearId, timetableGroup } });
+    return { message: `Timetable "${timetableGroup}" deleted` };
+  }
 }
 
 class TimetableEntryService {

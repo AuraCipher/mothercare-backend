@@ -39,6 +39,12 @@ router.delete('/branches/:branchId/timetable/slots/:id', asyncHandler(async (req
   res.json({ success: true, message: result.message });
 }));
 
+// DELETE /admin/branches/:branchId/academic-years/:ayId/timetable/groups/:group — Delete timetable group
+router.delete('/branches/:branchId/academic-years/:ayId/timetable/groups/:group', asyncHandler(async (req: Request, res: Response) => {
+  const result = await timetableSlotService.deleteGroup(req.params.ayId, req.params.group);
+  res.json({ success: true, message: result.message });
+}));
+
 // ═══════════════════════════════════════════════════════════════════
 // TIMETABLE DAY CONFIG — Enable/disable days per timetable group
 // ═══════════════════════════════════════════════════════════════════
