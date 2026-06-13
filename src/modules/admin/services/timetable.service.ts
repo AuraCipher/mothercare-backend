@@ -1,6 +1,23 @@
 import { prisma } from '../../../lib/prisma';
 
 class TimetableDayConfigService {
+  async getGroups(academicYearId: string) {
+    const configGroups = await prisma.timetableDayConfig.findMany({
+      where: { academicYearId },
+      select: { timetableGroup: true },
+      distinct: ['timetableGroup'],
+    });
+    const slotGroups = await prisma.timetableSlot.findMany({
+      where: { academicYearId },
+      select: { timetableGroup: true },
+      distinct: ['timetableGroup'],
+    });
+    const all = new Set<string>();
+    for (const g of configGroups) all.add(g.timetableGroup);
+    for (const g of slotGroups) all.add(g.timetableGroup);
+    return [...all].map(name => ({ name, slotCount: 0 }));
+  }
+
   async getDays(academicYearId: string, timetableGroup = 'default') {
     return prisma.timetableDayConfig.findMany({
       where: { academicYearId, timetableGroup },

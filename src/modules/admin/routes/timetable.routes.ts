@@ -49,6 +49,17 @@ router.delete('/branches/:branchId/academic-years/:ayId/timetable/groups/:group'
 // TIMETABLE DAY CONFIG — Enable/disable days per timetable group
 // ═══════════════════════════════════════════════════════════════════
 
+// GET /admin/branches/:branchId/academic-years/:ayId/timetable/groups — List all timetable groups
+router.get('/branches/:branchId/academic-years/:ayId/timetable/groups', asyncHandler(async (req: Request, res: Response) => {
+  const groups = await timetableDayConfigService.getGroups(req.params.ayId);
+  const slots = await timetableSlotService.findAll(req.params.ayId);
+  const enriched = groups.map(g => ({
+    ...g,
+    slotCount: slots.filter(s => (s.timetableGroup || 'default') === g.name).length,
+  }));
+  res.json({ success: true, data: enriched });
+}));
+
 // GET /admin/branches/:branchId/academic-years/:ayId/timetable/days
 router.get('/branches/:branchId/academic-years/:ayId/timetable/days', asyncHandler(async (req: Request, res: Response) => {
   const group = (req.query.timetableGroup as string) || 'default';
