@@ -39,6 +39,17 @@ router.delete('/branches/:branchId/timetable/slots/:id', asyncHandler(async (req
   res.json({ success: true, message: result.message });
 }));
 
+// PUT /admin/branches/:branchId/academic-years/:ayId/timetable/groups/:group/rename — Rename timetable group
+router.put('/branches/:branchId/academic-years/:ayId/timetable/groups/:group/rename', asyncHandler(async (req: Request, res: Response) => {
+  const { newName } = req.body;
+  if (!newName || !newName.trim()) {
+    res.status(400).json({ success: false, message: 'newName is required' });
+    return;
+  }
+  const result = await timetableSlotService.renameGroup(req.params.ayId, req.params.group, newName.trim());
+  res.json({ success: true, message: result.message });
+}));
+
 // DELETE /admin/branches/:branchId/academic-years/:ayId/timetable/groups/:group — Delete timetable group
 router.delete('/branches/:branchId/academic-years/:ayId/timetable/groups/:group', asyncHandler(async (req: Request, res: Response) => {
   const result = await timetableSlotService.deleteGroup(req.params.ayId, req.params.group);
@@ -54,8 +65,9 @@ router.get('/branches/:branchId/academic-years/:ayId/timetable/groups', asyncHan
   const groups = await timetableDayConfigService.getGroups(req.params.ayId);
   const slots = await timetableSlotService.findAll(req.params.ayId);
   const enriched = groups.map(g => ({
-    ...g,
+    name: g.name,
     slotCount: slots.filter(s => (s.timetableGroup || 'default') === g.name).length,
+    activeDays: g.activeDays,
   }));
   res.json({ success: true, data: enriched });
 }));

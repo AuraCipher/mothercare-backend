@@ -15,7 +15,17 @@ class TimetableDayConfigService {
     const all = new Set<string>();
     for (const g of configGroups) all.add(g.timetableGroup);
     for (const g of slotGroups) all.add(g.timetableGroup);
-    return [...all].map(name => ({ name, slotCount: 0 }));
+
+    // Count active days per group
+    const dayCounts = await prisma.timetableDayConfig.groupBy({
+      by: ['timetableGroup'],
+      where: { academicYearId, isActive: true },
+      _count: { id: true },
+    });
+    const dayCountMap: Record<string, number> = {};
+    for (const d of dayCounts) dayCountMap[d.timetableGroup] = d._count.id;
+
+    return [...all].map(name => ({ name, slotCount: 0, activeDays: dayCountMap[name] || 0 }));
   }
 
   async getDays(academicYearId: string, timetableGroup = 'default') {
@@ -83,6 +93,19 @@ class TimetableSlotService {
     if (!existing) throw { status: 404, message: 'Slot not found' };
     await prisma.timetableSlot.delete({ where: { id } });
     return { message: 'Slot deleted' };
+  }
+
+  // Rename a timetable group (updates all slots + day configs)
+  async renameGroup(academicYearId: string, oldName: string, newName: string) {
+    await prisma.timetableDayConfig.updateMany({
+      where: { academicYearId, timetableGroup: oldName },
+      data: { timetableGroup: newName },
+    });
+    await prisma.timetableSlot.updateMany({
+      where: { academicYearId, timetableGroup: oldName },
+      data: { timetableGroup: newName },
+    });
+    return { message: `Timetable renamed to "${newName}"` };
   }
 
   // Delete an entire timetable group (all slots + day configs)
