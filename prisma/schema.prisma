@@ -833,6 +833,7 @@ model TimetableEntry {
   groupId   String // FK → Group (section)
   subjectId String?
   teacherId String?
+  note      String? // "break", etc.
 
   slot    TimetableSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
   group   Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)

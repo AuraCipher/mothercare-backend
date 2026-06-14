@@ -104,8 +104,8 @@ router.get('/branches/:branchId/sections/:sectionId/timetable', asyncHandler(asy
 
 // PUT /admin/branches/:branchId/sections/:sectionId/timetable/:slotId
 router.put('/branches/:branchId/sections/:sectionId/timetable/:slotId', asyncHandler(async (req: Request, res: Response) => {
-  const { subjectId, teacherId } = req.body;
-  const entry = await timetableEntryService.upsert(req.params.slotId, req.params.sectionId, { subjectId, teacherId });
+  const { subjectId, teacherId, note } = req.body;
+  const entry = await timetableEntryService.upsert(req.params.slotId, req.params.sectionId, { subjectId, teacherId, note });
   res.json({ success: true, data: entry });
 }));
 

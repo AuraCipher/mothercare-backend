@@ -115,11 +115,11 @@ class TimetableEntryService {
     });
   }
 
-  async upsert(slotId: string, groupId: string, data: { subjectId?: string | null; teacherId?: string | null }) {
+  async upsert(slotId: string, groupId: string, data: { subjectId?: string | null; teacherId?: string | null; note?: string | null }) {
     return prisma.timetableEntry.upsert({
       where: { slotId_groupId: { slotId, groupId } },
-      create: { slotId, groupId, subjectId: data.subjectId, teacherId: data.teacherId },
-      update: { subjectId: data.subjectId, teacherId: data.teacherId },
+      create: { slotId, groupId, subjectId: data.subjectId, teacherId: data.teacherId, note: data.note },
+      update: { subjectId: data.subjectId, teacherId: data.teacherId, note: data.note },
       include: { subject: { select: { id: true, name: true } }, teacher: { select: { id: true, name: true } } },
     });
   }
