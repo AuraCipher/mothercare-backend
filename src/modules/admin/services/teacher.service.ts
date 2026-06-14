@@ -22,6 +22,11 @@ export interface CreateTeacherProfileInput {
   dateOfBirth?: string;
   gender?: 'male' | 'female' | 'other';
   bloodGroup?: string;
+  fatherName?: string;
+  cardId?: string;
+  severeDisease?: string;
+  experience?: string;
+  bio?: string;
 }
 
 export interface UpdateTeacherProfileInput {
@@ -36,6 +41,11 @@ export interface UpdateTeacherProfileInput {
   dateOfBirth?: string;
   gender?: 'male' | 'female' | 'other';
   bloodGroup?: string;
+  fatherName?: string;
+  cardId?: string;
+  severeDisease?: string;
+  experience?: string;
+  bio?: string;
 }
 
 export interface CreateAssignmentInput {
@@ -121,6 +131,11 @@ class TeacherProfileService {
         dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null,
         gender: data.gender as any,
         bloodGroup: data.bloodGroup,
+        fatherName: data.fatherName,
+        cardId: data.cardId,
+        severeDisease: data.severeDisease,
+        experience: data.experience,
+        bio: data.bio,
       },
       include: {
         user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true } },
@@ -249,6 +264,11 @@ class TeacherProfileService {
         dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : undefined,
         gender: data.gender as any,
         bloodGroup: data.bloodGroup,
+        fatherName: data.fatherName,
+        cardId: data.cardId,
+        severeDisease: data.severeDisease,
+        experience: data.experience,
+        bio: data.bio,
       },
       include: {
         user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true } },

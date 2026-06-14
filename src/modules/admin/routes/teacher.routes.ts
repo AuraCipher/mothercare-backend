@@ -16,7 +16,7 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
 // TC-011: POST /admin/teachers — Create teacher profile
 // Accepts either: userId (existing user) OR name+username+password (auto-create user)
 router.post('/teachers', asyncHandler(async (req: Request, res: Response) => {
-  const { userId, name, username, password, email, branchId, employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup } = req.body;
+  const { userId, name, username, password, email, branchId, employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio } = req.body;
 
   if (!userId && (!name || !username)) {
     res.status(400).json({ success: false, message: 'Provide either userId (existing user) or name+username (create new user)' });
@@ -24,7 +24,7 @@ router.post('/teachers', asyncHandler(async (req: Request, res: Response) => {
   }
 
   const profile = await teacherProfileService.create({
-    userId, name, username, password, email, branchId, employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup,
+    userId, name, username, password, email, branchId, employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio,
   });
 
   res.status(201).json({ success: true, data: profile });
@@ -52,10 +52,10 @@ router.get('/teachers/:id', asyncHandler(async (req: Request, res: Response) => 
 
 // TC-014: PUT /admin/teachers/:id — Update teacher profile
 router.put('/teachers/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup } = req.body;
+  const { employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio } = req.body;
 
   const profile = await teacherProfileService.update(req.params.id, {
-    employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup,
+    employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio,
   });
 
   res.json({ success: true, data: profile });
