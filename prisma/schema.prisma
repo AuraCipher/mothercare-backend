@@ -92,6 +92,8 @@ model User {
   dateOfBirth      DateTime?
   address          String?
   profilePhoto     String?
+  profilePhotoId   String?   @unique
+  profileFile      FileRecord?     @relation("UserProfilePhoto", fields: [profilePhotoId], references: [id])
   status           AccountStatus @default(active)
   isEmailVerified  Boolean       @default(false)
   isPhoneVerified  Boolean       @default(false)
@@ -132,6 +134,29 @@ model User {
   @@index([status])
   @@map("users")
 }
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    FILE RECORD                                 ║
+// ║  Universal file reference for profile photos, documents, etc.  ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model FileRecord {
+  id            String   @id @default(uuid())
+  originalName  String
+  storagePath   String   @unique
+  mimeType      String
+  size          Int
+  width         Int?
+  height        Int?
+  uploadedById  String?
+  createdAt     DateTime @default(now())
+
+  uploader      User?    @relation(fields: [uploadedById], references: [id])
+  profileUser   User?    @relation("UserProfilePhoto")
+
+  @@map("file_records")
+}
+
 
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║                       SCHOOL / TENANT                           ║
