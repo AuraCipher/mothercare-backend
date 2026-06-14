@@ -1538,7 +1538,9 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
     id: 'tp-1', userId: 'teacher-u-1', employeeId: 'TCH-001', qualification: 'M.Sc. Mathematics',
     specialization: 'Mathematics', joiningDate: new Date('2024-01-15'), salary: null,
     phone: '1234567890', emergencyContact: null, address: '123 School St', dateOfBirth: null,
-    gender: 'female', bloodGroup: null, createdAt: new Date(), updatedAt: new Date(),
+    gender: 'female', bloodGroup: null, fatherName: 'Muhammad', cardId: '12345-6789012-3',
+    severeDisease: 'Asthma', experience: '5 years', bio: 'Experienced math teacher',
+    createdAt: new Date(), updatedAt: new Date(),
     user: mockUser,
   };
 
@@ -1615,6 +1617,28 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
 
       expect(res.status).toBe(409);
       expect(res.body.message).toContain('already in use');
+    });
+
+    test('creates teacher with new fields (fatherName, cardId, severeDisease, experience, bio)', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(null);
+      prismaMock.user.findUnique.mockResolvedValue(mockUser as any);
+      const extendedProfile = { ...mockProfile, fatherName: 'Ahmed', cardId: 'CNIC-1234', severeDisease: 'Diabetes', experience: '8 years', bio: 'Senior science teacher' };
+      prismaMock.teacherProfile.create.mockResolvedValue(extendedProfile as any);
+
+      const res = await request(app)
+        .post('/admin/teachers')
+        .send({
+          userId: 'teacher-u-1', fatherName: 'Ahmed', cardId: 'CNIC-1234',
+          severeDisease: 'Diabetes', experience: '8 years', bio: 'Senior science teacher',
+        })
+        .set(adminToken);
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.fatherName).toBe('Ahmed');
+      expect(res.body.data.cardId).toBe('CNIC-1234');
+      expect(res.body.data.severeDisease).toBe('Diabetes');
+      expect(res.body.data.experience).toBe('8 years');
+      expect(res.body.data.bio).toBe('Senior science teacher');
     });
   });
 
@@ -1705,6 +1729,22 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
         .set(adminToken);
 
       expect(res.status).toBe(404);
+    });
+
+    test('updates teacher new fields (fatherName, cardId, severeDisease, experience, bio)', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(mockProfile as any);
+      const updated = { ...mockProfile, fatherName: 'Abdullah', cardId: 'CNIC-5678', severeDisease: 'None', experience: '10 years', bio: 'Updated bio' };
+      prismaMock.teacherProfile.update.mockResolvedValue(updated as any);
+
+      const res = await request(app)
+        .put('/admin/teachers/tp-1')
+        .send({ fatherName: 'Abdullah', cardId: 'CNIC-5678', severeDisease: 'None', experience: '10 years', bio: 'Updated bio' })
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.fatherName).toBe('Abdullah');
+      expect(res.body.data.cardId).toBe('CNIC-5678');
+      expect(res.body.data.bio).toBe('Updated bio');
     });
   });
 
