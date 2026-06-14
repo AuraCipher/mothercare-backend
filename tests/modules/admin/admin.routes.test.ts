@@ -2433,3 +2433,115 @@ describe('Admin — Sections (/branches/:id/academic-years/:ayId/sections)', () 
     expect(res.body.data).toEqual([]);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// TIMETABLES (Phase 27)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Admin — Timetables', () => {
+  const mockTt = { id: 'tt-1', academicYearId: 'ay-1', name: 'Regular', type: 'timetable', isActive: true, createdAt: new Date() };
+  const mockAy = { id: 'ay-1', status: 'ACTIVE' };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+  let mockBranch: MockBranch;
+
+  test('GET /timetables lists all timetables for AY', async () => {
+    prismaMock.timetable.findMany.mockResolvedValue([{ ...mockTt, _count: { slots: 0 }, dayConfigs: [{ dayOfWeek: 1, isActive: true }] }] as any);
+    mockBranch = createMockBranch();
+    const res = await request(app)
+      .get(`/admin/branches/${mockBranch.id}/academic-years/ay-1/timetables`)
+      .set(adminToken);
+    expect(res.body.data).toHaveLength(1);
+  });
+
+  test('POST /timetables creates a new timetable', async () => {
+    prismaMock.timetable.findUnique.mockResolvedValue(null);
+    prismaMock.timetable.create.mockResolvedValue(mockTt as any);
+    prismaMock.timetableDayConfig.create.mockResolvedValue({} as any);
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/academic-years/ay-1/timetables`)
+      .set(adminToken)
+      .send({ name: 'Regular', type: 'timetable' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.name).toBe('Regular');
+  });
+
+  test('POST /timetables returns 409 for duplicate name', async () => {
+    prismaMock.timetable.findUnique.mockResolvedValue(mockTt as any);
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/academic-years/ay-1/timetables`)
+      .set(adminToken)
+      .send({ name: 'Regular' });
+    expect(res.status).toBe(409);
+  });
+
+  test('PUT /timetables/:id/rename renames timetable', async () => {
+    prismaMock.timetable.findUnique.mockResolvedValue(mockTt as any);
+    prismaMock.timetable.update.mockResolvedValue({ ...mockTt, name: 'Updated' } as any);
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/timetables/tt-1/rename`)
+      .set(adminToken)
+      .send({ newName: 'Updated' });
+    expect(res.status).toBe(200);
+  });
+
+  test('DELETE /timetables/:id deletes empty timetable', async () => {
+    prismaMock.timetableSlot.findMany.mockResolvedValue([]);
+    prismaMock.timetableDayConfig.deleteMany.mockResolvedValue({ count: 0 } as any);
+    prismaMock.timetableSlot.deleteMany.mockResolvedValue({ count: 0 } as any);
+    prismaMock.timetable.delete.mockResolvedValue(mockTt as any);
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/timetables/tt-1`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+  });
+
+  test('POST /timetables/:id/slots creates slot (all days)', async () => {
+    prismaMock.timetableSlot.findFirst.mockResolvedValue(null);
+    prismaMock.timetableSlot.create.mockResolvedValue({ id: 's-1', timetableId: 'tt-1', lectureNumber: 1, startTime: '08:00', endTime: '08:40' } as any);
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/timetables/tt-1/slots`)
+      .set(adminToken)
+      .send({ startTime: '08:00', endTime: '08:40' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.lectureNumber).toBe(1);
+  });
+
+  test('POST /timetables/:id/slots creates slot (specific day)', async () => {
+    prismaMock.timetableSlot.findFirst.mockResolvedValue(null);
+    prismaMock.timetableSlot.create.mockResolvedValue({ id: 's-2', timetableId: 'tt-1', dayOfWeek: 3, lectureNumber: 1, startTime: '09:00', endTime: '12:00' } as any);
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/timetables/tt-1/slots`)
+      .set(adminToken)
+      .send({ dayOfWeek: 3, startTime: '09:00', endTime: '12:00' });
+    expect(res.status).toBe(201);
+  });
+
+  test('GET /timetables/:id/slots lists slots', async () => {
+    prismaMock.timetableSlot.findMany.mockResolvedValue([]);
+    const res = await request(app)
+      .get(`/admin/branches/${mockBranch.id}/timetables/tt-1/slots`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+  });
+
+  test('DELETE /timetables/:id/slots/:slotId deletes slot', async () => {
+    prismaMock.timetableSlot.findUnique.mockResolvedValue({ id: 's-1' } as any);
+    prismaMock.timetableSlot.delete.mockResolvedValue({} as any);
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/timetables/tt-1/slots/s-1`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+  });
+
+  test('PUT /timetables/:id/days updates day config', async () => {
+    prismaMock.timetableDayConfig.upsert.mockResolvedValue({} as any);
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/timetables/tt-1/days`)
+      .set(adminToken)
+      .send({ days: [{ dayOfWeek: 1, isActive: true }, { dayOfWeek: 2, isActive: false }] });
+    expect(res.status).toBe(200);
+  });
+});
