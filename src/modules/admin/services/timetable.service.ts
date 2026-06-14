@@ -115,6 +115,59 @@ class TimetableEntryService {
     });
   }
 
+  // Find timetable entries for a teacher, grouped by timetable
+  async findByTeacherGrouped(branchId: string, teacherProfileId: string) {
+    // Resolve teacher profile to user ID
+    const profile = await prisma.teacherProfile.findUnique({ where: { id: teacherProfileId }, select: { userId: true } });
+    if (!profile) throw { status: 404, message: 'Teacher not found' };
+
+    // Fetch all timetable entries for this teacher, where the timetable is active
+    const entries = await prisma.timetableEntry.findMany({
+      where: {
+        teacherId: profile.userId,
+        slot: { timetable: { isActive: true } },
+      },
+      include: {
+        slot: {
+          select: { id: true, lectureNumber: true, startTime: true, endTime: true, dayOfWeek: true, timetableId: true },
+        },
+        subject: { select: { id: true, name: true, code: true } },
+        group: { select: { id: true, name: true, section: true } },
+      },
+      orderBy: { slot: { lectureNumber: 'asc' } },
+    });
+
+    // Collect unique timetable IDs
+    const ttIds = [...new Set(entries.map(e => e.slot.timetableId))];
+    const timetables = await prisma.timetable.findMany({
+      where: { id: { in: ttIds } },
+      select: { id: true, name: true, type: true },
+    });
+    const ttMap = new Map(timetables.map(t => [t.id, t]));
+
+    // Group entries by timetable
+    const grouped = new Map<string, any>();
+    for (const entry of entries) {
+      const tt = ttMap.get(entry.slot.timetableId);
+      if (!tt) continue;
+      if (!grouped.has(tt.id)) {
+        grouped.set(tt.id, { id: tt.id, name: tt.name, type: tt.type, entries: [] });
+      }
+      grouped.get(tt.id).entries.push({
+        lectureNumber: entry.slot.lectureNumber,
+        startTime: entry.slot.startTime,
+        endTime: entry.slot.endTime,
+        dayOfWeek: entry.slot.dayOfWeek,
+        groupName: entry.group.name,
+        groupSection: entry.group.section,
+        subjectName: entry.subject?.name || null,
+        subjectCode: entry.subject?.code || null,
+      });
+    }
+
+    return Array.from(grouped.values());
+  }
+
   async upsert(slotId: string, groupId: string, data: { subjectId?: string | null; teacherId?: string | null; note?: string | null }) {
     return prisma.timetableEntry.upsert({
       where: { slotId_groupId: { slotId, groupId } },

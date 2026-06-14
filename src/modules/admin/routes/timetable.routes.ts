@@ -82,6 +82,14 @@ router.post('/branches/:branchId/timetables/:id/slots', asyncHandler(async (req:
     res.status(400).json({ success: false, message: 'startTime and endTime are required' });
     return;
   }
+  // 12-hour cycle: 12→1 is forward, but string "12" > "01" fails
+  const sh = parseInt(startTime.split(':')[0], 10);
+  const eh = parseInt(endTime.split(':')[0], 10);
+  const isAfter = (sh === 12 && eh < 12) ? true : startTime < endTime;
+  if (!isAfter) {
+    res.status(400).json({ success: false, message: 'End time must be after start time' });
+    return;
+  }
   const slot = await timetableSlotService.create(req.params.id, { dayOfWeek: dayOfWeek ?? null, startTime, endTime });
   res.status(201).json({ success: true, data: slot });
 }));
@@ -107,6 +115,12 @@ router.put('/branches/:branchId/sections/:sectionId/timetable/:slotId', asyncHan
   const { subjectId, teacherId, note } = req.body;
   const entry = await timetableEntryService.upsert(req.params.slotId, req.params.sectionId, { subjectId, teacherId, note });
   res.json({ success: true, data: entry });
+}));
+
+// GET /admin/branches/:branchId/teachers/:teacherId/timetables — Teacher's timetable entries grouped
+router.get('/branches/:branchId/teachers/:teacherId/timetables', asyncHandler(async (req: Request, res: Response) => {
+  const result = await timetableEntryService.findByTeacherGrouped(req.params.branchId, req.params.teacherId);
+  res.json({ success: true, data: result });
 }));
 
 export default router;

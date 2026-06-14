@@ -113,6 +113,7 @@ describe('Phase 02 — Branch CRUD', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockBranch = createMockBranch();
+    mockBranch = createMockBranch();
   });
 
   describe('POST /admin/branches — Create branch (BA-002)', () => {
@@ -323,10 +324,12 @@ describe('Phase 02 — Branch CRUD', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('Phase 02 — AcademicCalendar CRUD', () => {
+  let mockBranch: MockBranch;
   let mockCalendar: MockAcademicCalendar;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockBranch = createMockBranch();
     mockCalendar = createMockAcademicCalendar();
   });
 
@@ -470,6 +473,7 @@ describe('Phase 02 — AcademicYear CRUD', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockBranch = createMockBranch();
     mockBranch = createMockBranch();
     mockCalendar = createMockAcademicCalendar({ isCurrent: true });
     mockAcademicYear = createMockAcademicYear({
@@ -812,6 +816,7 @@ describe('Phase 02 — AcademicYear Members (BA-021)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockBranch = createMockBranch();
+    mockBranch = createMockBranch();
     mockAcademicYear = createMockAcademicYear({ branchId: mockBranch.id });
     mockUser = createMockUser({ role: 'teacher' });
   });
@@ -889,6 +894,7 @@ describe('Phase 02 — Branch Members (BA-022)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockBranch = createMockBranch();
+    mockBranch = createMockBranch();
     mockUser = createMockUser({ role: 'teacher' });
   });
 
@@ -955,6 +961,7 @@ describe('Phase 02 — GET /me/academic-year (BA-023)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockBranch = createMockBranch();
     mockUser = createMockUser({ role: 'teacher' });
     mockBranch = createMockBranch();
   });
@@ -1031,10 +1038,12 @@ describe('Phase 02 — GET /me/academic-year (BA-023)', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('Admin — Users', () => {
+  let mockBranch: MockBranch;
   let mockUser: MockUser;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockBranch = createMockBranch();
     mockUser = createMockUser({ role: 'super_admin' });
   });
 
@@ -1064,10 +1073,12 @@ describe('Admin — Users', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('Admin — Groups', () => {
+  let mockBranch: MockBranch;
   let mockGroup: MockGroup;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockBranch = createMockBranch();
     mockGroup = createMockGroup();
   });
 
@@ -1160,10 +1171,12 @@ describe('Admin — Groups', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('Admin — Students', () => {
+  let mockBranch: MockBranch;
   let mockStudent: MockStudent;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockBranch = createMockBranch();
     mockStudent = createMockStudent();
   });
 
@@ -1258,6 +1271,7 @@ describe('Phase 04 — Branch Member Management', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockBranch = createMockBranch();
     mockBranch = createMockBranch();
     mockUser = createMockUser({ role: 'teacher' });
   });
@@ -2139,6 +2153,7 @@ describe('Admin — Subjects (/admin/branches/:id/academic-years/:ayId/subjects)
   beforeEach(() => {
     jest.clearAllMocks();
     mockBranch = createMockBranch();
+    mockBranch = createMockBranch();
   });
 
   test('POST creates a subject', async () => {
@@ -2309,6 +2324,7 @@ describe('Admin — Sections (/branches/:id/academic-years/:ayId/sections)', () 
   beforeEach(() => {
     jest.clearAllMocks();
     mockBranch = createMockBranch();
+    mockBranch = createMockBranch();
   });
 
   test('POST creates a section', async () => {
@@ -2444,6 +2460,7 @@ describe('Admin — Timetables', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockBranch = createMockBranch();
   });
   let mockBranch: MockBranch;
 
@@ -2519,6 +2536,50 @@ describe('Admin — Timetables', () => {
     expect(res.status).toBe(201);
   });
 
+  test('POST /timetables/:id/slots returns 400 when startTime missing', async () => {
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/timetables/tt-1/slots`)
+      .set(adminToken)
+      .send({ endTime: '08:40' });
+    expect(res.status).toBe(400);
+  });
+
+  test('POST /timetables/:id/slots returns 400 when endTime missing', async () => {
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/timetables/tt-1/slots`)
+      .set(adminToken)
+      .send({ startTime: '08:00' });
+    expect(res.status).toBe(400);
+  });
+
+  test('POST /timetables/:id/slots returns 400 when endTime <= startTime', async () => {
+    // 11:30 → 10:30 should fail (string comparison: "11:30" > "10:30")
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/timetables/tt-1/slots`)
+      .set(adminToken)
+      .send({ startTime: '11:30', endTime: '10:30' });
+    expect(res.status).toBe(400);
+  });
+
+  test('POST /timetables/:id/slots accepts 12-hour cycle (12:40→01:30)', async () => {
+    prismaMock.timetableSlot.findFirst.mockResolvedValue(null);
+    prismaMock.timetableSlot.create.mockResolvedValue({ id: 's-1', lectureNumber: 1, startTime: '12:40', endTime: '01:30' } as any);
+    // 12:40 → 01:30 is forward in 12-hour cycle
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/timetables/tt-1/slots`)
+      .set(adminToken)
+      .send({ startTime: '12:40', endTime: '01:30' });
+    expect(res.status).toBe(201);
+  });
+
+  test('POST /timetables/:id/slots returns 400 when endTime equals startTime', async () => {
+    const res = await request(app)
+      .post(`/admin/branches/${mockBranch.id}/timetables/tt-1/slots`)
+      .set(adminToken)
+      .send({ startTime: '08:00', endTime: '08:00' });
+    expect(res.status).toBe(400);
+  });
+
   test('GET /timetables/:id/slots lists slots', async () => {
     prismaMock.timetableSlot.findMany.mockResolvedValue([]);
     const res = await request(app)
@@ -2543,5 +2604,205 @@ describe('Admin — Timetables', () => {
       .set(adminToken)
       .send({ days: [{ dayOfWeek: 1, isActive: true }, { dayOfWeek: 2, isActive: false }] });
     expect(res.status).toBe(200);
+  });
+
+  test('GET /timetables/:id/days returns day configs', async () => {
+    prismaMock.timetableDayConfig.findMany.mockResolvedValue([
+      { id: 'dc-1', timetableId: 'tt-1', dayOfWeek: 1, isActive: true },
+      { id: 'dc-2', timetableId: 'tt-1', dayOfWeek: 2, isActive: false },
+    ] as any);
+    const res = await request(app)
+      .get(`/admin/branches/${mockBranch.id}/timetables/tt-1/days`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+  });
+
+  test('DELETE /timetables/:id returns 409 when entries exist', async () => {
+    prismaMock.timetableSlot.findMany.mockResolvedValue([{ id: 's-1' }] as any);
+    prismaMock.timetableEntry.count.mockResolvedValue(3);
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/timetables/tt-1`)
+      .set(adminToken);
+    expect(res.status).toBe(409);
+  });
+
+  test('DELETE /timetables/:id returns 200 when slots exist but no entries', async () => {
+    prismaMock.timetableSlot.findMany.mockResolvedValue([{ id: 's-1' }, { id: 's-2' }] as any);
+    prismaMock.timetableEntry.count.mockResolvedValue(0);
+    prismaMock.timetableDayConfig.deleteMany.mockResolvedValue({ count: 6 } as any);
+    prismaMock.timetableSlot.deleteMany.mockResolvedValue({ count: 2 } as any);
+    prismaMock.timetable.delete.mockResolvedValue({} as any);
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/timetables/tt-1`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+  });
+
+  test('PUT /timetables/:id/rename returns 404 when not found', async () => {
+    prismaMock.timetable.findUnique.mockResolvedValue(null);
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/timetables/tt-nonexistent/rename`)
+      .set(adminToken)
+      .send({ newName: 'New Name' });
+    expect(res.status).toBe(404);
+  });
+
+  test('DELETE /timetables/:id/slots/:slotId returns 404 when slot not found', async () => {
+    prismaMock.timetableSlot.findUnique.mockResolvedValue(null);
+    const res = await request(app)
+      .delete(`/admin/branches/${mockBranch.id}/timetables/tt-1/slots/bad-slot`)
+      .set(adminToken);
+    expect(res.status).toBe(404);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// TIMETABLE ENTRIES (Phase 27b)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Admin — Timetable Entries', () => {
+  let mockBranch: MockBranch;
+  const mockSection = { id: 'sec-1', name: 'Class 1', section: 'A', isActive: true };
+  const mockSlot = { id: 'slot-1', timetableId: 'tt-1', dayOfWeek: null, lectureNumber: 1, startTime: '08:00', endTime: '08:40' };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockBranch = createMockBranch();
+  });
+
+  test('GET section timetable returns entries', async () => {
+    prismaMock.timetableEntry.findMany.mockResolvedValue([{ id: 'e-1', slotId: 'slot-1', groupId: 'sec-1', note: null, subject: { id: 'subj-1', name: 'Math', code: 'MATH' }, teacher: { id: 't-1', name: 'Ms. Sarah' } }] as any);
+    const res = await request(app).get(`/admin/branches/${mockBranch.id}/sections/sec-1/timetable`).set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].subject.name).toBe('Math');
+  });
+
+  test('PUT upsert entry sets subject and teacher', async () => {
+    prismaMock.timetableEntry.upsert.mockResolvedValue({ id: 'e-1', slotId: 'slot-1', groupId: 'sec-1', note: null, subject: { id: 'subj-1', name: 'Math' }, teacher: { id: 't-1', name: 'Ms. Sarah' } } as any);
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/sections/sec-1/timetable/slot-1`)
+      .set(adminToken)
+      .send({ subjectId: 'subj-1', teacherId: 't-1' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.teacher.name).toBe('Ms. Sarah');
+  });
+
+  test('PUT upsert entry with break note', async () => {
+    prismaMock.timetableEntry.upsert.mockResolvedValue({ id: 'e-2', slotId: 'slot-2', groupId: 'sec-1', note: 'break', subject: null, teacher: null } as any);
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/sections/sec-1/timetable/slot-2`)
+      .set(adminToken)
+      .send({ note: 'break', subjectId: null, teacherId: null });
+    expect(res.status).toBe(200);
+  });
+
+  test('PUT upsert entry with custom subject text (datesheet)', async () => {
+    prismaMock.timetableEntry.upsert.mockResolvedValue({ id: 'e-3', slotId: 'slot-3', groupId: 'sec-1', note: 'Midterm Math', subject: null, teacher: null } as any);
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/sections/sec-1/timetable/slot-3`)
+      .set(adminToken)
+      .send({ note: 'Midterm Math' });
+    expect(res.status).toBe(200);
+  });
+
+  test('PUT upsert entry clears existing subject (sets to null)', async () => {
+    prismaMock.timetableEntry.upsert.mockResolvedValue({ id: 'e-4', slotId: 'slot-1', groupId: 'sec-1', note: null, subject: null, teacher: { id: 't-1', name: 'Ms. Sarah' } } as any);
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/sections/sec-1/timetable/slot-1`)
+      .set(adminToken)
+      .send({ subjectId: null, teacherId: 't-1' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.subject).toBeNull();
+  });
+
+  test('PUT upsert entry updates only teacher (subject unchanged)', async () => {
+    prismaMock.timetableEntry.upsert.mockResolvedValue({ id: 'e-5', slotId: 'slot-1', groupId: 'sec-1', note: null, subject: { id: 'subj-1', name: 'Math' }, teacher: { id: 't-2', name: 'Mr. Khan' } } as any);
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/sections/sec-1/timetable/slot-1`)
+      .set(adminToken)
+      .send({ teacherId: 't-2' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.teacher.name).toBe('Mr. Khan');
+    expect(res.body.data.subject.name).toBe('Math');
+  });
+
+  test('PUT upsert entry updates only subject (teacher unchanged)', async () => {
+    prismaMock.timetableEntry.upsert.mockResolvedValue({ id: 'e-6', slotId: 'slot-1', groupId: 'sec-1', note: null, subject: { id: 'subj-2', name: 'Science' }, teacher: { id: 't-1', name: 'Ms. Sarah' } } as any);
+    const res = await request(app)
+      .put(`/admin/branches/${mockBranch.id}/sections/sec-1/timetable/slot-1`)
+      .set(adminToken)
+      .send({ subjectId: 'subj-2' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.subject.name).toBe('Science');
+    expect(res.body.data.teacher.name).toBe('Ms. Sarah');
+  });
+
+  test('GET section timetable returns empty array when no entries', async () => {
+    prismaMock.timetableEntry.findMany.mockResolvedValue([]);
+    const res = await request(app)
+      .get(`/admin/branches/${mockBranch.id}/sections/sec-1/timetable`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// TEACHER TIMETABLES (Phase 27c)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Admin — Teacher Timetables', () => {
+  let mockBranch: MockBranch;
+  const mockTeacherProfile = { id: 'tp-1', userId: 'teacher-1' };
+  const mockTimetable = { id: 'tt-1', name: 'Regular', type: 'timetable' };
+  const mockEntries = [
+    {
+      id: 'e-1', slotId: 'slot-1', groupId: 'sec-1', teacherId: 'teacher-1', subjectId: 'subj-1', note: null,
+      slot: { id: 'slot-1', lectureNumber: 1, startTime: '08:00', endTime: '08:40', dayOfWeek: null, timetableId: 'tt-1' },
+      subject: { id: 'subj-1', name: 'Math', code: 'MATH' },
+      group: { id: 'sec-1', name: 'Class 1', section: 'A' },
+    },
+  ];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockBranch = createMockBranch();
+  });
+
+  test('GET teacher timetables returns grouped entries', async () => {
+    prismaMock.teacherProfile.findUnique.mockResolvedValue(mockTeacherProfile as any);
+    prismaMock.timetableEntry.findMany.mockResolvedValue(mockEntries as any);
+    prismaMock.timetable.findMany.mockResolvedValue([mockTimetable] as any);
+
+    const res = await request(app)
+      .get(`/admin/branches/${mockBranch.id}/teachers/tp-1/timetables`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].name).toBe('Regular');
+    expect(res.body.data[0].entries).toHaveLength(1);
+    expect(res.body.data[0].entries[0].groupName).toBe('Class 1');
+    expect(res.body.data[0].entries[0].lectureNumber).toBe(1);
+  });
+
+  test('GET teacher timetables returns empty array when no entries', async () => {
+    prismaMock.teacherProfile.findUnique.mockResolvedValue(mockTeacherProfile as any);
+    prismaMock.timetableEntry.findMany.mockResolvedValue([]);
+
+    const res = await request(app)
+      .get(`/admin/branches/${mockBranch.id}/teachers/tp-1/timetables`)
+      .set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+
+  test('GET teacher timetables returns 404 when teacher not found', async () => {
+    prismaMock.teacherProfile.findUnique.mockResolvedValue(null);
+
+    const res = await request(app)
+      .get(`/admin/branches/${mockBranch.id}/teachers/nonexistent/timetables`)
+      .set(adminToken);
+    expect(res.status).toBe(404);
   });
 });
