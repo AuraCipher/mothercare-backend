@@ -126,6 +126,7 @@ model User {
   teacherAssignments  TeacherAssignment[]
   academicYearSnapshots AcademicYearSnapshot[] @relation("SnapshotTriggeredBy")
   timetableEntries        TimetableEntry[]     @relation("TimetableTeacher")
+  uploadedFiles       FileRecord[]
 
   @@index([username])
   @@index([email])
