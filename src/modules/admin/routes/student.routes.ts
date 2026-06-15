@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { prisma } from '../../../lib/prisma';
 import { studentService } from '../services/student.service';
 
 const router = Router();
@@ -7,10 +8,10 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
 
 // GET /students — List with search, filter, pagination
 router.get('/students', asyncHandler(async (req: Request, res: Response) => {
-  const { search, groupId, academicYearId, page, limit } = req.query;
+  const { search, groupId, academicYearId, rollNumber, page, limit } = req.query;
   const result = await studentService.findAll({
     search: search as string, groupId: groupId as string,
-    academicYearId: academicYearId as string,
+    academicYearId: academicYearId as string, rollNumber: rollNumber as string,
     page: page ? parseInt(page as string, 10) : 1,
     limit: limit ? parseInt(limit as string, 10) : 20,
   });
@@ -64,6 +65,19 @@ router.post('/students/:id/parents', asyncHandler(async (req: Request, res: Resp
   const { parentUserId, relation, isPrimary } = req.body;
   const link = await studentService.linkParent(req.params.id, parentUserId, relation, isPrimary);
   res.status(201).json({ success: true, data: link });
+}));
+
+// PUT /students/:id/parent — Update linked parent's profile
+router.put('/students/:id/parent', asyncHandler(async (req: Request, res: Response) => {
+  const student = await prisma.student.findUnique({ where: { id: req.params.id }, select: { id: true } });
+  if (!student) { res.status(404).json({ success: false, message: 'Student not found' }); return; }
+  const link = await prisma.studentParent.findFirst({ where: { studentId: req.params.id }, select: { parentId: true } });
+  if (!link) { res.status(404).json({ success: false, message: 'No parent linked' }); return; }
+  const updated = await prisma.parentProfile.update({
+    where: { id: link.parentId },
+    data: req.body,
+  });
+  res.json({ success: true, data: updated });
 }));
 
 // DELETE /students/:id/parents/:parentUserId — Unlink parent

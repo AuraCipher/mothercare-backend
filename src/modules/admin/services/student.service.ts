@@ -55,14 +55,16 @@ class StudentService {
     search?: string;
     groupId?: string;
     academicYearId?: string;
+    rollNumber?: string;
     page?: number;
     limit?: number;
   }) {
-    const { search, groupId, academicYearId, page = 1, limit = 20 } = params;
+    const { search, groupId, academicYearId, rollNumber, page = 1, limit = 20 } = params;
     const skip = (page - 1) * limit;
     const where: any = {};
     if (groupId) where.groupId = groupId;
     if (academicYearId) where.academicYearId = academicYearId;
+    if (rollNumber) where.rollNumber = { contains: rollNumber, mode: 'insensitive' };
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
