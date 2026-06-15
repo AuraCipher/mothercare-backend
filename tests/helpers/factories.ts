@@ -25,6 +25,7 @@ export interface MockUser {
   dateOfBirth: Date | null;
   address: string | null;
   profilePhoto: string | null;
+  profilePhotoId: string | null;
   status: 'active' | 'inactive' | 'suspended';
   isEmailVerified: boolean;
   isPhoneVerified: boolean;
@@ -210,6 +211,7 @@ export function createMockUser(overrides: Partial<MockUser> = {}): MockUser {
     dateOfBirth: null,
     address: null,
     profilePhoto: null,
+    profilePhotoId: null,
     status: 'active',
     isEmailVerified: false,
     isPhoneVerified: false,

@@ -1,4 +1,5 @@
 import { prisma } from '../../../lib/prisma';
+import { storage } from '../../upload/storage.service';
 
 // ═══════════════════════════════════════════════════════════════════
 // TYPES
@@ -27,6 +28,7 @@ export interface CreateTeacherProfileInput {
   severeDisease?: string;
   experience?: string;
   bio?: string;
+  profilePhotoId?: string;
 }
 
 export interface UpdateTeacherProfileInput {
@@ -46,6 +48,7 @@ export interface UpdateTeacherProfileInput {
   severeDisease?: string;
   experience?: string;
   bio?: string;
+  profilePhotoId?: string;
 }
 
 export interface CreateAssignmentInput {
@@ -138,7 +141,7 @@ class TeacherProfileService {
         bio: data.bio,
       },
       include: {
-        user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true } },
+        user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true, profilePhotoId: true } },
       },
     });
 
@@ -161,6 +164,27 @@ class TeacherProfileService {
       } catch (err: any) {
         console.warn('[Teacher] Failed to create BranchMember:', err.message);
       }
+    }
+
+    // Set profile photo if provided (and delete old one if exists)
+    if (data.profilePhotoId) {
+      // Check if user already had a profile photo and delete it
+      const existingUser = await prisma.user.findUnique({ where: { id: userId }, select: { profilePhotoId: true } });
+      if (existingUser?.profilePhotoId && existingUser.profilePhotoId !== data.profilePhotoId) {
+        try {
+          const oldRecord = await prisma.fileRecord.findUnique({ where: { id: existingUser.profilePhotoId } });
+          if (oldRecord) {
+            await storage.delete(oldRecord.storagePath);
+            await prisma.fileRecord.delete({ where: { id: oldRecord.id } });
+          }
+        } catch (err) {
+          console.warn('[Teacher] Failed to delete old profile photo:', err);
+        }
+      }
+      await prisma.user.update({
+        where: { id: userId },
+        data: { profilePhotoId: data.profilePhotoId },
+      });
     }
 
     return profile;
@@ -195,7 +219,7 @@ class TeacherProfileService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true } },
+          user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true, profilePhotoId: true } },
         },
       }),
       prisma.teacherProfile.count({ where }),
@@ -220,7 +244,7 @@ class TeacherProfileService {
     const profile = await prisma.teacherProfile.findUnique({
       where: { id },
       include: {
-        user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true } },
+        user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true, profilePhotoId: true } },
       },
     });
 
@@ -250,7 +274,7 @@ class TeacherProfileService {
       if (conflict) throw { status: 409, message: `Employee ID "${data.employeeId}" is already in use` };
     }
 
-    return prisma.teacherProfile.update({
+    const profile = await prisma.teacherProfile.update({
       where: { id },
       data: {
         employeeId: data.employeeId,
@@ -271,9 +295,33 @@ class TeacherProfileService {
         bio: data.bio,
       },
       include: {
-        user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true } },
+        user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true, profilePhotoId: true } },
       },
     });
+
+    // Update profile photo if provided
+    if (data.profilePhotoId !== undefined) {
+      // Get old profile photo (before update) to delete the file
+      const oldUser = await prisma.user.findUnique({ where: { id: existing.userId }, select: { profilePhotoId: true } });
+      const oldPhotoId = oldUser?.profilePhotoId;
+      if (oldPhotoId && oldPhotoId !== data.profilePhotoId) {
+        try {
+          const oldRecord = await prisma.fileRecord.findUnique({ where: { id: oldPhotoId } });
+          if (oldRecord) {
+            await storage.delete(oldRecord.storagePath);
+            await prisma.fileRecord.delete({ where: { id: oldRecord.id } });
+          }
+        } catch (err) {
+          console.warn('[Teacher] Failed to delete old profile photo:', err);
+        }
+      }
+      await prisma.user.update({
+        where: { id: existing.userId },
+        data: { profilePhotoId: data.profilePhotoId || null },
+      });
+    }
+
+    return profile;
   }
 
   // Set password for teacher (admin verifies own password first)

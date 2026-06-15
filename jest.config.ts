@@ -37,6 +37,14 @@ const config: Config = {
     ['jest-junit', { outputDirectory: 'tests/results' }],
   ],
 
+  // Mock native modules that can't compile in test environment
+  moduleNameMapper: {
+    '^sharp$': '<rootDir>/tests/__mocks__/sharp.ts',
+    '^file-type$': '<rootDir>/tests/__mocks__/file-type.ts',
+    '^multer$': '<rootDir>/tests/__mocks__/multer.ts',
+    '^uuid$': '<rootDir>/tests/__mocks__/uuid.ts',
+  },
+
   // Clear mocks between tests automatically
   clearMocks: true,
 

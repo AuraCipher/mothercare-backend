@@ -10,6 +10,7 @@ import setupRoutes from './modules/setup/setup.routes';
 import adminRoutes, { meRouter } from './modules/admin/routes/admin.routes';
 import invitationRoutes from './modules/admin/routes/invitation.routes';
 import branchAdminRoutes from './modules/admin/routes/branch-admin.routes';
+import uploadRoutes from './modules/upload/upload.routes';
 import errorHandler from './middleware/error/errorHandler';
 import requestLogger from './middleware/logging/requestLogger';
 import env from './config/env';
@@ -99,6 +100,13 @@ app.use('/admin', adminRoutes);
 app.use('/admin', invitationRoutes);
 app.use('/me', meRouter);
 app.use('/branches', branchAdminRoutes);
+
+// ─── Upload routes — GET (serving) is public for <img> tags, POST needs auth ──
+app.use('/api', uploadRoutes);
+
+// ─── Serve uploaded files statically ─────────────────────────
+const uploadsDir = path.resolve(__dirname, '..', 'uploads');
+app.use('/uploads', express.static(uploadsDir, { maxAge: '1y', immutable: true }));
 
 // ─── 404 Handler ─────────────────────────────────────────────
 app.use('*', (_req, res) => {
