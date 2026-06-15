@@ -2995,3 +2995,66 @@ describe('Admin — Teacher Profile Photo', () => {
     );
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// ADDITIONAL EDGE CASES
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Additional — Branch Empty List', () => {
+  let mockBranch: MockBranch;
+  beforeEach(() => { jest.clearAllMocks(); mockBranch = createMockBranch(); });
+
+  test('GET /admin/branches returns empty array', async () => {
+    prismaMock.branch.findMany.mockResolvedValue([]);
+    const res = await request(app).get('/admin/branches').set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+});
+
+describe('Additional — Section Edge Cases', () => {
+  let mockBranch: MockBranch;
+  beforeEach(() => { jest.clearAllMocks(); mockBranch = createMockBranch(); });
+
+  test('GET sections returns empty', async () => {
+    prismaMock.group.findMany.mockResolvedValue([]);
+    const res = await request(app).get(`/admin/branches/${mockBranch.id}/academic-years/ay-1/sections`).set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+
+  test('DELETE section returns 404 for unknown', async () => {
+    prismaMock.group.findUnique.mockResolvedValue(null);
+    const res = await request(app).delete(`/admin/branches/${mockBranch.id}/sections/unknown`).set(adminToken);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('Additional — Timetable Days Invalid', () => {
+  let mockBranch: MockBranch;
+  beforeEach(() => { jest.clearAllMocks(); mockBranch = createMockBranch(); });
+
+  test('PUT days with non-array returns 400', async () => {
+    const res = await request(app).put(`/admin/branches/${mockBranch.id}/timetables/tt-1/days`).set(adminToken).send({ days: 'invalid' });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('Additional — Assignment Edge', () => {
+  beforeEach(() => { jest.clearAllMocks(); });
+
+  test('POST assignment with missing fields returns 400', async () => {
+    const res = await request(app).post('/admin/assignments').set(adminToken).send({});
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('Additional — Upload 404', () => {
+  beforeEach(() => { jest.clearAllMocks(); });
+
+  test('GET /api/uploads/:id returns 404 for unknown', async () => {
+    prismaMock.fileRecord.findUnique.mockResolvedValue(null);
+    const res = await request(app).get('/api/uploads/unknown').set(adminToken);
+    expect(res.status).toBe(404);
+  });
+});
