@@ -11,6 +11,7 @@ import teacherRoutes from './teacher.routes';
 import sectionRoutes from './section.routes';
 import subjectRoutes from './subject.routes';
 import timetableRoutes from './timetable.routes';
+import studentRoutes from './student.routes';
 
 const router = Router();
 const meRouter = Router();
@@ -39,6 +40,7 @@ router.use(teacherRoutes); // Contains /teachers, /teachers/:id, /assignments, /
 router.use(sectionRoutes); // Contains /branches/:branchId/academic-years/:ayId/sections, /branches/:branchId/sections/:id
 router.use(subjectRoutes); // Contains /branches/:branchId/academic-years/:ayId/subjects, /branches/:branchId/subjects/:id
 router.use(timetableRoutes); // Contains /branches/:branchId/academic-years/:ayId/timetable/slots, /branches/:branchId/sections/:sectionId/timetable
+router.use(studentRoutes); // Contains /students, /students/:id, /students/:id/emergency-contact, etc.
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
@@ -212,90 +214,6 @@ router.delete('/groups/:id', asyncHandler(async (req: Request, res: Response) =>
     data: { isActive: false },
   });
   res.json({ success: true, message: 'Group deactivated' });
-}));
-
-// ═══════════════════════════════════════════════════════════════════
-// STUDENTS (Create, Read, Delete)
-// ═══════════════════════════════════════════════════════════════════
-
-router.get('/students', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../../lib/prisma'));
-  const { groupId, isActive, academicYearId } = req.query;
-  const where: any = {};
-  if (groupId) where.groupId = groupId;
-  if (academicYearId) where.academicYearId = academicYearId;
-  if (isActive !== undefined) where.isActive = isActive === 'true';
-
-  const students = await prisma.student.findMany({
-    where,
-    orderBy: { createdAt: 'desc' },
-    include: {
-      group: { select: { name: true, section: true } },
-    },
-  });
-
-  res.json({ success: true, data: students });
-}));
-
-router.get('/students/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../../lib/prisma'));
-  const student = await prisma.student.findUnique({
-    where: { id: req.params.id },
-    include: {
-      group: true,
-      parents: { include: { parent: { include: { user: true } } } },
-    },
-  });
-  if (!student) {
-    res.status(404).json({ success: false, message: 'Student not found' });
-    return;
-  }
-  res.json({ success: true, data: student });
-}));
-
-router.post('/students', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../../lib/prisma'));
-  const { name, gender, dateOfBirth, groupId, academicYearId } = req.body;
-
-  if (!name) {
-    res.status(400).json({ success: false, message: 'Student name is required' });
-    return;
-  }
-
-  // Auto-assign to ACTIVE academic year if not provided
-  let targetAyId = academicYearId;
-  if (!targetAyId) {
-    const activeAy = await prisma.academicYear.findFirst({
-      where: { status: 'ACTIVE' },
-      select: { id: true },
-    });
-    if (!activeAy) {
-      res.status(400).json({ success: false, message: 'No active academic year found. Create one first.' });
-      return;
-    }
-    targetAyId = activeAy.id;
-  }
-
-  const student = await prisma.student.create({
-    data: {
-      name,
-      gender,
-      dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
-      groupId,
-      academicYearId: targetAyId,
-    },
-  });
-
-  res.status(201).json({ success: true, data: student });
-}));
-
-router.delete('/students/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { prisma } = (await import('../../../lib/prisma'));
-  const student = await prisma.student.update({
-    where: { id: req.params.id },
-    data: { isActive: false },
-  });
-  res.json({ success: true, message: 'Student deactivated', data: { id: student.id } });
 }));
 
 // ═══════════════════════════════════════════════════════════════════

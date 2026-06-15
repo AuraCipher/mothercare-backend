@@ -1218,6 +1218,7 @@ describe('Admin — Students', () => {
   });
 
   test('DELETE /admin/students/:id soft-deletes a student', async () => {
+    prismaMock.student.findUnique.mockResolvedValue(mockStudent as any);
     prismaMock.student.update.mockResolvedValue({ ...mockStudent, isActive: false } as any);
     const res = await request(app).delete(`/admin/students/${mockStudent.id}`).set(adminToken);
     expect(res.status).toBe(200);
@@ -1639,6 +1640,36 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
       expect(res.body.data.severeDisease).toBe('Diabetes');
       expect(res.body.data.experience).toBe('8 years');
       expect(res.body.data.bio).toBe('Senior science teacher');
+    });
+
+    test('creates teacher with complete payload (all fields combined)', async () => {
+      prismaMock.teacherProfile.findUnique.mockResolvedValue(null);
+      prismaMock.user.findUnique.mockResolvedValue(mockUser as any);
+      const fullProfile = {
+        ...mockProfile, fatherName: 'Khalid', cardId: 'CNIC-9999',
+        severeDisease: 'None', experience: '12 years', bio: 'Senior teacher with PhD',
+        user: { ...mockUser, profilePhotoId: 'photo-001' },
+      };
+      prismaMock.teacherProfile.create.mockResolvedValue(fullProfile as any);
+      prismaMock.user.update.mockResolvedValue(mockUser as any);
+
+      const res = await request(app)
+        .post('/admin/teachers')
+        .send({
+          userId: 'teacher-u-1', employeeId: 'TCH-999', qualification: 'PhD',
+          specialization: 'Physics', joiningDate: '2024-01-15', phone: '1234567890',
+          address: '456 School Rd', gender: 'male', bloodGroup: 'B+',
+          fatherName: 'Khalid', cardId: 'CNIC-9999',
+          severeDisease: 'None', experience: '12 years', bio: 'Senior teacher with PhD',
+          profilePhotoId: 'photo-001',
+        })
+        .set(adminToken);
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.fatherName).toBe('Khalid');
+      expect(res.body.data.cardId).toBe('CNIC-9999');
+      expect(res.body.data.experience).toBe('12 years');
+      expect(res.body.data.bio).toBe('Senior teacher with PhD');
     });
   });
 
@@ -2867,10 +2898,30 @@ describe('Admin — File Upload', () => {
     const res = await request(app).post('/api/upload');
     expect(res.status).toBe(401);
   });
-});
 
-// ═══════════════════════════════════════════════════════════════════
-// TEACHER PROFILE PHOTO (Phase 28b)
+  test('GET /api/uploads/:id/meta returns file metadata', async () => {
+    prismaMock.fileRecord.findUnique.mockResolvedValue({
+      id: 'file-999', originalName: 'test.jpg', storagePath: '2026/06/test.jpg',
+      mimeType: 'image/webp', size: 12345, width: 300, height: 300,
+      uploadedById: null, createdAt: new Date(),
+    } as any);
+
+    const res = await request(app)
+      .get('/api/uploads/file-999/meta')
+      .set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data.mimeType).toBe('image/webp');
+    expect(res.body.data.size).toBe(12345);
+  });
+
+  test('GET /api/uploads/:id/meta returns 404 for unknown file', async () => {
+    prismaMock.fileRecord.findUnique.mockResolvedValue(null);
+    const res = await request(app)
+      .get('/api/uploads/unknown/meta')
+      .set(adminToken);
+    expect(res.status).toBe(404);
+  });
+});
 // ═══════════════════════════════════════════════════════════════════
 
 describe('Admin — Teacher Profile Photo', () => {

@@ -154,6 +154,7 @@ model FileRecord {
 
   uploader      User?    @relation(fields: [uploadedById], references: [id])
   profileUser   User?    @relation("UserProfilePhoto")
+  profileStudent Student? @relation("StudentProfilePhoto")
 
   @@map("file_records")
 }
@@ -487,10 +488,16 @@ model ManagementProfile {
 model ParentProfile {
   id         String   @id @default(uuid())
   userId     String   @unique
-  occupation String?
-  relation   String? // "Father", "Mother", "Guardian"
-  cnicNumber String?  @unique
-  createdAt  DateTime @default(now())
+  occupation    String?
+  employerName  String?
+  maritalStatus String?
+  monthlyIncome String?
+  relation      String? // "Father", "Mother", "Guardian"
+  cnicNumber    String?  @unique
+  phone         String?
+  whatsapp      String?
+  email         String?
+  createdAt     DateTime @default(now())
 
   user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   children StudentParent[]
@@ -518,7 +525,18 @@ model Student {
   address         String?
   phone           String?
   bloodGroup      String?
+  bformCnic       String?
+  motherTongue    String?
+  studentEmail    String?
+  studentWhatsapp String?
+  city            String?
+  postalCode      String?
   previousSchool  String?
+  previousClass   String?
+  tcNumber        String?
+  referredBy      String?
+  profilePhotoId  String?   @unique
+  profileFile     FileRecord?  @relation("StudentProfilePhoto", fields: [profilePhotoId], references: [id])
   status          StudentStatus @default(ACTIVE)
   isActive        Boolean       @default(true)
   admissionDate   DateTime      @default(now())
@@ -526,8 +544,10 @@ model Student {
 
   academicYear AcademicYear    @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   group        Group?          @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  parents      StudentParent[]
-  enrollments  Enrollment[]
+  parents          StudentParent[]
+  enrollments      Enrollment[]
+  emergencyContacts EmergencyContact[]
+  healthRecord     HealthRecord?
 
   @@index([groupId])
   @@index([academicYearId])
@@ -548,6 +568,48 @@ model StudentParent {
 
   @@unique([studentId, parentId])
   @@map("student_parents")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    EMERGENCY CONTACT                             ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model EmergencyContact {
+  id          String   @id @default(uuid())
+  studentId   String
+  name        String
+  relationship String
+  phone       String
+  whatsapp    String?
+  priority    Int      @default(1)
+  createdAt   DateTime @default(now())
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("emergency_contacts")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                      HEALTH RECORD                              ║
+// ║  One record per student.                                        ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model HealthRecord {
+  id               String   @id @default(uuid())
+  studentId        String   @unique
+  bloodGroup       String?
+  hasChronicDisease Boolean @default(false)
+  diseaseDetails   String?
+  allergies        String?
+  disability       String?
+  medicalNotes     String?
+  doctorName       String?
+  doctorPhone      String?
+  updatedAt        DateTime @updatedAt
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("health_records")
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
