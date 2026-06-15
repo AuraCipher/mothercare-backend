@@ -2846,3 +2846,101 @@ describe('Admin — Teacher Timetables', () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// FILE UPLOAD (Phase 28)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Admin — File Upload', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('POST /api/upload returns 400 when no file provided', async () => {
+    const res = await request(app)
+      .post('/api/upload')
+      .set(adminToken);
+    expect(res.status).toBe(400);
+  });
+
+  test('POST /api/upload returns 401 without auth', async () => {
+    const res = await request(app).post('/api/upload');
+    expect(res.status).toBe(401);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// TEACHER PROFILE PHOTO (Phase 28b)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Admin — Teacher Profile Photo', () => {
+  const mockUser = { id: 'teacher-u-1', name: 'Ms. Sarah', email: 'sarah@school.com', phone: null, role: 'teacher', status: 'active', profilePhotoId: null };
+  const mockProfile = {
+    id: 'tp-1', userId: 'teacher-u-1', employeeId: 'TCH-001', qualification: 'M.Sc. Mathematics',
+    specialization: 'Mathematics', joiningDate: new Date('2024-01-15'), salary: null,
+    phone: '1234567890', emergencyContact: null, address: '123 School St', dateOfBirth: null,
+    gender: 'female', bloodGroup: null, fatherName: null, cardId: null,
+    severeDisease: null, experience: null, bio: null,
+    createdAt: new Date(), updatedAt: new Date(),
+    user: mockUser,
+  };
+  let mockBranch: MockBranch;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockBranch = createMockBranch();
+  });
+
+  test('POST /admin/teachers creates teacher with profilePhotoId', async () => {
+    prismaMock.teacherProfile.findUnique.mockResolvedValue(null);
+    prismaMock.user.findUnique.mockResolvedValue(mockUser as any);
+    const extendedProfile = { ...mockProfile, user: { ...mockUser, profilePhotoId: 'file-123' } };
+    prismaMock.teacherProfile.create.mockResolvedValue(extendedProfile as any);
+    prismaMock.user.update.mockResolvedValue(mockUser as any);
+
+    const res = await request(app)
+      .post('/admin/teachers')
+      .send({ userId: 'teacher-u-1', profilePhotoId: 'file-123' })
+      .set(adminToken);
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.user.profilePhotoId).toBe('file-123');
+  });
+
+  test('PUT /admin/teachers/:id updates profilePhotoId', async () => {
+    prismaMock.teacherProfile.findUnique.mockResolvedValue(mockProfile as any);
+    const updated = { ...mockProfile, user: { ...mockUser, profilePhotoId: 'file-456' } };
+    prismaMock.teacherProfile.update.mockResolvedValue(updated as any);
+    prismaMock.user.update.mockResolvedValue(mockUser as any);
+
+    const res = await request(app)
+      .put('/admin/teachers/tp-1')
+      .send({ profilePhotoId: 'file-456' })
+      .set(adminToken);
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ profilePhotoId: 'file-456' }),
+      }),
+    );
+  });
+
+  test('PUT /admin/teachers/:id clears profilePhotoId when set to null', async () => {
+    prismaMock.teacherProfile.findUnique.mockResolvedValue(mockProfile as any);
+    prismaMock.teacherProfile.update.mockResolvedValue(mockProfile as any);
+    prismaMock.user.update.mockResolvedValue(mockUser as any);
+
+    const res = await request(app)
+      .put('/admin/teachers/tp-1')
+      .send({ profilePhotoId: null })
+      .set(adminToken);
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ profilePhotoId: null }),
+      }),
+    );
+  });
+});

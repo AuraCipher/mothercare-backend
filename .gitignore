@@ -5,3 +5,6 @@ tests/results/
 .env
 *.log
 .DS_Store
+.next/
+# Uploaded files
+uploads/

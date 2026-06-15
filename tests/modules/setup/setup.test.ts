@@ -156,6 +156,7 @@ describe('POST /setup/init', () => {
       dateOfBirth: null,
       address: null,
       profilePhoto: null,
+      profilePhotoId: null,
       managementPerms: [],
       isEmailVerified: false,
       isPhoneVerified: false,
