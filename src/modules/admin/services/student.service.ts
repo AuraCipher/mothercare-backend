@@ -24,6 +24,9 @@ export interface CreateStudentInput {
   academicYearId?: string;
   admissionNumber?: string;
   profilePhotoId?: string;
+  // Guardian fields — if provided, creates a parent profile and links it
+  guardianName?: string;
+  guardianRelation?: string;
 }
 
 export interface UpdateStudentInput {
@@ -135,6 +138,38 @@ class StudentService {
       },
       include: { group: { select: { id: true, name: true, section: true } } },
     });
+
+    // If guardian info provided, create parent profile and link
+    if (data.guardianName && data.phone) {
+      try {
+        const parentUser = await prisma.user.create({
+          data: {
+            name: data.guardianName,
+            username: `parent_${student.admissionNumber?.toLowerCase() || student.id.slice(0, 8)}`,
+            passwordHash: '$2a$12$placeholder',
+            role: 'parent',
+            phone: data.phone,
+            email: data.studentEmail,
+            status: 'active',
+          },
+        });
+        const parentProfile = await prisma.parentProfile.create({
+          data: {
+            userId: parentUser.id,
+            relation: data.guardianRelation || 'Guardian',
+            phone: data.phone,
+            whatsapp: data.studentWhatsapp,
+            email: data.studentEmail,
+          },
+        });
+        await prisma.studentParent.create({
+          data: { studentId: student.id, parentId: parentProfile.id, relation: data.guardianRelation || 'Guardian', isPrimary: true },
+        });
+      } catch (err) {
+        console.warn('[Student] Failed to create parent profile:', err);
+      }
+    }
+
     return student;
   }
 
