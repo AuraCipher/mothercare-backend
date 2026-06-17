@@ -67,17 +67,41 @@ router.post('/students/:id/parents', asyncHandler(async (req: Request, res: Resp
   res.status(201).json({ success: true, data: link });
 }));
 
-// PUT /students/:id/parent — Update linked parent's profile
+// PUT /students/:id/parent — Create or update parent profile
 router.put('/students/:id/parent', asyncHandler(async (req: Request, res: Response) => {
   const student = await prisma.student.findUnique({ where: { id: req.params.id }, select: { id: true } });
   if (!student) { res.status(404).json({ success: false, message: 'Student not found' }); return; }
+
   const link = await prisma.studentParent.findFirst({ where: { studentId: req.params.id }, select: { parentId: true } });
-  if (!link) { res.status(404).json({ success: false, message: 'No parent linked' }); return; }
-  const updated = await prisma.parentProfile.update({
-    where: { id: link.parentId },
-    data: req.body,
-  });
-  res.json({ success: true, data: updated });
+  const { name, ...parentData } = req.body;
+
+  if (link) {
+    // Update existing parent profile
+    const updated = await prisma.parentProfile.update({
+      where: { id: link.parentId },
+      data: parentData,
+    });
+    res.json({ success: true, data: updated });
+  } else if (name) {
+    // Create new parent user + profile + link
+    const baseUsername = `parent_${student.id.slice(0, 8)}`;
+    const parentUser = await prisma.user.create({
+      data: { name, username: baseUsername, passwordHash: '$2a$12$placeholder', role: 'parent', status: 'active' },
+    }).catch(async () => {
+      return prisma.user.create({
+        data: { name, username: `${baseUsername}_${Math.random().toString(36).slice(2, 6)}`, passwordHash: '$2a$12$placeholder', role: 'parent', status: 'active' },
+      });
+    });
+    const profile = await prisma.parentProfile.create({
+      data: { userId: parentUser.id, ...parentData },
+    });
+    await prisma.studentParent.create({
+      data: { studentId: req.params.id, parentId: profile.id, relation: parentData.relation || 'Guardian', isPrimary: true },
+    });
+    res.status(201).json({ success: true, data: profile });
+  } else {
+    res.status(400).json({ success: false, message: 'Parent name is required to create a new parent' });
+  }
 }));
 
 // DELETE /students/:id/parents/:parentUserId — Unlink parent
