@@ -6,8 +6,14 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 
 const ALLOWED_MIMES = new Set([
-  'image/jpeg', 'image/png', 'image/webp',
-  'application/pdf',
+  // Images
+  'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/bmp',
+  // Documents
+  'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/plain', 'text/csv', 'text/html', 'text/markdown', 'application/json', 'application/xml',
+  'application/zip', 'application/x-rar-compressed',
 ]);
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
@@ -26,7 +32,21 @@ export class UploadService {
 
     // 2. Magic byte validation
     const type = await fileTypeFromBuffer(buffer);
-    const mime = type?.mime || 'application/octet-stream';
+    let mime = type?.mime;
+    // Fallback: if magic bytes fail, guess from extension
+    if (!mime) {
+      const ext = originalName.split('.').pop()?.toLowerCase();
+      const extMap: Record<string, string> = {
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
+        pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        txt: 'text/plain', csv: 'text/csv', html: 'text/html', htm: 'text/html', md: 'text/markdown',
+        json: 'application/json', xml: 'application/xml',
+        zip: 'application/zip', rar: 'application/x-rar-compressed',
+      };
+      mime = ext ? (extMap[ext] || 'application/octet-stream') : 'application/octet-stream';
+    }
     if (!ALLOWED_MIMES.has(mime)) {
       throw { status: 400, message: `File type "${mime}" is not allowed` };
     }
