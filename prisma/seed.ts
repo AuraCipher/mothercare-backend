@@ -45,6 +45,38 @@ const DEFAULT_GROUPS = [
   { name: 'Class 10',        displayOrder: 13 },
 ];
 
+const DEFAULT_SUBJECTS = [
+  { name: 'Mathematics', code: 'MATH' },
+  { name: 'English',     code: 'ENG' },
+  { name: 'Urdu',        code: 'URD' },
+  { name: 'Science',     code: 'SCI' },
+  { name: 'Physics',     code: 'PHY' },
+  { name: 'Chemistry',   code: 'CHEM' },
+  { name: 'Computer',    code: 'CS' },
+];
+
+const DEFAULT_TEACHERS = [
+  { name: 'Ms. Fatima Ali',   username: 'fatima_teacher',   empId: 'TCH-001', qual: 'M.Sc. Mathematics',   spec: 'Mathematics' },
+  { name: 'Mr. Usman Khan',   username: 'usman_teacher',   empId: 'TCH-002', qual: 'M.A. English',         spec: 'English Literature' },
+  { name: 'Ms. Ayesha Ahmed', username: 'ayesha_teacher',  empId: 'TCH-003', qual: 'M.Sc. Physics',        spec: 'Physics' },
+];
+
+const TIMETABLE_SLOTS = [
+  { lecture: 1, start: '08:00', end: '08:40' },
+  { lecture: 2, start: '08:40', end: '09:20' },
+  { lecture: 3, start: '09:30', end: '10:10' },
+  { lecture: 4, start: '10:10', end: '10:50' },
+  { lecture: 5, start: '11:00', end: '11:40' },
+];
+
+const DATESHEET_PAPERS = [
+  { day: 1, lecture: 1, start: '09:00', end: '12:00' },
+  { day: 1, lecture: 2, start: '14:00', end: '17:00' },
+  { day: 3, lecture: 3, start: '09:00', end: '12:00' },
+  { day: 3, lecture: 4, start: '14:00', end: '17:00' },
+  { day: 5, lecture: 5, start: '09:00', end: '12:00' },
+];
+
 // ─── Helper: Idempotent find-or-create ───────────────────────────────────
 
 async function ensureBranch(name: string, code: string) {
@@ -133,6 +165,64 @@ async function ensureGroups(academicYearId: string) {
 
   const total = await prisma.group.count({ where: { academicYearId } });
   console.log(`  → Total groups: ${total}`);
+}
+
+async function ensureSubjects(academicYearId: string) {
+  let created = 0;
+  for (const sub of DEFAULT_SUBJECTS) {
+    const existing = await prisma.subject.findFirst({ where: { academicYearId, name: sub.name } });
+    if (!existing) {
+      await prisma.subject.create({
+        data: { academicYearId, name: sub.name, code: sub.code },
+      });
+      created++;
+    }
+  }
+  console.log(`  ✓ ${created} subjects created (${DEFAULT_SUBJECTS.length - created} already exist)`);
+}
+
+async function ensureTeachers() {
+  for (const t of DEFAULT_TEACHERS) {
+    const existing = await prisma.teacherProfile.findUnique({ where: { employeeId: t.empId } });
+    if (existing) continue;
+    const user = await prisma.user.upsert({
+      where: { username: t.username },
+      update: {},
+      create: { name: t.name, username: t.username, passwordHash: '$2a$12$placeholder', role: 'teacher', status: 'active' },
+    });
+    await prisma.teacherProfile.create({
+      data: { userId: user.id, employeeId: t.empId, qualification: t.qual, specialization: t.spec, phone: '+92 300 0000000' },
+    });
+  }
+  console.log(`  ✓ ${DEFAULT_TEACHERS.length} teachers ensured`);
+}
+
+async function ensureTimetable(academicYearId: string, name: string, type: string, slots: any[], activeDays: number[]) {
+  let tt = await prisma.timetable.findUnique({ where: { academicYearId_name: { academicYearId, name } } });
+  if (!tt) {
+    tt = await prisma.timetable.create({ data: { academicYearId, name, type } });
+  }
+  // Day configs
+  for (const d of activeDays) {
+    await prisma.timetableDayConfig.upsert({
+      where: { timetableId_dayOfWeek: { timetableId: tt.id, dayOfWeek: d } },
+      create: { timetableId: tt.id, dayOfWeek: d, isActive: true },
+      update: {},
+    });
+  }
+  // Slots
+  for (const s of slots) {
+    const exists = await prisma.timetableSlot.findFirst({
+      where: { timetableId: tt.id, lectureNumber: s.lecture, dayOfWeek: (s as any).day || null },
+    });
+    if (!exists) {
+      await prisma.timetableSlot.create({
+        data: { timetableId: tt.id, lectureNumber: s.lecture, startTime: s.start, endTime: s.end, dayOfWeek: (s as any).day || null },
+      });
+    }
+  }
+  const slotCount = await prisma.timetableSlot.count({ where: { timetableId: tt.id } });
+  console.log(`  ✓ "${name}" (${type}): ${slotCount} slots, ${activeDays.length} active days`);
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────
@@ -260,6 +350,46 @@ async function main() {
     },
   });
   console.log(`  ✓ Branch admin assigned as branch_admin (Principal) at "${branch.name}"`);
+
+  // Step 7: Subjects
+  console.log('\n[7/11] Subjects');
+  await ensureSubjects(academicYear.id);
+
+  // Step 8: Teachers
+  console.log('\n[8/11] Teachers');
+  await ensureTeachers();
+
+  // Step 9: Timetable
+  console.log('\n[9/11] Timetable');
+  await ensureTimetable(academicYear.id, 'Regular Timetable', 'timetable', TIMETABLE_SLOTS, [1,2,3,4,5,6]);
+
+  // Step 10: Date Sheet
+  console.log('\n[10/11] Date Sheet');
+  await ensureTimetable(academicYear.id, 'Final Exams', 'datesheet', DATESHEET_PAPERS, [1,2,3]);
+
+  // Step 11: Section Subjects (link subjects to Class 1-10 groups)
+  console.log('\n[11/11] Section Subjects');
+  const groups = await prisma.group.findMany({ where: { academicYearId: academicYear.id, isActive: true } });
+  const subjects = await prisma.subject.findMany({ where: { academicYearId: academicYear.id } });
+  let links = 0;
+  for (const group of groups) {
+    const orderNum = group.displayOrder;
+    // Assign Math, English, Urdu to all classes; Science for Class 1-5; Physics/Chem for Class 6-10
+    const groupSubjects = subjects.filter(s => {
+      if (s.code === 'MATH' || s.code === 'ENG' || s.code === 'URD') return true;
+      if (orderNum <= 8 && s.code === 'SCI') return true;
+      if (orderNum >= 9 && (s.code === 'PHY' || s.code === 'CHEM')) return true;
+      return false;
+    });
+    for (const sub of groupSubjects) {
+      const exists = await prisma.groupSubject.findUnique({ where: { groupId_subjectId: { groupId: group.id, subjectId: sub.id } } });
+      if (!exists) {
+        await prisma.groupSubject.create({ data: { groupId: group.id, subjectId: sub.id } });
+        links++;
+      }
+    }
+  }
+  console.log(`  ✓ ${links} subject-group links created`);
 
   // Summary
   const groupCount = await prisma.group.count({ where: { academicYearId: academicYear.id } });

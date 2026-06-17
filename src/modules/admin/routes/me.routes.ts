@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { prisma } from '../../../lib/prisma';
 import { academicYearService } from '../services/academic-year.service';
 import { branchMemberService } from '../services/branch-member.service';
 
@@ -17,10 +18,18 @@ router.get('/academic-year', asyncHandler(async (req: Request, res: Response) =>
   res.json({ success: true, data: activeAy });
 }));
 
-// GET /me/branches — User's branch memberships
+// GET /me/branches — User's branch memberships (all branches for super_admin)
 router.get('/branches', asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
-  const memberships = await branchMemberService.listUserBranches(userId);
+  const user = (req as any).user;
+  if (user?.role === 'super_admin') {
+    const allBranches = await prisma.branch.findMany({ where: { isActive: true } });
+    res.json({
+      success: true,
+      data: allBranches.map(b => ({ branch: b, role: 'super_admin' })),
+    });
+    return;
+  }
+  const memberships = await branchMemberService.listUserBranches(user.id);
   res.json({ success: true, data: memberships });
 }));
 
