@@ -48,6 +48,15 @@ router.post('/students/:id/emergency-contact', asyncHandler(async (req: Request,
   res.status(201).json({ success: true, data: contact });
 }));
 
+// PUT /students/:id/emergency-contact/:contactId — Update emergency contact
+router.put('/students/:id/emergency-contact/:contactId', asyncHandler(async (req: Request, res: Response) => {
+  const updated = await prisma.emergencyContact.update({
+    where: { id: req.params.contactId },
+    data: req.body,
+  });
+  res.json({ success: true, data: updated });
+}));
+
 // DELETE /students/:id/emergency-contact/:contactId
 router.delete('/students/:id/emergency-contact/:contactId', asyncHandler(async (req: Request, res: Response) => {
   await studentService.deleteEmergencyContact(req.params.contactId);
