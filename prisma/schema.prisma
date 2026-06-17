@@ -531,6 +531,7 @@ model Student {
   studentWhatsapp String?
   city            String?
   postalCode      String?
+  country         String?
   previousSchool  String?
   previousClass   String?
   tcNumber        String?

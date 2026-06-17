@@ -10,6 +10,7 @@ export interface CreateStudentInput {
   address?: string;
   city?: string;
   postalCode?: string;
+  country?: string;
   phone?: string;
   bloodGroup?: string;
   bformCnic?: string;
@@ -38,6 +39,7 @@ export interface UpdateStudentInput {
   address?: string;
   city?: string;
   postalCode?: string;
+  country?: string;
   phone?: string;
   bloodGroup?: string;
   bformCnic?: string;
@@ -128,6 +130,7 @@ class StudentService {
         dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : undefined,
         religion: data.religion, nationality: data.nationality || 'Pakistani',
         address: data.address, city: data.city, postalCode: data.postalCode,
+        country: data.country,
         phone: data.phone, bloodGroup: data.bloodGroup,
         bformCnic: data.bformCnic, motherTongue: data.motherTongue,
         studentEmail: data.studentEmail, studentWhatsapp: data.studentWhatsapp,
@@ -189,6 +192,7 @@ class StudentService {
         dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : undefined,
         religion: data.religion, nationality: data.nationality,
         address: data.address, city: data.city, postalCode: data.postalCode,
+        country: data.country,
         phone: data.phone, bloodGroup: data.bloodGroup,
         bformCnic: data.bformCnic, motherTongue: data.motherTongue,
         studentEmail: data.studentEmail, studentWhatsapp: data.studentWhatsapp,
