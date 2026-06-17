@@ -7,16 +7,25 @@ import path from 'path';
 
 const ALLOWED_MIMES = new Set([
   // Images
-  'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/bmp',
-  // Documents
-  'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/bmp', 'image/tiff', 'image/x-icon', 'image/vnd.microsoft.icon',
+  // Office / Documents
+  'application/pdf', 'application/rtf',
+  'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'text/plain', 'text/csv', 'text/html', 'text/markdown', 'application/json', 'application/xml',
-  'application/zip', 'application/x-rar-compressed',
+  'application/vnd.oasis.opendocument.text', 'application/vnd.oasis.opendocument.spreadsheet', 'application/vnd.oasis.opendocument.presentation',
+  // Text / Code / Data
+  'text/plain', 'text/csv', 'text/html', 'text/markdown', 'text/css', 'text/javascript', 'text/yaml', 'text/xml',
+  'application/json', 'application/xml', 'application/typescript', 'application/x-yaml', 'application/x-toml',
+  // Archives
+  'application/zip', 'application/x-rar-compressed', 'application/x-7z-compressed', 'application/x-tar', 'application/gzip',
+  // Fonts
+  'font/ttf', 'font/otf', 'font/woff', 'font/woff2',
+  // Video (common school recordings)
+  'video/mp4', 'video/webm', 'video/x-msvideo',
 ]);
 
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB (increased for videos & archives)
 const PROFILE_MAX_DIM = 300;
 
 export class UploadService {
@@ -38,12 +47,19 @@ export class UploadService {
       const ext = originalName.split('.').pop()?.toLowerCase();
       const extMap: Record<string, string> = {
         jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
-        pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        svg: 'image/svg+xml', bmp: 'image/bmp', tiff: 'image/tiff', tif: 'image/tiff', ico: 'image/x-icon',
+        pdf: 'application/pdf', rtf: 'application/rtf',
+        doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        odt: 'application/vnd.oasis.opendocument.text', ods: 'application/vnd.oasis.opendocument.spreadsheet', odp: 'application/vnd.oasis.opendocument.presentation',
         txt: 'text/plain', csv: 'text/csv', html: 'text/html', htm: 'text/html', md: 'text/markdown',
-        json: 'application/json', xml: 'application/xml',
-        zip: 'application/zip', rar: 'application/x-rar-compressed',
+        css: 'text/css', js: 'text/javascript', ts: 'application/typescript', jsx: 'text/javascript', tsx: 'application/typescript',
+        json: 'application/json', xml: 'application/xml', yaml: 'application/x-yaml', yml: 'application/x-yaml', toml: 'application/x-toml',
+        zip: 'application/zip', rar: 'application/x-rar-compressed', '7z': 'application/x-7z-compressed',
+        tar: 'application/x-tar', gz: 'application/gzip', tgz: 'application/gzip',
+        mp4: 'video/mp4', webm: 'video/webm', avi: 'video/x-msvideo',
+        ttf: 'font/ttf', otf: 'font/otf', woff: 'font/woff', woff2: 'font/woff2',
       };
       mime = ext ? (extMap[ext] || 'application/octet-stream') : 'application/octet-stream';
     }
