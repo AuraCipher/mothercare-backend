@@ -142,27 +142,44 @@ class StudentService {
       include: { group: { select: { id: true, name: true, section: true } } },
     });
 
-    // If guardian info provided, create parent profile and link
-    if (data.guardianName && data.phone) {
+    // If guardian name provided, create parent profile and link
+    if (data.guardianName) {
+      const baseUsername = `parent_${student.admissionNumber?.toLowerCase() || student.id.slice(0, 8)}`;
+      let parentUser;
       try {
-        const parentUser = await prisma.user.create({
+        parentUser = await prisma.user.create({
           data: {
             name: data.guardianName,
-            username: `parent_${student.admissionNumber?.toLowerCase() || student.id.slice(0, 8)}`,
+            username: baseUsername,
             passwordHash: '$2a$12$placeholder',
             role: 'parent',
-            phone: data.phone,
-            email: data.studentEmail,
+            phone: data.phone || null,
+            email: data.studentEmail || null,
             status: 'active',
           },
         });
+      } catch (e: any) {
+        // Username collision — append random suffix
+        parentUser = await prisma.user.create({
+          data: {
+            name: data.guardianName,
+            username: `${baseUsername}_${Math.random().toString(36).slice(2, 6)}`,
+            passwordHash: '$2a$12$placeholder',
+            role: 'parent',
+            phone: data.phone || null,
+            email: null,
+            status: 'active',
+          },
+        });
+      }
+      try {
         const parentProfile = await prisma.parentProfile.create({
           data: {
             userId: parentUser.id,
             relation: data.guardianRelation || 'Guardian',
-            phone: data.phone,
-            whatsapp: data.studentWhatsapp,
-            email: data.studentEmail,
+            phone: data.phone || null,
+            whatsapp: data.studentWhatsapp || null,
+            email: data.studentEmail || null,
           },
         });
         await prisma.studentParent.create({
