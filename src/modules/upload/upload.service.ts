@@ -30,10 +30,12 @@ const PROFILE_MAX_DIM = 300;
 
 export class UploadService {
   /**
-   * Upload a file buffer. For images, resize to max 300px and convert to WebP.
-   * For documents (PDF), store as-is.
+   * Upload a file buffer.
+   * @param purpose 'profile' — resize to 300×300 + WebP q80; 'document' — WebP q80 only, no resize; anything else defaults to document behavior.
+   * SVG/GIF bypass sharp entirely (preserve animation / unsupported format).
+   * Non-images are stored raw (PDF, DOCX, MP4, etc.).
    */
-  async uploadFile(buffer: Buffer, originalName: string, uploadedById?: string) {
+  async uploadFile(buffer: Buffer, originalName: string, uploadedById?: string, purpose?: string) {
     // 1. Size check
     if (buffer.length > MAX_FILE_SIZE) {
       throw { status: 413, message: `File too large (max ${MAX_FILE_SIZE / 1024 / 1024}MB)` };
@@ -75,23 +77,34 @@ export class UploadService {
 
     // 3. Process image files
     if (mime.startsWith('image/')) {
-      const img = sharp(buffer).rotate(); // auto-rotate based on EXIF
-      const meta = await img.metadata();
-      width = meta.width || null;
-      height = meta.height || null;
+      // SVG/GIF — bypass sharp entirely (preserve animation / unsupported format)
+      if (mime === 'image/svg+xml' || mime === 'image/gif') {
+        processedBuffer = buffer;
+        finalMime = mime;
+        ext = type?.ext || (mime === 'image/svg+xml' ? 'svg' : 'gif');
+      } else {
+        const img = sharp(buffer).rotate(); // auto-rotate based on EXIF
+        const meta = await img.metadata();
+        width = meta.width || null;
+        height = meta.height || null;
 
-      // Resize if larger than max, convert to WebP
-      const resized = img.resize(PROFILE_MAX_DIM, PROFILE_MAX_DIM, {
-        fit: 'cover',
-        position: 'centre',
-        withoutEnlargement: true,
-      });
-
-      processedBuffer = await resized.webp({ quality: 80 }).toBuffer();
-      finalMime = 'image/webp';
-      ext = 'webp';
+        if (purpose === 'profile') {
+          // Profile photo: resize to 300×300 + WebP q80
+          const resized = img.resize(PROFILE_MAX_DIM, PROFILE_MAX_DIM, {
+            fit: 'cover',
+            position: 'centre',
+            withoutEnlargement: true,
+          });
+          processedBuffer = await resized.webp({ quality: 80 }).toBuffer();
+        } else {
+          // Document / default: WebP q80 only, preserve original dimensions
+          processedBuffer = await img.webp({ quality: 80 }).toBuffer();
+        }
+        finalMime = 'image/webp';
+        ext = 'webp';
+      }
     } else {
-      // Document (PDF) — store as-is
+      // Non-image — store as-is (PDF, DOCX, MP4, etc.)
       processedBuffer = buffer;
       finalMime = mime;
       ext = type?.ext || 'bin';

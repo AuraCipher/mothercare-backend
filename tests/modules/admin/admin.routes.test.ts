@@ -37,6 +37,11 @@ import type {
 } from '../../helpers/factories';
 import { generateTestToken, getAuthHeader } from '../../helpers/auth';
 
+// Mock helpers for upload testing (typed as any — exports exist at runtime via moduleNameMapper)
+const fileTypeMock = require('file-type') as any;
+const multerMock = require('multer') as any;
+const sharpMock = require('sharp') as any;
+
 // ─── Shared auth tokens ─────────────────────────────────────
 
 const adminToken = getAuthHeader(generateTestToken('admin-1', 'super_admin'));
@@ -2920,6 +2925,104 @@ describe('Admin — File Upload', () => {
       .get('/api/uploads/unknown/meta')
       .set(adminToken);
     expect(res.status).toBe(404);
+  });
+
+  // ─── File processing rules ────────────────────────────────────────
+
+  describe('File processing rules', () => {
+    const mockFileRecord = {
+      id: 'file-test-1',
+      originalName: 'test.svg',
+      storagePath: '2026/06/test-0000-4000-8000-000000000000.svg',
+      mimeType: 'image/svg+xml',
+      size: 100,
+      width: null,
+      height: null,
+      uploadedById: null,
+      createdAt: new Date(),
+    };
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      multerMock.__resetMockFile();
+      sharpMock.__resetMockSharp();
+      // Default file-type result: webp
+      fileTypeMock.__setFileTypeResult({ ext: 'webp', mime: 'image/webp' });
+      // Default fileRecord.create mock
+      prismaMock.fileRecord.create.mockResolvedValue(mockFileRecord as any);
+    });
+
+    test('SVG upload bypasses sharp, stored as image/svg+xml', async () => {
+      fileTypeMock.__setFileTypeResult({ ext: 'svg', mime: 'image/svg+xml' });
+      multerMock.__setMockFile({
+        buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="40"/></svg>'),
+        originalname: 'icon.svg',
+        mimetype: 'image/svg+xml',
+        size: 80,
+      }, { purpose: 'document' });
+
+      const res = await request(app)
+        .post('/api/upload')
+        .set(adminToken);
+
+      expect(res.status).toBe(201);
+      expect(prismaMock.fileRecord.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            mimeType: 'image/svg+xml',
+          }),
+        }),
+      );
+    });
+
+    test('GIF upload bypasses sharp, stored as image/gif', async () => {
+      fileTypeMock.__setFileTypeResult({ ext: 'gif', mime: 'image/gif' });
+      multerMock.__setMockFile({
+        buffer: Buffer.from('GIF89a...mock-gif-data'),
+        originalname: 'animation.gif',
+        mimetype: 'image/gif',
+        size: 200,
+      }, { purpose: 'document' });
+
+      const res = await request(app)
+        .post('/api/upload')
+        .set(adminToken);
+
+      expect(res.status).toBe(201);
+      expect(prismaMock.fileRecord.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            mimeType: 'image/gif',
+          }),
+        }),
+      );
+    });
+
+    test('Document purpose upload compresses with WebP without resize', async () => {
+      fileTypeMock.__setFileTypeResult({ ext: 'jpeg', mime: 'image/jpeg' });
+      multerMock.__setMockFile({
+        buffer: Buffer.from('mock-jpeg-data'),
+        originalname: 'photo.jpg',
+        mimetype: 'image/jpeg',
+        size: 50000,
+      }, { purpose: 'document' });
+
+      const res = await request(app)
+        .post('/api/upload')
+        .set(adminToken);
+
+      expect(res.status).toBe(201);
+      // Should be stored as WebP (compressed)
+      expect(prismaMock.fileRecord.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            mimeType: 'image/webp',
+          }),
+        }),
+      );
+      // Should NOT have been resized (purpose=document means compress only)
+      expect(sharpMock.__resizeCalled).toBe(false);
+    });
   });
 });
 // ═══════════════════════════════════════════════════════════════════

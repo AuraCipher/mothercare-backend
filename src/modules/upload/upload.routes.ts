@@ -22,7 +22,8 @@ router.post('/upload', authMiddleware, upload.single('file'), asyncHandler(async
   }
 
   const userId = (req as any).user?.id;
-  const result = await uploadService.uploadFile(req.file.buffer, req.file.originalname, userId);
+  const purpose = req.body?.purpose || 'document';
+  const result = await uploadService.uploadFile(req.file.buffer, req.file.originalname, userId, purpose);
   res.status(201).json({ success: true, data: result });
 }));
 
@@ -37,7 +38,7 @@ router.get('/uploads/:id', asyncHandler(async (req: Request, res: Response) => {
   const { buffer, mimeType, originalName } = await uploadService.getFile(req.params.id);
   res.setHeader('Content-Type', mimeType);
   res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-  res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
+  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(originalName)}`);
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.send(buffer);
 }));
