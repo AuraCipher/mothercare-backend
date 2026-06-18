@@ -196,6 +196,20 @@ export class UploadService {
     // Delete DB record
     await prisma.fileRecord.delete({ where: { id: fileId } });
   }
+
+  /**
+   * Rename a file record (update originalName).
+   */
+  async renameFile(fileId: string, newName: string) {
+    const record = await prisma.fileRecord.findUnique({ where: { id: fileId } });
+    if (!record) throw { status: 404, message: 'File not found' };
+    if (!newName || !newName.trim()) throw { status: 400, message: 'Name cannot be empty' };
+    return prisma.fileRecord.update({
+      where: { id: fileId },
+      data: { originalName: newName.trim() },
+      select: { id: true, originalName: true },
+    });
+  }
 }
 
 export const uploadService = new UploadService();

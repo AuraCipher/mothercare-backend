@@ -51,6 +51,17 @@ router.get('/uploads', authMiddleware, asyncHandler(async (req: Request, res: Re
   res.json({ success: true, data: records });
 }));
 
+// ─── PUT /api/uploads/:id/rename — Rename file (auth required) ────────────
+router.put('/uploads/:id/rename', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
+  const { originalName } = req.body;
+  if (!originalName || !originalName.trim()) {
+    res.status(400).json({ success: false, message: 'originalName is required' });
+    return;
+  }
+  const result = await uploadService.renameFile(req.params.id, originalName);
+  res.json({ success: true, data: result });
+}));
+
 // ─── DELETE /api/uploads/:id — Delete file + disk cleanup (auth required) ─
 router.delete('/uploads/:id', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
   await uploadService.deleteFile(req.params.id);

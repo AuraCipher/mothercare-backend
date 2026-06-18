@@ -3160,6 +3160,68 @@ describe('Admin — File Upload', () => {
       expect(res.status).toBe(401);
     });
   });
+
+  // ─── File rename ──────────────────────────────────────────────────
+
+  describe('File rename', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+    });
+
+    test('PUT /api/uploads/:id/rename returns 200 and updates name', async () => {
+      prismaMock.fileRecord.findUnique.mockResolvedValue({
+        id: 'file-ren-1', originalName: 'old-name.pdf', storagePath: '2026/06/file.pdf',
+      } as any);
+      prismaMock.fileRecord.update.mockResolvedValue({
+        id: 'file-ren-1', originalName: 'new-name.pdf',
+      } as any);
+
+      const res = await request(app)
+        .put('/api/uploads/file-ren-1/rename')
+        .set(adminToken)
+        .send({ originalName: 'new-name.pdf' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.originalName).toBe('new-name.pdf');
+      expect(prismaMock.fileRecord.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'file-ren-1' },
+          data: { originalName: 'new-name.pdf' },
+        }),
+      );
+    });
+
+    test('PUT /api/uploads/:id/rename returns 404 for unknown file', async () => {
+      prismaMock.fileRecord.findUnique.mockResolvedValue(null);
+
+      const res = await request(app)
+        .put('/api/uploads/unknown/rename')
+        .set(adminToken)
+        .send({ originalName: 'new.pdf' });
+
+      expect(res.status).toBe(404);
+    });
+
+    test('PUT /api/uploads/:id/rename returns 400 for empty name', async () => {
+      prismaMock.fileRecord.findUnique.mockResolvedValue({
+        id: 'file-ren-2', originalName: 'test.pdf',
+      } as any);
+
+      const res = await request(app)
+        .put('/api/uploads/file-ren-2/rename')
+        .set(adminToken)
+        .send({ originalName: '' });
+
+      expect(res.status).toBe(400);
+    });
+
+    test('PUT /api/uploads/:id/rename returns 401 without auth', async () => {
+      const res = await request(app)
+        .put('/api/uploads/any/rename')
+        .send({ originalName: 'new.pdf' });
+      expect(res.status).toBe(401);
+    });
+  });
 });
 // ═══════════════════════════════════════════════════════════════════
 
