@@ -24,8 +24,31 @@ router.post('/upload', authMiddleware, uploadLimiter, upload.single('file'), asy
 
   const userId = (req as any).user?.id;
   const purpose = req.body?.purpose || 'document';
-  const result = await uploadService.uploadFile(req.file.buffer, req.file.originalname, userId, purpose);
+  const entityType = req.body?.entityType || undefined;
+  const entityId = req.body?.entityId || undefined;
+  // Validate entityType if provided
+  if (entityType && !['student', 'teacher'].includes(entityType)) {
+    res.status(400).json({ success: false, message: 'entityType must be "student" or "teacher"' });
+    return;
+  }
+  const result = await uploadService.uploadFile(req.file.buffer, req.file.originalname, userId, purpose, entityType, entityId);
   res.status(201).json({ success: true, data: result });
+}));
+
+// ─── GET /api/uploads — List files by entity (auth required) ─────────
+router.get('/uploads', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
+  const entityType = req.query.entityType as string;
+  const entityId = req.query.entityId as string;
+  if (!entityType || !entityId) {
+    res.status(400).json({ success: false, message: 'entityType and entityId query params required' });
+    return;
+  }
+  if (!['student', 'teacher'].includes(entityType)) {
+    res.status(400).json({ success: false, message: 'entityType must be "student" or "teacher"' });
+    return;
+  }
+  const records = await uploadService.listByEntity(entityType, entityId);
+  res.json({ success: true, data: records });
 }));
 
 // ─── GET /api/uploads/:id/meta — File metadata (auth required) ──────

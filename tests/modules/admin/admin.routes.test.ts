@@ -3029,6 +3029,97 @@ describe('Admin — File Upload', () => {
       expect(sharpMock.__resizeCalled).toBe(false);
     });
   });
+
+  // ─── Entity-based document listing ────────────────────────────────
+
+  describe('Entity-based document listing', () => {
+    const mockFiles = [
+      { id: 'f-1', originalName: 'doc1.pdf', mimeType: 'application/pdf', size: 5000, createdAt: new Date('2026-01-01') },
+      { id: 'f-2', originalName: 'doc2.jpg', mimeType: 'image/webp', size: 3000, createdAt: new Date('2026-01-02') },
+    ];
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+    });
+
+    test('POST /api/upload accepts entityType + entityId', async () => {
+      fileTypeMock.__setFileTypeResult({ ext: 'jpeg', mime: 'image/jpeg' });
+      multerMock.__setMockFile({
+        buffer: Buffer.from('mock-data'),
+        originalname: 'report.pdf',
+        mimetype: 'application/pdf',
+        size: 1000,
+      }, { purpose: 'document', entityType: 'student', entityId: 'stu-123' });
+      prismaMock.fileRecord.create.mockResolvedValue({
+        id: 'f-new', originalName: 'report.pdf', mimeType: 'image/webp', size: 800, storagePath: '2026/06/test.webp',
+      } as any);
+
+      const res = await request(app)
+        .post('/api/upload')
+        .set(adminToken);
+
+      expect(res.status).toBe(201);
+      expect(prismaMock.fileRecord.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            entityType: 'student',
+            entityId: 'stu-123',
+          }),
+        }),
+      );
+    });
+
+    test('GET /api/uploads lists files for entity', async () => {
+      prismaMock.fileRecord.findMany.mockResolvedValue(mockFiles as any);
+
+      const res = await request(app)
+        .get('/api/uploads?entityType=student&entityId=stu-123')
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(2);
+      expect(res.body.data[0].originalName).toBe('doc1.pdf');
+      expect(prismaMock.fileRecord.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { entityType: 'student', entityId: 'stu-123' },
+        }),
+      );
+    });
+
+    test('GET /api/uploads returns 400 without entityType', async () => {
+      const res = await request(app)
+        .get('/api/uploads?entityId=stu-123')
+        .set(adminToken);
+      expect(res.status).toBe(400);
+    });
+
+    test('GET /api/uploads returns 400 with invalid entityType', async () => {
+      const res = await request(app)
+        .get('/api/uploads?entityType=admin&entityId=xyz')
+        .set(adminToken);
+      expect(res.status).toBe(400);
+    });
+
+    test('GET /api/uploads returns 401 without auth', async () => {
+      const res = await request(app).get('/api/uploads?entityType=student&entityId=stu-123');
+      expect(res.status).toBe(401);
+    });
+
+    test('POST /api/upload returns 400 with invalid entityType', async () => {
+      multerMock.__setMockFile({
+        buffer: Buffer.from('data'),
+        originalname: 'test.txt',
+        mimetype: 'text/plain',
+        size: 100,
+      }, { purpose: 'document', entityType: 'invalidType', entityId: 'x' });
+
+      const res = await request(app)
+        .post('/api/upload')
+        .set(adminToken);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('entityType');
+    });
+  });
 });
 // ═══════════════════════════════════════════════════════════════════
 

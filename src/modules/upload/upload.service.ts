@@ -34,8 +34,10 @@ export class UploadService {
    * @param purpose 'profile' — resize to 300×300 + WebP q80; 'document' — WebP q80 only, no resize; anything else defaults to document behavior.
    * SVG/GIF bypass sharp entirely (preserve animation / unsupported format).
    * Non-images are stored raw (PDF, DOCX, MP4, etc.).
+   * @param entityType 'student' | 'teacher' — what kind of profile this doc belongs to
+   * @param entityId UUID of the student or teacher profile
    */
-  async uploadFile(buffer: Buffer, originalName: string, uploadedById?: string, purpose?: string) {
+  async uploadFile(buffer: Buffer, originalName: string, uploadedById?: string, purpose?: string, entityType?: string, entityId?: string) {
     // 1. Size check
     if (buffer.length > MAX_FILE_SIZE) {
       throw { status: 413, message: `File too large (max ${MAX_FILE_SIZE / 1024 / 1024}MB)` };
@@ -130,6 +132,8 @@ export class UploadService {
         width: mime.startsWith('image/') ? (width ?? undefined) : undefined,
         height: mime.startsWith('image/') ? (height ?? undefined) : undefined,
         uploadedById: uploadedById || undefined,
+        entityType: entityType || undefined,
+        entityId: entityId || undefined,
       },
     });
 
@@ -158,6 +162,24 @@ export class UploadService {
     if (!record) throw { status: 404, message: 'File not found' };
     const buffer = await storage.get(record.storagePath);
     return { buffer, mimeType: record.mimeType, originalName: record.originalName };
+  }
+
+  /**
+   * List file records for a given entity (student or teacher profile).
+   */
+  async listByEntity(entityType: string, entityId: string) {
+    const records = await prisma.fileRecord.findMany({
+      where: { entityType, entityId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        originalName: true,
+        mimeType: true,
+        size: true,
+        createdAt: true,
+      },
+    });
+    return records;
   }
 }
 

@@ -150,12 +150,15 @@ model FileRecord {
   width         Int?
   height        Int?
   uploadedById  String?
+  entityType    String?  // "student" | "teacher" — what entity this doc belongs to
+  entityId      String?  // UUID of the student or teacher profile
   createdAt     DateTime @default(now())
 
   uploader      User?    @relation(fields: [uploadedById], references: [id])
   profileUser   User?    @relation("UserProfilePhoto")
   profileStudent Student? @relation("StudentProfilePhoto")
 
+  @@index([entityType, entityId])
   @@map("file_records")
 }
 
