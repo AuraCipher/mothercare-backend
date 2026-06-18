@@ -12,6 +12,9 @@ const ALLOWED_MIMES = new Set([
   'application/pdf', 'application/rtf',
   'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel.sheet.macroEnabled.12', 'application/vnd.ms-excel.sheet.binaryMacroEnabled.12',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.template', 'application/vnd.ms-excel.template.macroEnabled.12',
+  'application/vnd.ms-excel.addin.macroEnabled.12',
   'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'application/vnd.oasis.opendocument.text', 'application/vnd.oasis.opendocument.spreadsheet', 'application/vnd.oasis.opendocument.presentation',
   // Text / Code / Data
@@ -46,26 +49,31 @@ export class UploadService {
     // 2. Magic byte validation
     const type = await fileTypeFromBuffer(buffer);
     let mime = type?.mime;
-    // Fallback: if magic bytes fail, guess from extension
-    if (!mime) {
-      const ext = originalName.split('.').pop()?.toLowerCase();
-      const extMap: Record<string, string> = {
-        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
-        svg: 'image/svg+xml', bmp: 'image/bmp', tiff: 'image/tiff', tif: 'image/tiff', ico: 'image/x-icon',
-        pdf: 'application/pdf', rtf: 'application/rtf',
-        doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        odt: 'application/vnd.oasis.opendocument.text', ods: 'application/vnd.oasis.opendocument.spreadsheet', odp: 'application/vnd.oasis.opendocument.presentation',
-        txt: 'text/plain', csv: 'text/csv', html: 'text/html', htm: 'text/html', md: 'text/markdown',
-        css: 'text/css', js: 'text/javascript', ts: 'application/typescript', jsx: 'text/javascript', tsx: 'application/typescript',
-        json: 'application/json', xml: 'application/xml', yaml: 'application/x-yaml', yml: 'application/x-yaml', toml: 'application/x-toml',
-        zip: 'application/zip', rar: 'application/x-rar-compressed', '7z': 'application/x-7z-compressed',
-        tar: 'application/x-tar', gz: 'application/gzip', tgz: 'application/gzip',
-        mp4: 'video/mp4', webm: 'video/webm', avi: 'video/x-msvideo',
-        ttf: 'font/ttf', otf: 'font/otf', woff: 'font/woff', woff2: 'font/woff2',
-      };
-      mime = ext ? (extMap[ext] || 'application/octet-stream') : 'application/octet-stream';
+    const fileExt = originalName.split('.').pop()?.toLowerCase();
+    // Extension-based fallback map (used when magic bytes fail or return uncommon types)
+    const extMap: Record<string, string> = {
+      jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
+      svg: 'image/svg+xml', bmp: 'image/bmp', tiff: 'image/tiff', tif: 'image/tiff', ico: 'image/x-icon',
+      pdf: 'application/pdf', rtf: 'application/rtf',
+      doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      xlsm: 'application/vnd.ms-excel.sheet.macroEnabled.12', xlsb: 'application/vnd.ms-excel.sheet.binaryMacroEnabled.12',
+      xltx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.template', xltm: 'application/vnd.ms-excel.template.macroEnabled.12',
+      xlt: 'application/vnd.ms-excel', xlam: 'application/vnd.ms-excel.addin.macroEnabled.12',
+      ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      odt: 'application/vnd.oasis.opendocument.text', ods: 'application/vnd.oasis.opendocument.spreadsheet', odp: 'application/vnd.oasis.opendocument.presentation',
+      txt: 'text/plain', csv: 'text/csv', html: 'text/html', htm: 'text/html', md: 'text/markdown',
+      css: 'text/css', js: 'text/javascript', ts: 'application/typescript', jsx: 'text/javascript', tsx: 'application/typescript',
+      json: 'application/json', xml: 'application/xml', yaml: 'application/x-yaml', yml: 'application/x-yaml', toml: 'application/x-toml',
+      zip: 'application/zip', rar: 'application/x-rar-compressed', '7z': 'application/x-7z-compressed',
+      tar: 'application/x-tar', gz: 'application/gzip', tgz: 'application/gzip',
+      mp4: 'video/mp4', webm: 'video/webm', avi: 'video/x-msvideo',
+      ttf: 'font/ttf', otf: 'font/otf', woff: 'font/woff', woff2: 'font/woff2',
+    };
+    // If magic bytes failed or returned a type not in our whitelist,
+    // try matching by extension (handles OLE2/CFB formats like .xls detected as "application/x-cfb")
+    if (!mime || !ALLOWED_MIMES.has(mime)) {
+      mime = fileExt ? (extMap[fileExt] || 'application/octet-stream') : 'application/octet-stream';
     }
     if (!ALLOWED_MIMES.has(mime)) {
       throw { status: 400, message: `File type "${mime}" is not allowed` };
