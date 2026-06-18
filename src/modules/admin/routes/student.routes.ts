@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../../lib/prisma';
 import { studentService } from '../services/student.service';
+import { passwordSetLimiter } from '../../../middleware/security/rateLimiter';
 
 const router = Router();
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
@@ -117,6 +118,24 @@ router.put('/students/:id/parent', asyncHandler(async (req: Request, res: Respon
 router.delete('/students/:id/parents/:parentUserId', asyncHandler(async (req: Request, res: Response) => {
   await studentService.unlinkParent(req.params.id, req.params.parentUserId);
   res.json({ success: true });
+}));
+
+// PUT /students/:id/generate-credentials — Generate login credentials
+router.put('/students/:id/generate-credentials', asyncHandler(async (req: Request, res: Response) => {
+  const result = await studentService.generateCredentials(req.params.id);
+  res.json({ success: true, data: result });
+}));
+
+// PUT /students/:id/set-password — Set student password (admin must verify)
+router.put('/students/:id/set-password', passwordSetLimiter, asyncHandler(async (req: Request, res: Response) => {
+  const { password, adminPassword } = req.body;
+  const adminId = (req as any).user?.id;
+  if (!password || !adminPassword) {
+    res.status(400).json({ success: false, message: 'password and adminPassword are required' });
+    return;
+  }
+  const result = await studentService.setPassword(req.params.id, password, adminId, adminPassword, req.ip);
+  res.json({ success: true, message: result.message });
 }));
 
 export default router;

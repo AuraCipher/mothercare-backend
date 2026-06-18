@@ -17,9 +17,10 @@ datasource db {
 
 enum Role {
   super_admin // Highest authority, full system access
-  management  // Administrative staff with assigned permissions
-  teacher     // Class/group instructors
-  parent      // Parent/student merged account
+  management // Administrative staff with assigned permissions
+  teacher // Class/group instructors
+  parent // Parent/student merged account
+  student // Student login account
 }
 
 enum Gender {
@@ -36,19 +37,19 @@ enum AccountStatus {
 
 // Branch-level roles for hierarchical access control
 enum BranchRole {
-  branch_admin  // Principal — full branch management
-  sub_admin     // Vice-Principal / Deputy
-  management    // Accountant, Admin Staff
-  teacher       // Teaching staff
-  parent        // Parent representative
+  branch_admin // Principal — full branch management
+  sub_admin // Vice-Principal / Deputy
+  management // Accountant, Admin Staff
+  teacher // Teaching staff
+  parent // Parent representative
 }
 
 // Academic Year lifecycle: BUILD_STAGE → ACTIVE → ARCHIVED
 enum AcademicYearStatus {
   BUILD_STAGE // Year being set up — only admins see it
-  ACTIVE      // Current operational year — everyone sees it
-  ON_HOLD     // Temporarily paused (e.g. summer break) — resume to ACTIVE
-  ARCHIVED    // Closed year — admins can still edit data
+  ACTIVE // Current operational year — everyone sees it
+  ON_HOLD // Temporarily paused (e.g. summer break) — resume to ACTIVE
+  ARCHIVED // Closed year — admins can still edit data
 }
 
 // Year-end close / batch promotion state machine
@@ -70,7 +71,7 @@ enum StudentStatus {
 
 enum ApiKeyType {
   publishable // Public: verified store / registered layout
-  secret      // Admin: bypass login, full CRUD
+  secret // Admin: bypass login, full CRUD
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -92,8 +93,8 @@ model User {
   dateOfBirth      DateTime?
   address          String?
   profilePhoto     String?
-  profilePhotoId   String?   @unique
-  profileFile      FileRecord?     @relation("UserProfilePhoto", fields: [profilePhotoId], references: [id])
+  profilePhotoId   String?       @unique
+  profileFile      FileRecord?   @relation("UserProfilePhoto", fields: [profilePhotoId], references: [id])
   status           AccountStatus @default(active)
   isEmailVerified  Boolean       @default(false)
   isPhoneVerified  Boolean       @default(false)
@@ -105,28 +106,29 @@ model User {
   updatedAt        DateTime      @updatedAt
 
   // Existing relations
-  managementProfile ManagementProfile?
-  teacherProfile    TeacherProfile?
-  parentProfile     ParentProfile?
-  subjectsAsHod     Subject[]                @relation("SubjectHOD")
-  sentMessages      Message[]               @relation("SentMessages")
-  notifications     NotificationRecipient[]
-  deviceTokens      DeviceToken[]
-  auditLogs         AuditLog[]
-  groupMembers      GroupMember[]
-  batchPromotions   BatchPromotion[]        @relation("PromotedByUser")
+  managementProfile   ManagementProfile?
+  teacherProfile      TeacherProfile?
+  parentProfile       ParentProfile?
+  subjectsAsHod       Subject[]               @relation("SubjectHOD")
+  sentMessages        Message[]               @relation("SentMessages")
+  notifications       NotificationRecipient[]
+  deviceTokens        DeviceToken[]
+  auditLogs           AuditLog[]
+  groupMembers        GroupMember[]
+  batchPromotions     BatchPromotion[]        @relation("PromotedByUser")
   passwordResetTokens PasswordResetToken[]
 
   // New relations for Academic Year System
-  branchMembers       BranchMember[]
+  branchMembers         BranchMember[]
   // Reverse relations for BranchMember.assignedBy and BranchMember.resignedInFavorOf
-  assignedMembers     BranchMember[] @relation("AssignedBy")
-  resignedToMembers   BranchMember[] @relation("ResignedInFavorOf")
-  academicYearMembers AcademicYearMember[]
-  teacherAssignments  TeacherAssignment[]
+  assignedMembers       BranchMember[]         @relation("AssignedBy")
+  resignedToMembers     BranchMember[]         @relation("ResignedInFavorOf")
+  academicYearMembers   AcademicYearMember[]
+  teacherAssignments    TeacherAssignment[]
   academicYearSnapshots AcademicYearSnapshot[] @relation("SnapshotTriggeredBy")
-  timetableEntries        TimetableEntry[]     @relation("TimetableTeacher")
-  uploadedFiles       FileRecord[]
+  timetableEntries      TimetableEntry[]       @relation("TimetableTeacher")
+  uploadedFiles         FileRecord[]
+  student               Student?
 
   @@index([username])
   @@index([email])
@@ -142,26 +144,25 @@ model User {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model FileRecord {
-  id            String   @id @default(uuid())
-  originalName  String
-  storagePath   String   @unique
-  mimeType      String
-  size          Int
-  width         Int?
-  height        Int?
-  uploadedById  String?
-  entityType    String?  // "student" | "teacher" — what entity this doc belongs to
-  entityId      String?  // UUID of the student or teacher profile
-  createdAt     DateTime @default(now())
+  id           String   @id @default(uuid())
+  originalName String
+  storagePath  String   @unique
+  mimeType     String
+  size         Int
+  width        Int?
+  height       Int?
+  uploadedById String?
+  entityType   String? // "student" | "teacher" — what entity this doc belongs to
+  entityId     String? // UUID of the student or teacher profile
+  createdAt    DateTime @default(now())
 
-  uploader      User?    @relation(fields: [uploadedById], references: [id])
-  profileUser   User?    @relation("UserProfilePhoto")
+  uploader       User?    @relation(fields: [uploadedById], references: [id])
+  profileUser    User?    @relation("UserProfilePhoto")
   profileStudent Student? @relation("StudentProfilePhoto")
 
   @@index([entityType, entityId])
   @@map("file_records")
 }
-
 
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║                       SCHOOL / TENANT                           ║
@@ -204,8 +205,8 @@ model Branch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  academicYears AcademicYear[]
-  branchMembers BranchMember[]
+  academicYears    AcademicYear[]
+  branchMembers    BranchMember[]
   adminInvitations AdminInvitation[]
 
   @@map("branches")
@@ -239,29 +240,29 @@ model AcademicCalendar {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model AcademicYear {
-  id                    String             @id @default(uuid())
-  branchId              String
-  calendarId            String
-  status                AcademicYearStatus @default(BUILD_STAGE)
-  previousAcademicYearId String?           // Self-referencing FK for year chain
-  createdAt             DateTime           @default(now())
-  updatedAt             DateTime           @updatedAt
+  id                     String             @id @default(uuid())
+  branchId               String
+  calendarId             String
+  status                 AcademicYearStatus @default(BUILD_STAGE)
+  previousAcademicYearId String? // Self-referencing FK for year chain
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
 
-  branch              Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  calendar            AcademicCalendar   @relation(fields: [calendarId], references: [id])
-  previousAcademicYear AcademicYear?      @relation("YearSequence", fields: [previousAcademicYearId], references: [id])
-  nextAcademicYears    AcademicYear[]     @relation("YearSequence")
+  branch               Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  calendar             AcademicCalendar @relation(fields: [calendarId], references: [id])
+  previousAcademicYear AcademicYear?    @relation("YearSequence", fields: [previousAcademicYearId], references: [id])
+  nextAcademicYears    AcademicYear[]   @relation("YearSequence")
 
-  members             AcademicYearMember[]
-  groups              Group[]
-  subjects            Subject[]
-  teacherAssignments  TeacherAssignment[]
-  students            Student[]
-  enrollments         Enrollment[]
-  snapshots           AcademicYearSnapshot[]  @relation("SourceAcademicYear")
-  newSnapshots        AcademicYearSnapshot[]  @relation("NewAcademicYear")
-  announcements       Announcement[]
-  timetables          Timetable[]
+  members            AcademicYearMember[]
+  groups             Group[]
+  subjects           Subject[]
+  teacherAssignments TeacherAssignment[]
+  students           Student[]
+  enrollments        Enrollment[]
+  snapshots          AcademicYearSnapshot[] @relation("SourceAcademicYear")
+  newSnapshots       AcademicYearSnapshot[] @relation("NewAcademicYear")
+  announcements      Announcement[]
+  timetables         Timetable[]
 
   @@unique([branchId, calendarId])
   @@map("academic_years")
@@ -303,10 +304,10 @@ model BranchMember {
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
 
-  branch            Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  assignedBy        User?   @relation("AssignedBy", fields: [assignedById], references: [id])
-  resignedInFavorOf User?   @relation("ResignedInFavorOf", fields: [resignedInFavorOfId], references: [id])
+  branch            Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedBy        User?  @relation("AssignedBy", fields: [assignedById], references: [id])
+  resignedInFavorOf User?  @relation("ResignedInFavorOf", fields: [resignedInFavorOfId], references: [id])
 
   @@unique([branchId, userId])
   @@index([userId])
@@ -324,21 +325,21 @@ model Group {
   academicYearId   String
   name             String // "Playgroup", "Class 3", "Class 10"
   section          String? // "A", "B" or "Bio", "CompSci", "Arts"
-  displayOrder     Int     // 1-13 for ordering/grade level
-  capacity         Int     @default(30)
-  onlyAdminCanSend Boolean @default(true)
-  isActive         Boolean @default(true)
+  displayOrder     Int // 1-13 for ordering/grade level
+  capacity         Int      @default(30)
+  onlyAdminCanSend Boolean  @default(true)
+  isActive         Boolean  @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  academicYear AcademicYear     @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
-  members       GroupMember[]
-  messages      Message[]
-  students      Student[]
-  groupSubjects  GroupSubject[]
+  academicYear       AcademicYear        @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  members            GroupMember[]
+  messages           Message[]
+  students           Student[]
+  groupSubjects      GroupSubject[]
   teacherAssignments TeacherAssignment[]
-  enrollments   Enrollment[]
-  timetableEntries TimetableEntry[]
+  enrollments        Enrollment[]
+  timetableEntries   TimetableEntry[]
 
   @@unique([academicYearId, name, section])
   @@map("groups")
@@ -369,20 +370,20 @@ model GroupMember {
 model Subject {
   id             String   @id @default(uuid())
   academicYearId String
-  name           String   // "English", "Mathematics", "Science"
-  code           String?  // Optional subject code (unique per AY)
+  name           String // "English", "Mathematics", "Science"
+  code           String? // Optional subject code (unique per AY)
   description    String?
   totalMarks     Float    @default(100)
   passingMarks   Float    @default(50)
   isElective     Boolean  @default(false)
-  hodId          String?  // Head of Department — FK to User
+  hodId          String? // Head of Department — FK to User
   createdAt      DateTime @default(now())
 
-  academicYear      AcademicYear      @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
-  groupSubjects     GroupSubject[]
+  academicYear       AcademicYear        @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  groupSubjects      GroupSubject[]
   teacherAssignments TeacherAssignment[]
-  timetableEntries    TimetableEntry[]
-  hod               User?             @relation("SubjectHOD", fields: [hodId], references: [id])
+  timetableEntries   TimetableEntry[]
+  hod                User?               @relation("SubjectHOD", fields: [hodId], references: [id])
 
   @@unique([academicYearId, code])
   @@map("subjects")
@@ -412,13 +413,13 @@ model GroupSubject {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model TeacherProfile {
-  id               String   @id @default(uuid())
-  userId           String   @unique
-  employeeId       String?  @unique
+  id               String    @id @default(uuid())
+  userId           String    @unique
+  employeeId       String?   @unique
   qualification    String?
   specialization   String?
   joiningDate      DateTime?
-  salary           Decimal? @db.Decimal(12, 2)
+  salary           Decimal?  @db.Decimal(12, 2)
   phone            String?
   emergencyContact String?
   address          String?
@@ -430,8 +431,8 @@ model TeacherProfile {
   severeDisease    String?
   experience       String?
   bio              String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -448,7 +449,7 @@ model TeacherProfile {
 model TeacherAssignment {
   id             String  @id @default(uuid())
   academicYearId String
-  teacherId      String  // FK → User (role=teacher)
+  teacherId      String // FK → User (role=teacher)
   groupId        String
   subjectId      String
   isClassTeacher Boolean @default(false)
@@ -489,8 +490,8 @@ model ManagementProfile {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model ParentProfile {
-  id         String   @id @default(uuid())
-  userId     String   @unique
+  id            String   @id @default(uuid())
+  userId        String   @unique
   occupation    String?
   employerName  String?
   maritalStatus String?
@@ -539,19 +540,21 @@ model Student {
   previousClass   String?
   tcNumber        String?
   referredBy      String?
-  profilePhotoId  String?   @unique
-  profileFile     FileRecord?  @relation("StudentProfilePhoto", fields: [profilePhotoId], references: [id])
+  profilePhotoId  String?       @unique
+  profileFile     FileRecord?   @relation("StudentProfilePhoto", fields: [profilePhotoId], references: [id])
+  userId          String?       @unique
+  user            User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
   status          StudentStatus @default(ACTIVE)
   isActive        Boolean       @default(true)
   admissionDate   DateTime      @default(now())
   createdAt       DateTime      @default(now())
 
-  academicYear AcademicYear    @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
-  group        Group?          @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  parents          StudentParent[]
-  enrollments      Enrollment[]
+  academicYear      AcademicYear       @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  group             Group?             @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  parents           StudentParent[]
+  enrollments       Enrollment[]
   emergencyContacts EmergencyContact[]
-  healthRecord     HealthRecord?
+  healthRecord      HealthRecord?
 
   @@index([groupId])
   @@index([academicYearId])
@@ -563,7 +566,7 @@ model StudentParent {
   id        String   @id @default(uuid())
   studentId String
   parentId  String
-  relation  String   // "Father", "Mother", "Guardian"
+  relation  String // "Father", "Mother", "Guardian"
   isPrimary Boolean  @default(false)
   createdAt DateTime @default(now())
 
@@ -579,14 +582,14 @@ model StudentParent {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model EmergencyContact {
-  id          String   @id @default(uuid())
-  studentId   String
-  name        String
+  id           String   @id @default(uuid())
+  studentId    String
+  name         String
   relationship String
-  phone       String
-  whatsapp    String?
-  priority    Int      @default(1)
-  createdAt   DateTime @default(now())
+  phone        String
+  whatsapp     String?
+  priority     Int      @default(1)
+  createdAt    DateTime @default(now())
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
@@ -599,17 +602,17 @@ model EmergencyContact {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model HealthRecord {
-  id               String   @id @default(uuid())
-  studentId        String   @unique
-  bloodGroup       String?
-  hasChronicDisease Boolean @default(false)
-  diseaseDetails   String?
-  allergies        String?
-  disability       String?
-  medicalNotes     String?
-  doctorName       String?
-  doctorPhone      String?
-  updatedAt        DateTime @updatedAt
+  id                String   @id @default(uuid())
+  studentId         String   @unique
+  bloodGroup        String?
+  hasChronicDisease Boolean  @default(false)
+  diseaseDetails    String?
+  allergies         String?
+  disability        String?
+  medicalNotes      String?
+  doctorName        String?
+  doctorPhone       String?
+  updatedAt         DateTime @updatedAt
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
@@ -646,18 +649,18 @@ model Enrollment {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model AcademicYearSnapshot {
-  id               String          @id @default(uuid())
-  academicYearId   String
+  id                String          @id @default(uuid())
+  academicYearId    String
   newAcademicYearId String?
-  fromLabel        String          // Human label of source year
-  toLabel          String          // Human label of target year
-  triggeredById    String          // User who triggered the close
-  status           PromotionStatus @default(PENDING)
-  totalStudents    Int             @default(0)
-  totalGraduated   Int             @default(0)
-  canReverse       Boolean         @default(true)
-  reversedAt       DateTime?
-  createdAt        DateTime        @default(now())
+  fromLabel         String // Human label of source year
+  toLabel           String // Human label of target year
+  triggeredById     String // User who triggered the close
+  status            PromotionStatus @default(PENDING)
+  totalStudents     Int             @default(0)
+  totalGraduated    Int             @default(0)
+  canReverse        Boolean         @default(true)
+  reversedAt        DateTime?
+  createdAt         DateTime        @default(now())
 
   academicYear    AcademicYear    @relation("SourceAcademicYear", fields: [academicYearId], references: [id], onDelete: Cascade)
   newAcademicYear AcademicYear?   @relation("NewAcademicYear", fields: [newAcademicYearId], references: [id])
@@ -674,15 +677,15 @@ model AcademicYearSnapshot {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model GroupSnapshot {
-  id            String   @id @default(uuid())
-  snapshotId    String
-  groupId       String   // Original group ID (not FK — group may change)
-  groupName     String
-  section       String?
-  displayOrder  Int
-  studentsData  Json?    // Frozen student list
-  teachersData  Json?    // Frozen teacher assignments
-  studentCount  Int      @default(0)
+  id           String  @id @default(uuid())
+  snapshotId   String
+  groupId      String // Original group ID (not FK — group may change)
+  groupName    String
+  section      String?
+  displayOrder Int
+  studentsData Json? // Frozen student list
+  teachersData Json? // Frozen teacher assignments
+  studentCount Int     @default(0)
 
   snapshot AcademicYearSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
 
@@ -736,17 +739,17 @@ model Message {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model BatchPromotion {
-  id            String    @id @default(uuid())
+  id             String    @id @default(uuid())
   academicYearId String
-  fromYear      String
-  toYear        String
-  promotedById  String
-  status        String    @default("pending")
-  totalStudents Int
-  canReverse    Boolean   @default(true)
-  reversedAt    DateTime?
-  notes         String?
-  createdAt     DateTime  @default(now())
+  fromYear       String
+  toYear         String
+  promotedById   String
+  status         String    @default("pending")
+  totalStudents  Int
+  canReverse     Boolean   @default(true)
+  reversedAt     DateTime?
+  notes          String?
+  createdAt      DateTime  @default(now())
 
   promotedBy User @relation("PromotedByUser", fields: [promotedById], references: [id])
 
@@ -762,7 +765,7 @@ model NotificationRecipient {
   userId    String
   title     String
   body      String
-  type      String    // "announcement", "message", etc.
+  type      String // "announcement", "message", etc.
   data      Json?
   isRead    Boolean   @default(false)
   readAt    DateTime?
@@ -779,7 +782,7 @@ model DeviceToken {
   id        String   @id @default(uuid())
   userId    String
   token     String   @unique
-  platform  String   // "android", "ios", "web"
+  platform  String // "android", "ios", "web"
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -837,7 +840,7 @@ model ApiKey {
   name       String
   type       ApiKeyType @default(publishable)
   keyHash    String     @unique
-  prefix     String     // e.g. "mcs_abc1"
+  prefix     String // e.g. "mcs_abc1"
   createdBy  String
   lastUsedAt DateTime?
   expiresAt  DateTime?
@@ -855,15 +858,15 @@ model ApiKey {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model AdminInvitation {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   email     String
   name      String?
   phone     String?
   branchId  String
-  token     String   @unique
+  token     String    @unique
   usedAt    DateTime?
   expiresAt DateTime
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   branch Branch @relation(fields: [branchId], references: [id])
 
@@ -886,16 +889,16 @@ model AdminInvitation {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model Timetable {
-  id              String   @id @default(uuid())
-  academicYearId  String
-  name            String   // Display name (regular, friday-schedule, exam-week)
-  type            String   @default("timetable") // "timetable" or "datesheet"
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
+  id             String   @id @default(uuid())
+  academicYearId String
+  name           String // Display name (regular, friday-schedule, exam-week)
+  type           String   @default("timetable") // "timetable" or "datesheet"
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
 
-  academicYear AcademicYear      @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
-  slots         TimetableSlot[]
-  dayConfigs    TimetableDayConfig[]
+  academicYear AcademicYear         @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  slots        TimetableSlot[]
+  dayConfigs   TimetableDayConfig[]
 
   @@unique([academicYearId, name])
   @@map("timetables")
@@ -904,14 +907,14 @@ model Timetable {
 model TimetableSlot {
   id            String   @id @default(uuid())
   timetableId   String
-  dayOfWeek     Int?     // null = all days, 1=Monday ... 6=Saturday
-  lectureNumber Int      // 1, 2, 3...
-  startTime     String   // "08:00"
-  endTime       String   // "08:40"
+  dayOfWeek     Int? // null = all days, 1=Monday ... 6=Saturday
+  lectureNumber Int // 1, 2, 3...
+  startTime     String // "08:00"
+  endTime       String // "08:40"
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
 
-  timetable Timetable       @relation(fields: [timetableId], references: [id], onDelete: Cascade)
+  timetable Timetable        @relation(fields: [timetableId], references: [id], onDelete: Cascade)
   entries   TimetableEntry[]
 
   @@unique([timetableId, lectureNumber])
@@ -925,7 +928,7 @@ model TimetableSlot {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model TimetableEntry {
-  id        String @id @default(uuid())
+  id        String  @id @default(uuid())
   slotId    String
   groupId   String // FK → Group (section)
   subjectId String?
@@ -947,10 +950,10 @@ model TimetableEntry {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model TimetableDayConfig {
-  id          String  @id @default(uuid())
+  id          String   @id @default(uuid())
   timetableId String
-  dayOfWeek   Int     // 1=Mon ... 6=Sat
-  isActive    Boolean @default(true)
+  dayOfWeek   Int // 1=Mon ... 6=Sat
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
 
   timetable Timetable @relation(fields: [timetableId], references: [id], onDelete: Cascade)

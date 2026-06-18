@@ -104,6 +104,7 @@ class StudentService {
         },
         emergencyContacts: { orderBy: { priority: 'asc' } },
         healthRecord: true,
+        user: { select: { id: true, name: true, username: true } },
       },
     });
     if (!student) throw { status: 404, message: 'Student not found' };
@@ -262,6 +263,112 @@ class StudentService {
     return prisma.studentParent.delete({
       where: { studentId_parentId: { studentId, parentId: parentUserId } },
     });
+  }
+
+  // ─── Credential management ────────────────────────────────────
+
+  /**
+   * Generate login credentials for a student. Creates a User(role='student')
+   * linked to the Student record, generates a username and random password.
+   * Returns the plaintext password once (must be shown to admin immediately).
+   */
+  async generateCredentials(studentId: string) {
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { id: true, name: true, userId: true },
+    });
+    if (!student) throw { status: 404, message: 'Student not found' };
+    if (student.userId) throw { status: 409, message: 'Student already has login credentials' };
+
+    const bc = await import('bcryptjs');
+    const tempPassword = 'stu_' + Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 6);
+    const hash = await bc.hash(tempPassword, 12);
+
+    // Generate unique username
+    const base = `student_${student.name.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+    let username = base;
+    let attempts = 0;
+    while (attempts < 10) {
+      const existing = await prisma.user.findUnique({ where: { username } });
+      if (!existing) break;
+      username = `${base}_${Math.floor(Math.random() * 9000 + 1000)}`;
+      attempts++;
+    }
+    if (attempts >= 10) username = `${base}_${Date.now() % 10000}`;
+
+    // Create user and link to student
+    const user = await prisma.user.create({
+      data: {
+        name: student.name,
+        username,
+        passwordHash: hash,
+        role: 'student',
+        status: 'active',
+        student: { connect: { id: student.id } },
+      },
+    });
+
+    return { username: user.username, password: tempPassword };
+  }
+
+  /**
+   * Set a new password for a student's linked User account.
+   * Requires admin password verification (same pattern as teacher).
+   */
+  async setPassword(studentId: string, newPassword: string, adminId: string, adminPassword: string, ipAddress?: string) {
+    const bc = await import('bcryptjs');
+
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { userId: true, name: true },
+    });
+    if (!student) throw { status: 404, message: 'Student not found' };
+    if (!student.userId) throw { status: 400, message: 'Student has no login credentials. Generate credentials first.' };
+
+    // Verify admin's password
+    const admin = await prisma.user.findUnique({ where: { id: adminId } });
+    if (!admin) throw { status: 404, message: 'Admin user not found' };
+    const isMatch = await bc.compare(adminPassword, admin.passwordHash);
+    if (!isMatch) throw { status: 403, message: 'Admin password is incorrect' };
+
+    // Password history check (last 3)
+    const recentChanges = await prisma.auditLog.findMany({
+      where: { entity: 'Student', entityId: studentId, action: 'password_reset' },
+      orderBy: { createdAt: 'desc' },
+      take: 3,
+      select: { newValue: true },
+    });
+    for (const entry of recentChanges) {
+      const prevHash = (entry.newValue as any)?.passwordHash;
+      if (prevHash && typeof prevHash === 'string') {
+        const isReused = await bc.compare(newPassword, prevHash);
+        if (isReused) {
+          throw { status: 409, message: 'This password was used recently. Please choose a different one.' };
+        }
+      }
+    }
+
+    const newHash = await bc.hash(newPassword, 12);
+    await prisma.user.update({
+      where: { id: student.userId },
+      data: { passwordHash: newHash },
+    });
+
+    // Audit trail
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId: adminId,
+          action: 'password_reset',
+          entity: 'Student',
+          entityId: studentId,
+          newValue: { username: student.name, passwordHash: newHash },
+          ipAddress,
+        },
+      });
+    } catch { /* audit log is best-effort */ }
+
+    return { message: 'Password updated successfully' };
   }
 }
 
