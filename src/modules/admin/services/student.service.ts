@@ -1,5 +1,6 @@
 import { prisma } from '../../../lib/prisma';
 import { storage } from '../../upload/storage.service';
+import { generateUsername, generatePassword } from '../../../utils/username';
 
 export interface CreateStudentInput {
   name: string;
@@ -275,32 +276,36 @@ class StudentService {
   async generateCredentials(studentId: string) {
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      select: { id: true, name: true, userId: true },
+      select: { id: true, name: true, rollNumber: true, userId: true },
     });
     if (!student) throw { status: 404, message: 'Student not found' };
     if (student.userId) throw { status: 409, message: 'Student already has login credentials' };
 
-    const bc = await import('bcryptjs');
-    const tempPassword = 'stu_' + Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 6);
-    const hash = await bc.hash(tempPassword, 12);
+    // Get total student count for username scattering
+    const totalCount = await prisma.student.count();
+    const year = new Date().getFullYear();
 
-    // Generate unique username
-    const base = `student_${student.name.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-    let username = base;
-    let attempts = 0;
-    while (attempts < 10) {
-      const existing = await prisma.user.findUnique({ where: { username } });
-      if (!existing) break;
-      username = `${base}_${Math.floor(Math.random() * 9000 + 1000)}`;
-      attempts++;
-    }
-    if (attempts >= 10) username = `${base}_${Date.now() % 10000}`;
+    // Generate username using the encoder utility
+    // Pattern: <firstName><scatteredCount><rollLetters><yearLastDigit>
+    const username = generateUsername(
+      student.name,
+      totalCount + 1, // count INCLUDING this new student
+      student.rollNumber || '0',
+      year,
+    );
+
+    // Ensure username is unique (fallback: append random suffix)
+    const finalUsername = await this.ensureUniqueUsername(username);
+
+    const bc = await import('bcryptjs');
+    const password = generatePassword();
+    const hash = await bc.hash(password, 12);
 
     // Create user and link to student
     const user = await prisma.user.create({
       data: {
         name: student.name,
-        username,
+        username: finalUsername,
         passwordHash: hash,
         role: 'student',
         status: 'active',
@@ -308,7 +313,25 @@ class StudentService {
       },
     });
 
-    return { username: user.username, password: tempPassword };
+    return { username: user.username, password };
+  }
+
+  /**
+   * Ensure a username is unique in the DB.
+   * If the generated username is taken, appends a random suffix.
+   */
+  private async ensureUniqueUsername(baseUsername: string): Promise<string> {
+    let username = baseUsername;
+    let attempts = 0;
+    while (attempts < 10) {
+      const existing = await prisma.user.findUnique({ where: { username } });
+      if (!existing) return username;
+      // Append random 3 digits to make unique
+      username = `${baseUsername}${Math.floor(Math.random() * 900 + 100)}`;
+      attempts++;
+    }
+    // Last resort: append timestamp
+    return `${baseUsername}${Date.now() % 10000}`;
   }
 
   /**
