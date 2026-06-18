@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import authMiddleware from '../../middleware/auth/auth.middleware';
+import { uploadLimiter } from '../../middleware/security/rateLimiter';
 import { uploadService } from './upload.service';
 
 const router = Router();
@@ -14,8 +15,8 @@ const upload = multer({
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
   (req: Request, res: Response, next: NextFunction) => { fn(req, res, next).catch(next); };
 
-// ─── POST /api/upload — Upload a file (auth required) ───────────────
-router.post('/upload', authMiddleware, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
+// ─── POST /api/upload — Upload a file (auth + rate limit) ──────────
+router.post('/upload', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
   if (!req.file) {
     res.status(400).json({ success: false, message: 'No file provided' });
     return;

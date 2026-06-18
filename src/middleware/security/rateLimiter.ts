@@ -15,3 +15,19 @@ export const passwordSetLimiter = rateLimit({
     message: 'Too many attempts. Please try again in 1 minute.',
   },
 });
+
+/**
+ * Rate limiter for file upload endpoint.
+ * Prevents disk space abuse by limiting upload frequency.
+ * 20 uploads per minute per IP (~1 per 3 seconds).
+ */
+export const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many uploads. Please slow down (max 20 per minute).',
+  },
+});
