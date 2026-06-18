@@ -51,6 +51,12 @@ router.get('/uploads', authMiddleware, asyncHandler(async (req: Request, res: Re
   res.json({ success: true, data: records });
 }));
 
+// ─── DELETE /api/uploads/:id — Delete file + disk cleanup (auth required) ─
+router.delete('/uploads/:id', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
+  await uploadService.deleteFile(req.params.id);
+  res.json({ success: true, message: 'File deleted' });
+}));
+
 // ─── GET /api/uploads/:id/meta — File metadata (auth required) ──────
 router.get('/uploads/:id/meta', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const result = await uploadService.getMeta(req.params.id);

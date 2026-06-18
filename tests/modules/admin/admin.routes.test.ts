@@ -3120,6 +3120,46 @@ describe('Admin — File Upload', () => {
       expect(res.body.message).toContain('entityType');
     });
   });
+
+  // ─── File delete ──────────────────────────────────────────────────
+
+  describe('File delete', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+    });
+
+    test('DELETE /api/uploads/:id returns 200 and deletes file', async () => {
+      prismaMock.fileRecord.findUnique.mockResolvedValue({
+        id: 'file-to-delete', storagePath: '2026/06/test-file.pdf',
+      } as any);
+      prismaMock.fileRecord.delete.mockResolvedValue({} as any);
+
+      const res = await request(app)
+        .delete('/api/uploads/file-to-delete')
+        .set(adminToken);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(prismaMock.fileRecord.delete).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'file-to-delete' } }),
+      );
+    });
+
+    test('DELETE /api/uploads/:id returns 404 for unknown file', async () => {
+      prismaMock.fileRecord.findUnique.mockResolvedValue(null);
+
+      const res = await request(app)
+        .delete('/api/uploads/unknown')
+        .set(adminToken);
+
+      expect(res.status).toBe(404);
+    });
+
+    test('DELETE /api/uploads/:id returns 401 without auth', async () => {
+      const res = await request(app).delete('/api/uploads/any-id');
+      expect(res.status).toBe(401);
+    });
+  });
 });
 // ═══════════════════════════════════════════════════════════════════
 

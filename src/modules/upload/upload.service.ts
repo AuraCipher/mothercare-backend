@@ -181,6 +181,21 @@ export class UploadService {
     });
     return records;
   }
+
+  /**
+   * Delete a file record and remove the physical file from disk.
+   * If the file no longer exists on disk, the DB record is still cleaned up.
+   */
+  async deleteFile(fileId: string) {
+    const record = await prisma.fileRecord.findUnique({ where: { id: fileId } });
+    if (!record) throw { status: 404, message: 'File not found' };
+    // Delete physical file from disk (ignore if already gone)
+    try {
+      await storage.delete(record.storagePath);
+    } catch { /* file may already be missing — still clean up DB */ }
+    // Delete DB record
+    await prisma.fileRecord.delete({ where: { id: fileId } });
+  }
 }
 
 export const uploadService = new UploadService();
