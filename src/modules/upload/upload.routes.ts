@@ -27,14 +27,14 @@ router.post('/upload', authMiddleware, upload.single('file'), asyncHandler(async
   res.status(201).json({ success: true, data: result });
 }));
 
-// ─── GET /api/uploads/:id/meta — File metadata ──────────────────────
-router.get('/uploads/:id/meta', asyncHandler(async (req: Request, res: Response) => {
+// ─── GET /api/uploads/:id/meta — File metadata (auth required) ──────
+router.get('/uploads/:id/meta', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const result = await uploadService.getMeta(req.params.id);
   res.json({ success: true, data: result });
 }));
 
-// ─── GET /api/uploads/:id — Serve file ──────────────────────────────
-router.get('/uploads/:id', asyncHandler(async (req: Request, res: Response) => {
+// ─── GET /api/uploads/:id — Serve file (auth required) ──────────────
+router.get('/uploads/:id', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const { buffer, mimeType, originalName } = await uploadService.getFile(req.params.id);
   res.setHeader('Content-Type', mimeType);
   res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');

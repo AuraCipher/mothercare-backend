@@ -2904,6 +2904,11 @@ describe('Admin — File Upload', () => {
     expect(res.status).toBe(401);
   });
 
+  test('GET /api/uploads/:id returns 401 without auth', async () => {
+    const res = await request(app).get('/api/uploads/any-id');
+    expect(res.status).toBe(401);
+  });
+
   test('GET /api/uploads/:id/meta returns file metadata', async () => {
     prismaMock.fileRecord.findUnique.mockResolvedValue({
       id: 'file-999', originalName: 'test.jpg', storagePath: '2026/06/test.jpg',
