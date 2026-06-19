@@ -11,38 +11,40 @@ function timestamp() {
   return new Date().toISOString().slice(11, 23); // HH:mm:ss.SSS
 }
 
+// Pretty-print objects with 2-space indentation for readability
+function pretty(val: any): string {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'object') {
+    try { return '\n' + JSON.stringify(val, null, 2); } catch { return ''; }
+  }
+  return ` ${val}`;
+}
+
 export default {
   info: (label: string, meta?: any) => {
     if (!IS_DEV) return;
-    if (meta) console.info(`[${timestamp()}]  INFO  ${label}`, meta);
-    else console.info(`[${timestamp()}]  INFO  ${label}`);
+    console.info(`[${timestamp()}]  INFO  ${label}${pretty(meta)}`);
   },
 
   warn: (label: string, meta?: any) => {
     if (!IS_DEV) return;
-    if (meta) console.warn(`[${timestamp()}]  WARN  ${label}`, meta);
-    else console.warn(`[${timestamp()}]  WARN  ${label}`);
+    console.warn(`[${timestamp()}]  WARN  ${label}${pretty(meta)}`);
   },
 
   error: (label: string, meta?: any) => {
-    if (meta) console.error(`[${timestamp()}]  ERROR ${label}`, meta);
-    else console.error(`[${timestamp()}]  ERROR ${label}`);
+    console.error(`[${timestamp()}]  ERROR ${label}${pretty(meta)}`);
   },
 
   debug: (label: string, meta?: any) => {
     if (!IS_DEV) return;
-    if (meta) console.debug(`[${timestamp()}]  DEBUG ${label}`, meta);
-    else console.debug(`[${timestamp()}]  DEBUG ${label}`);
+    console.debug(`[${timestamp()}]  DEBUG ${label}${pretty(meta)}`);
   },
 
   // Request/Response logging (development only)
   req: (method: string, url: string, body?: any) => {
     if (!IS_DEV) return;
-    if (body && Object.keys(body).length > 0) {
-      console.log(`[${timestamp()}]  -->  ${method}  ${url}`, body);
-    } else {
-      console.log(`[${timestamp()}]  -->  ${method}  ${url}`);
-    }
+    const bodyStr = body && Object.keys(body).length > 0 ? pretty(body) : '';
+    console.log(`[${timestamp()}]  -->  ${method}  ${url}${bodyStr}`);
   },
 
   res: (method: string, url: string, status: number, duration: number) => {

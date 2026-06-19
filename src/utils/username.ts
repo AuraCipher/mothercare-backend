@@ -210,62 +210,62 @@ export function lettersToRoll(letters: string): string {
 /**
  * Generate a full username.
  *
+ * The username encodes the studentNumber TWICE (scattered + letter-encoded)
+ * with the admission year appended, making it hard to reverse-engineer.
+ *
+ * Pattern: <firstName><scatteredStudentNumber><studentNumberLetters><admissionYearLast>
+ *
  * @param firstName - Student's first name (lowercased, non-alphanumeric stripped)
- * @param studentCount - Total number of students in the system (for scattering)
- * @param rollNumber - Student's roll number as string (e.g., "012")
- * @param year - Current year (e.g., 2026)
+ * @param studentNumber - Permanent sequential number assigned on admission
+ * @param admissionYear - Year the student was admitted (e.g., 2026)
  * @returns Generated username string
  *
  * Example:
- *   generateUsername("Ali", 907, "012", 2026)
- *   → ali + 790 + zmp + 6
- *   → "ali790zmp6"
+ *   generateUsername("Ali", 907, 2026)
+ *   → ali + 790 + kzx + 6
+ *   → "ali790kzx6"
  */
 export function generateUsername(
   firstName: string,
-  studentCount: number,
-  rollNumber: string,
-  year: number,
+  studentNumber: number,
+  admissionYear: number,
 ): string {
   // Sanitize name: lowercase, strip non-alphanumeric
   const cleanName = firstName
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
 
-  const scattered = scatterCount(studentCount);
-  const rollLetters = rollToLetters(rollNumber);
-  const yearLastDigit = year.toString().slice(-1);
+  const scattered = scatterCount(studentNumber);
+  const numberLetters = rollToLetters(studentNumber.toString());
+  const yearLastDigit = admissionYear.toString().slice(-1);
 
-  return `${cleanName}${scattered}${rollLetters}${yearLastDigit}`;
+  return `${cleanName}${scattered}${numberLetters}${yearLastDigit}`;
 }
 
 /**
  * Decode a username back into its components (admin reference).
  *
  * Example:
- *   decodeUsername("ali790zmp6")
- *   → { firstName: "ali", originalCount: 907, rollNumber: "12", year: 2026 }
+ *   decodeUsername("ali790kzx6")
+ *   → { firstName: "ali", studentNumber: 907, admissionYearLastDigit: "6" }
  */
 export function decodeUsername(username: string): {
   firstName: string;
-  originalCount: number;
-  rollNumber: string;
-  yearLastDigit: string;
+  studentNumber: number;
+  admissionYearLastDigit: string;
 } | null {
   try {
-    // Find where the numeric scattered portion starts (after the name)
     const match = username.match(/^([a-z]+)(\d+)([a-z]+)(\d)$/);
     if (!match) return null;
 
     const firstName = match[1];
     const scattered = match[2];
-    const rollLetters = match[3];
+    const numberLetters = match[3];
     const yearLastDigit = match[4];
 
-    const originalCount = unscatterCount(scattered);
-    const rollNumber = lettersToRoll(rollLetters);
+    const studentNumber = unscatterCount(scattered);
 
-    return { firstName, originalCount, rollNumber, yearLastDigit };
+    return { firstName, studentNumber, admissionYearLastDigit: yearLastDigit };
   } catch {
     return null;
   }

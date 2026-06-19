@@ -122,12 +122,23 @@ class StudentService {
       if (!activeAy) throw { status: 400, message: 'No active academic year found' };
       academicYearId = activeAy.id;
     }
+
+    // Get next student number from sequence (permanent, never reuses)
+    const seqResult: any = await prisma.$queryRawUnsafe(`SELECT nextval('students_number_seq') AS n`);
+    const studentNumber = parseInt(seqResult[0]?.n || '0', 10);
+
     let admissionNumber = data.admissionNumber;
     if (!admissionNumber) {
       const year = new Date().getFullYear();
-      const count = await prisma.student.count();
-      admissionNumber = `MCS-${year}-${String(count + 1).padStart(4, '0')}`;
+      admissionNumber = `MCS-${year}-${String(studentNumber).padStart(4, '0')}`;
     }
+
+    // Auto-generate username using studentNumber + admission year
+    const admissionYear = data.dateOfBirth
+      ? new Date(data.dateOfBirth).getFullYear()
+      : new Date().getFullYear();
+    const username = generateUsername(data.name, studentNumber, admissionYear);
+
     const student = await prisma.student.create({
       data: {
         name: data.name, gender: data.gender as any,
@@ -143,6 +154,8 @@ class StudentService {
         groupId: data.groupId, academicYearId, admissionNumber,
         profilePhotoId: data.profilePhotoId,
         createdById: (data as any).createdById,
+        studentNumber,
+        username,
       },
       include: { group: { select: { id: true, name: true, section: true } } },
     });
