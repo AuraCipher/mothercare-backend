@@ -5,38 +5,38 @@ const router = Router();
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
   (req: Request, res: Response, next: NextFunction) => { fn(req, res, next).catch(next); };
 
-// GET /attendance?date=2026-06-20&groupId=xxx — Get attendance for a date + class
+// GET /attendance?date=...&groupId=... — Get attendance (single day or range)
+//   Single day: /attendance?date=2026-06-20&groupId=xxx
+//   Range:      /attendance?from=2026-06-01&to=2026-06-30&groupId=xxx
 router.get('/attendance', asyncHandler(async (req: Request, res: Response) => {
-  const { date, groupId } = req.query;
-  if (!date || !groupId) {
-    res.status(400).json({ success: false, message: 'date and groupId are required' });
+  const { date, from, to, groupId } = req.query;
+  if (!groupId) {
+    res.status(400).json({ success: false, message: 'groupId is required' });
     return;
   }
 
-  const dateStr = date as string;
+  // Build date filter
+  let dateFilter: any = {};
+  if (from && to) {
+    dateFilter = { gte: new Date(from as string), lte: new Date(to as string) };
+  } else if (date) {
+    dateFilter = { equals: new Date(date as string) };
+  }
+
   const students = await prisma.student.findMany({
     where: { groupId: groupId as string, isActive: true },
     select: {
       id: true, name: true, rollNumber: true, admissionNumber: true,
       attendances: {
-        where: { date: new Date(dateStr) },
-        select: { status: true, id: true },
+        where: Object.keys(dateFilter).length ? { date: dateFilter } : undefined,
+        select: { date: true, status: true },
+        orderBy: { date: 'asc' },
       },
     },
     orderBy: { rollNumber: 'asc' },
   });
 
-  // Map to include attendance status (default: not marked)
-  const data = students.map(s => ({
-    id: s.id,
-    name: s.name,
-    rollNumber: s.rollNumber,
-    admissionNumber: s.admissionNumber,
-    status: s.attendances[0]?.status || 'unmarked',
-    attendanceId: s.attendances[0]?.id || null,
-  }));
-
-  res.json({ success: true, data, total: data.length });
+  res.json({ success: true, data: students, total: students.length });
 }));
 
 // POST /attendance/batch — Save attendance for multiple students
