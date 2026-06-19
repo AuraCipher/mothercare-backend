@@ -29,6 +29,7 @@ export interface CreateStudentInput {
   // Guardian fields — if provided, creates a parent profile and links it
   guardianName?: string;
   guardianRelation?: string;
+  createdById?: string;
 }
 
 export interface UpdateStudentInput {
@@ -54,6 +55,7 @@ export interface UpdateStudentInput {
   groupId?: string;
   admissionNumber?: string;
   profilePhotoId?: string;
+  updatedById?: string;
 }
 
 class StudentService {

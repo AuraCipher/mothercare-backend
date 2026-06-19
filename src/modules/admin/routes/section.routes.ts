@@ -22,7 +22,7 @@ router.post('/branches/:branchId/academic-years/:ayId/sections', asyncHandler(as
     return;
   }
 
-  const result = await sectionService.create(req.params.ayId, { name, section, displayOrder, capacity });
+  const result = await sectionService.create(req.params.ayId, { name, section, displayOrder, capacity, createdById: (req as any).user?.id });
   res.status(201).json({ success: true, data: result });
 }));
 
@@ -35,7 +35,7 @@ router.get('/branches/:branchId/academic-years/:ayId/sections', asyncHandler(asy
 // PUT /admin/branches/:branchId/sections/:id — Update
 router.put('/branches/:branchId/sections/:id', asyncHandler(async (req: Request, res: Response) => {
   const { name, section, displayOrder, capacity } = req.body;
-  const result = await sectionService.update(req.params.id, { name, section, displayOrder, capacity });
+  const result = await sectionService.update(req.params.id, { name, section, displayOrder, capacity, updatedById: (req as any).user?.id });
   res.json({ success: true, data: result });
 }));
 

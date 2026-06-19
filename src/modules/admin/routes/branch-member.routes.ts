@@ -56,7 +56,7 @@ router.put('/:branchId/members/:userId', asyncHandler(async (req: Request, res: 
     return;
   }
 
-  const member = await branchMemberService.updateRole(req.params.branchId, req.params.userId, { role, keepTeacherRole });
+  const member = await branchMemberService.updateRole(req.params.branchId, req.params.userId, { role, keepTeacherRole, updatedById: (req as any).user?.id });
   res.json({ success: true, data: member });
 }));
 

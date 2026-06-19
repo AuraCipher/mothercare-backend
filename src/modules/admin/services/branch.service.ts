@@ -7,6 +7,7 @@ export interface CreateBranchInput {
   phone?: string;
   email?: string;
   logoUrl?: string;
+  createdById?: string;
 }
 
 export interface UpdateBranchInput {
@@ -15,6 +16,7 @@ export interface UpdateBranchInput {
   phone?: string;
   email?: string;
   logoUrl?: string;
+  updatedById?: string;
 }
 
 class BranchService {

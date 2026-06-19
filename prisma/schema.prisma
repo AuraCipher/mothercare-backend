@@ -189,7 +189,11 @@ model School {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@map("schools")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -214,7 +218,11 @@ model Branch {
   branchMembers    BranchMember[]
   adminInvitations AdminInvitation[]
 
+  createdById     String?
+  updatedById     String?
+
   @@map("branches")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -236,7 +244,11 @@ model AcademicCalendar {
 
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@map("academic_calendars")
+
 
 }
 
@@ -272,8 +284,12 @@ model AcademicYear {
   announcements      Announcement[]
   timetables         Timetable[]
 
+  createdById     String?
+  updatedById     String?
+
   @@unique([branchId, calendarId])
   @@map("academic_years")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -293,8 +309,12 @@ model AcademicYearMember {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@unique([academicYearId, userId])
   @@map("academic_year_members")
+
 
 }
 
@@ -321,9 +341,13 @@ model BranchMember {
   assignedBy        User?  @relation("AssignedBy", fields: [assignedById], references: [id])
   resignedInFavorOf User?  @relation("ResignedInFavorOf", fields: [resignedInFavorOfId], references: [id])
 
+  createdById     String?
+  updatedById     String?
+
   @@unique([branchId, userId])
   @@index([userId])
   @@map("branch_members")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -353,8 +377,12 @@ model Group {
   enrollments        Enrollment[]
   timetableEntries   TimetableEntry[]
 
+  createdById     String?
+  updatedById     String?
+
   @@unique([academicYearId, name, section])
   @@map("groups")
+
 }
 
 // Group membership (users in a group)
@@ -371,8 +399,12 @@ model GroupMember {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@unique([groupId, userId])
   @@map("group_members")
+
 
 }
 
@@ -403,8 +435,12 @@ model Subject {
 
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@unique([academicYearId, code])
   @@map("subjects")
+
 
 }
 
@@ -425,8 +461,12 @@ model GroupSubject {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@unique([groupId, subjectId])
   @@map("group_subjects")
+
 
 }
 
@@ -459,7 +499,11 @@ model TeacherProfile {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  createdById     String?
+  updatedById     String?
+
   @@map("teacher_profiles")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -486,7 +530,11 @@ model TeacherAssignment {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@map("teacher_assignments")
+
 
 }
 
@@ -509,7 +557,11 @@ model ManagementProfile {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  createdById     String?
+  updatedById     String?
+
   @@map("management_profiles")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -535,7 +587,11 @@ model ParentProfile {
 
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@map("parent_profiles")
+
 
 }
 
@@ -611,8 +667,12 @@ model StudentParent {
 
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@unique([studentId, parentId])
   @@map("student_parents")
+
 
 }
 
@@ -634,7 +694,11 @@ model EmergencyContact {
 
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@map("emergency_contacts")
+
 
 }
 
@@ -660,7 +724,11 @@ model HealthRecord {
 
   createdAt       DateTime      @default(now())
 
+  createdById     String?
+  updatedById     String?
+
   @@map("health_records")
+
 
 }
 
@@ -686,8 +754,12 @@ model Enrollment {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@unique([studentId, academicYearId])
   @@map("enrollments")
+
 
 }
 
@@ -718,7 +790,11 @@ model AcademicYearSnapshot {
 
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@map("academic_year_snapshots")
+
 
 }
 
@@ -744,7 +820,11 @@ model GroupSnapshot {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@map("group_snapshots")
+
 
 }
 
@@ -814,7 +894,11 @@ model BatchPromotion {
 
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@map("batch_promotions")
+
 
 }
 
@@ -946,10 +1030,14 @@ model AdminInvitation {
 
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@index([token])
   @@index([email])
   @@index([branchId])
   @@map("admin_invitations")
+
 
 }
 
@@ -979,8 +1067,12 @@ model Timetable {
 
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@unique([academicYearId, name])
   @@map("timetables")
+
 
 }
 
@@ -999,8 +1091,12 @@ model TimetableSlot {
 
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@unique([timetableId, lectureNumber])
   @@map("timetable_slots")
+
 
 }
 
@@ -1026,8 +1122,12 @@ model TimetableEntry {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@unique([slotId, groupId])
   @@map("timetable_entries")
+
 
 }
 
@@ -1047,7 +1147,11 @@ model TimetableDayConfig {
 
   updatedAt       DateTime      @updatedAt
 
+  createdById     String?
+  updatedById     String?
+
   @@unique([timetableId, dayOfWeek])
   @@map("timetable_day_configs")
+
 
 }

@@ -8,6 +8,7 @@ export interface CreateSubjectInput {
   passingMarks?: number;
   isElective?: boolean;
   hodId?: string;
+  createdById?: string;
 }
 
 export interface UpdateSubjectInput {
@@ -18,6 +19,7 @@ export interface UpdateSubjectInput {
   passingMarks?: number;
   isElective?: boolean;
   hodId?: string | null;
+  updatedById?: string;
 }
 
 class SubjectService {

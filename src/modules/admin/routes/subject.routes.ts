@@ -23,6 +23,7 @@ router.post('/branches/:branchId/academic-years/:ayId/subjects', asyncHandler(as
 
   const subject = await subjectService.create(req.params.ayId, {
     name, code, description, totalMarks, passingMarks, isElective, hodId,
+    createdById: (req as any).user?.id,
   });
 
   res.status(201).json({ success: true, data: subject });
@@ -45,6 +46,7 @@ router.put('/branches/:branchId/subjects/:id', asyncHandler(async (req: Request,
   const { name, code, description, totalMarks, passingMarks, isElective, hodId } = req.body;
   const subject = await subjectService.update(req.params.id, {
     name, code, description, totalMarks, passingMarks, isElective, hodId,
+    updatedById: (req as any).user?.id,
   });
   res.json({ success: true, data: subject });
 }));

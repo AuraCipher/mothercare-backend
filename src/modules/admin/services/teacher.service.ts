@@ -29,6 +29,7 @@ export interface CreateTeacherProfileInput {
   experience?: string;
   bio?: string;
   profilePhotoId?: string;
+  createdById?: string;
 }
 
 export interface UpdateTeacherProfileInput {
@@ -49,6 +50,7 @@ export interface UpdateTeacherProfileInput {
   experience?: string;
   bio?: string;
   profilePhotoId?: string;
+  updatedById?: string;
 }
 
 export interface CreateAssignmentInput {
@@ -58,10 +60,12 @@ export interface CreateAssignmentInput {
   subjectId: string;
   isClassTeacher?: boolean;
   role?: string; // "primary", "assistant", "hod"
+  createdById?: string;
 }
 
 export interface UpdateAssignmentInput {
   isClassTeacher?: boolean;
+  updatedById?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════

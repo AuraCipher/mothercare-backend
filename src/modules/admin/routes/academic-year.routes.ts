@@ -52,6 +52,7 @@ router.post('/branches/:branchId/academic-years', asyncHandler(async (req: Reque
     calendarId,
     previousAcademicYearId,
     directToArchived: directToArchived === true,
+    createdById: (req as any).user?.id,
   });
 
   res.status(201).json({ success: true, data: academicYear });

@@ -6,10 +6,12 @@ export interface CreateAcademicYearInput {
   calendarId: string;
   previousAcademicYearId?: string;
   directToArchived?: boolean; // Skip BUILD_STAGE, create directly as ARCHIVED (for historical import)
+  createdById?: string;
 }
 
 export interface UpdateAcademicYearInput {
   previousAcademicYearId?: string;
+  updatedById?: string;
 }
 
 class AcademicYearService {

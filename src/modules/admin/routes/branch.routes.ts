@@ -33,6 +33,7 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
     phone,
     email,
     logoUrl,
+    createdById: (req as any).user?.id,
   });
 
   res.status(201).json({ success: true, data: branch });
@@ -59,7 +60,7 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-  const branch = await branchService.update(req.params.id, { name, address, phone, email, logoUrl });
+  const branch = await branchService.update(req.params.id, { name, address, phone, email, logoUrl, updatedById: (req as any).user?.id });
   res.json({ success: true, data: branch });
 }));
 

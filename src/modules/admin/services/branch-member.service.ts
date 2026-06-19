@@ -12,6 +12,7 @@ export interface AddMemberInput {
 export interface UpdateMemberInput {
   role?: BranchRole;
   keepTeacherRole?: boolean;
+  updatedById?: string;
 }
 
 class BranchMemberService {

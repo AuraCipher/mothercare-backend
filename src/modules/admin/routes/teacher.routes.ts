@@ -25,6 +25,7 @@ router.post('/teachers', asyncHandler(async (req: Request, res: Response) => {
 
   const profile = await teacherProfileService.create({
     userId, name, username, password, email, branchId, employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio,
+    createdById: (req as any).user?.id,
   });
 
   res.status(201).json({ success: true, data: profile });
@@ -56,6 +57,7 @@ router.put('/teachers/:id', asyncHandler(async (req: Request, res: Response) => 
 
   const profile = await teacherProfileService.update(req.params.id, {
     employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio, profilePhotoId,
+    updatedById: (req as any).user?.id,
   });
 
   res.json({ success: true, data: profile });

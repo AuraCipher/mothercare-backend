@@ -30,6 +30,7 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
     startDate,
     endDate,
     isCurrent,
+    createdById: (req as any).user?.id,
   });
 
   res.status(201).json({ success: true, data: calendar });
@@ -50,7 +51,7 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
 // PUT /admin/calendars/:id — Update calendar (BA-008)
 router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
   const { label, startDate, endDate, isCurrent } = req.body;
-  const calendar = await academicCalendarService.update(req.params.id, { label, startDate, endDate, isCurrent });
+  const calendar = await academicCalendarService.update(req.params.id, { label, startDate, endDate, isCurrent, updatedById: (req as any).user?.id });
   res.json({ success: true, data: calendar });
 }));
 

@@ -5,6 +5,7 @@ export interface CreateCalendarInput {
   startDate: string;
   endDate: string;
   isCurrent?: boolean;
+  createdById?: string;
 }
 
 export interface UpdateCalendarInput {
@@ -12,6 +13,7 @@ export interface UpdateCalendarInput {
   startDate?: string;
   endDate?: string;
   isCurrent?: boolean;
+  updatedById?: string;
 }
 
 class AcademicCalendarService {
