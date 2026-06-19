@@ -95,6 +95,13 @@ router.post('/teachers/:id/set-password', passwordSetLimiter, asyncHandler(async
   res.json({ success: true, message: result.message });
 }));
 
+// POST /admin/teachers/:id/send-credentials — Send via WhatsApp
+router.post('/teachers/:id/send-credentials', asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  const result = await teacherProfileService.sendCredentials(req.params.id, userId, req.ip);
+  res.json({ success: true, data: result });
+}));
+
 // TC-016: GET /admin/teachers/:id/assignments — Get teacher's assignments
 router.get('/teachers/:id/assignments', asyncHandler(async (req: Request, res: Response) => {
   const assignments = await teacherAssignmentService.findByTeacher(req.params.id);

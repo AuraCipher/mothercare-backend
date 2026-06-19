@@ -472,6 +472,51 @@ class TeacherProfileService {
 
     return { message: 'Teacher deleted permanently.' };
   }
+
+  // ─── Send credentials via WhatsApp ─────────────────────────
+
+  async sendCredentials(profileId: string, userId: string, ipAddress?: string) {
+    const bc = await import('bcryptjs');
+    const profile = await prisma.teacherProfile.findUnique({
+      where: { id: profileId },
+      select: { id: true, userId: true, phone: true, user: { select: { name: true, username: true } } },
+    });
+    if (!profile) throw { status: 404, message: 'Teacher not found' };
+    if (!profile.phone) throw { status: 400, message: 'No phone number available for this teacher.' };
+
+    // Generate fresh temp password
+    const { generatePassword } = await import('../../../utils/username');
+    const tempPassword = generatePassword();
+    const hash = await bc.hash(tempPassword, 12);
+    await prisma.user.update({
+      where: { id: profile.userId },
+      data: { passwordHash: hash },
+    });
+
+    const notificationService = (await import('../../../services/notification.service')).default;
+    const result = await notificationService.sendCredential({
+      to: profile.phone,
+      username: profile.user.username || profile.user.name,
+      password: tempPassword,
+      name: profile.user.name,
+    });
+
+    // Audit trail
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId,
+          action: 'credential_sent',
+          entity: 'TeacherProfile',
+          entityId: profileId,
+          newValue: { sent: result.success, to: profile.phone.slice(0, 6) + '****' },
+          ipAddress,
+        },
+      });
+    } catch { /* best-effort */ }
+
+    return { sent: result.success, status: result.messageStatus };
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
