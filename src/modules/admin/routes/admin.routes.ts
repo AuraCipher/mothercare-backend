@@ -11,6 +11,7 @@ import teacherRoutes from './teacher.routes';
 import sectionRoutes from './section.routes';
 import subjectRoutes from './subject.routes';
 import timetableRoutes from './timetable.routes';
+import attendanceRoutes from './attendance.routes';
 import studentRoutes from './student.routes';
 
 const router = Router();
@@ -40,6 +41,7 @@ router.use(teacherRoutes); // Contains /teachers, /teachers/:id, /assignments, /
 router.use(sectionRoutes); // Contains /branches/:branchId/academic-years/:ayId/sections, /branches/:branchId/sections/:id
 router.use(subjectRoutes); // Contains /branches/:branchId/academic-years/:ayId/subjects, /branches/:branchId/subjects/:id
 router.use(timetableRoutes); // Contains /branches/:branchId/academic-years/:ayId/timetable/slots, /branches/:branchId/sections/:sectionId/timetable
+router.use(attendanceRoutes); // Contains /attendance, /attendance/batch
 router.use(studentRoutes); // Contains /students, /students/:id, /students/:id/emergency-contact, etc.
 
 // ═══════════════════════════════════════════════════════════════════

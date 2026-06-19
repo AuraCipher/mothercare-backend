@@ -1,0 +1,108 @@
+import { Router, Request, Response, NextFunction } from 'express';
+import { prisma } from '../../../lib/prisma';
+
+const router = Router();
+const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
+  (req: Request, res: Response, next: NextFunction) => { fn(req, res, next).catch(next); };
+
+// GET /attendance?date=2026-06-20&groupId=xxx — Get attendance for a date + class
+router.get('/attendance', asyncHandler(async (req: Request, res: Response) => {
+  const { date, groupId } = req.query;
+  if (!date || !groupId) {
+    res.status(400).json({ success: false, message: 'date and groupId are required' });
+    return;
+  }
+
+  const dateStr = date as string;
+  const students = await prisma.student.findMany({
+    where: { groupId: groupId as string, isActive: true },
+    select: {
+      id: true, name: true, rollNumber: true, admissionNumber: true,
+      attendances: {
+        where: { date: new Date(dateStr) },
+        select: { status: true, id: true },
+      },
+    },
+    orderBy: { rollNumber: 'asc' },
+  });
+
+  // Map to include attendance status (default: not marked)
+  const data = students.map(s => ({
+    id: s.id,
+    name: s.name,
+    rollNumber: s.rollNumber,
+    admissionNumber: s.admissionNumber,
+    status: s.attendances[0]?.status || 'unmarked',
+    attendanceId: s.attendances[0]?.id || null,
+  }));
+
+  res.json({ success: true, data, total: data.length });
+}));
+
+// POST /attendance/batch — Save attendance for multiple students
+router.post('/attendance/batch', asyncHandler(async (req: Request, res: Response) => {
+  const { date, groupId, academicYearId, records } = req.body;
+  if (!date || !groupId || !records || !Array.isArray(records)) {
+    res.status(400).json({ success: false, message: 'date, groupId, and records[] are required' });
+    return;
+  }
+
+  if (!academicYearId) {
+    const activeAy = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } });
+    if (!activeAy) { res.status(400).json({ success: false, message: 'No active academic year' }); return; }
+    req.body.academicYearId = activeAy.id;
+  }
+
+  const userId = (req as any).user?.id;
+  const dateObj = new Date(date as string);
+  let saved = 0;
+
+  for (const record of records) {
+    if (!record.studentId || !record.status) continue;
+    await prisma.attendance.upsert({
+      where: { studentId_date: { studentId: record.studentId, date: dateObj } },
+      update: { status: record.status, markedById: userId },
+      create: {
+        studentId: record.studentId,
+        academicYearId: req.body.academicYearId,
+        date: dateObj,
+        status: record.status,
+        markedById: userId,
+      },
+    });
+    saved++;
+  }
+
+  res.json({ success: true, data: { saved, total: records.length } });
+}));
+
+// GET /students/:id/attendance — Student attendance report
+router.get('/students/:id/attendance', asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { from, to } = req.query;
+
+  const where: any = { studentId: id };
+  if (from) where.date = { ...where.date, gte: new Date(from as string) };
+  if (to) where.date = { ...where.date, lte: new Date(to as string) };
+
+  const records = await prisma.attendance.findMany({
+    where,
+    orderBy: { date: 'asc' },
+    select: { date: true, status: true },
+  });
+
+  const present = records.filter(r => r.status === 'present').length;
+  const absent = records.filter(r => r.status === 'absent').length;
+  const late = records.filter(r => r.status === 'late').length;
+  const total = records.length;
+
+  res.json({
+    success: true,
+    data: {
+      records,
+      summary: { present, absent, late, total, percentage: total ? Math.round((present / total) * 100) : 0 },
+    },
+  });
+}));
+
+export default router;
