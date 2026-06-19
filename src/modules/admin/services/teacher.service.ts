@@ -374,6 +374,12 @@ class TeacherProfileService {
       data: { passwordHash: newHash },
     });
 
+    // Track password change date
+    await prisma.teacherProfile.update({
+      where: { id: profileId },
+      data: { passwordSetAt: new Date() },
+    });
+
     // ── Audit trail (V2) ────────────────────────────────────
     try {
       await prisma.auditLog.create({
@@ -501,6 +507,18 @@ class TeacherProfileService {
       name: profile.user.name,
     });
 
+    // Update tracking fields
+    const status = result.success ? 'sent' : 'failed';
+    const now = new Date();
+    await prisma.teacherProfile.update({
+      where: { id: profileId },
+      data: {
+        credentialSentAt: now,
+        credentialStatus: status,
+        passwordSetAt: now,
+      },
+    });
+
     // Audit trail
     try {
       await prisma.auditLog.create({
@@ -509,13 +527,13 @@ class TeacherProfileService {
           action: 'credential_sent',
           entity: 'TeacherProfile',
           entityId: profileId,
-          newValue: { sent: result.success, to: profile.phone.slice(0, 6) + '****' },
+          newValue: { sent: result.success, status, to: profile.phone.slice(0, 6) + '****' },
           ipAddress,
         },
       });
     } catch { /* best-effort */ }
 
-    return { sent: result.success, status: result.messageStatus };
+    return { sent: result.success, status };
   }
 }
 

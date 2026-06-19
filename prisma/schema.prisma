@@ -500,8 +500,14 @@ model TeacherProfile {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  createdById     String?
-  updatedById     String?
+  createdById         String?
+  updatedById         String?
+  credentialGeneratedAt  DateTime?
+  credentialSentAt       DateTime?
+  credentialDeliveredAt  DateTime?
+  credentialSeenAt       DateTime?
+  passwordSetAt          DateTime?
+  credentialStatus       String?       @default("none")
 
   @@map("teacher_profiles")
 
