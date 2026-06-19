@@ -58,7 +58,27 @@ const notificationService: NotificationService = {
       const message = await twilioClient.messages.create({
         from,
         to: formattedTo,
-        body: `Welcome to Mother Care School, ${name}!\n\nHere are your login credentials:\n\nUsername: ${username}\nPassword: ${password}\n\nPlease keep this information safe. Do not share your password with anyone.\n\nThank you!`,
+        body: `Welcome to Mother Care School, ${name}!
+
+We are delighted to have you and your family as part of our school community. This is your personal login to stay connected with your child's academic journey.
+
+Login Credentials:
+👤 Username: ${username}
+🔑 Password: ${password}
+
+─────────────────────
+🌐 Web Portal:
+Login with same credentials on your browser to access full detail reports, attendance, fees & more.
+${env.FRONTEND_URL || 'https://mothercare.pk'}
+
+📱 MCS Messaging App:
+Download our app to receive instant push notifications for homework, class activities, messages from teachers & principal.
+${env.APP_DOWNLOAD_URL || 'https://play.google.com/store/apps/details?id=com.mothercare.app'}
+
+─────────────────────
+⚠️ If you forget your password, contact the school management to get a new one.
+
+Keep your credentials safe. Do not share your password.`,
       });
 
       return { success: true, messageStatus: message.status };
