@@ -140,6 +140,7 @@ class StudentService {
         tcNumber: data.tcNumber, referredBy: data.referredBy,
         groupId: data.groupId, academicYearId, admissionNumber,
         profilePhotoId: data.profilePhotoId,
+        createdById: (data as any).createdById,
       },
       include: { group: { select: { id: true, name: true, section: true } } },
     });
@@ -219,6 +220,7 @@ class StudentService {
         tcNumber: data.tcNumber, referredBy: data.referredBy,
         groupId: data.groupId, admissionNumber: data.admissionNumber,
         profilePhotoId: data.profilePhotoId,
+        updatedById: (data as any).updatedById,
       },
       include: { group: { select: { id: true, name: true, section: true } } },
     });

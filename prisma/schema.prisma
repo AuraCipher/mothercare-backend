@@ -129,6 +129,8 @@ model User {
   timetableEntries      TimetableEntry[]       @relation("TimetableTeacher")
   uploadedFiles         FileRecord[]
   student               Student?
+  createdStudents       Student[]  @relation("StudentCreatedBy")
+  updatedStudents       Student[]  @relation("StudentUpdatedBy")
 
   @@index([username])
   @@index([email])
@@ -578,6 +580,10 @@ model Student {
   admissionDate   DateTime      @default(now())
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+  createdById     String?
+  updatedById     String?
+  createdBy       User?         @relation("StudentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy       User?         @relation("StudentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   academicYear      AcademicYear       @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   group             Group?             @relation(fields: [groupId], references: [id], onDelete: SetNull)

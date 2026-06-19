@@ -27,13 +27,15 @@ router.get('/students/:id', asyncHandler(async (req: Request, res: Response) => 
 
 // POST /students — Create
 router.post('/students', asyncHandler(async (req: Request, res: Response) => {
-  const student = await studentService.create(req.body);
+  const userId = (req as any).user?.id;
+  const student = await studentService.create({ ...req.body, createdById: userId });
   res.status(201).json({ success: true, data: student });
 }));
 
 // PUT /students/:id — Update
 router.put('/students/:id', asyncHandler(async (req: Request, res: Response) => {
-  const student = await studentService.update(req.params.id, req.body);
+  const userId = (req as any).user?.id;
+  const student = await studentService.update(req.params.id, { ...req.body, updatedById: userId });
   res.json({ success: true, data: student });
 }));
 
