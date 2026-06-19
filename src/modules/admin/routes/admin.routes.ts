@@ -201,6 +201,7 @@ router.post('/groups', asyncHandler(async (req: Request, res: Response) => {
       section: section || undefined,
       displayOrder: displayOrder || 1,
       capacity: capacity || 30,
+      createdById: (req as any).user?.id,
     },
   });
 

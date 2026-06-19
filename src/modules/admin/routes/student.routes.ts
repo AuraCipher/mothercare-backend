@@ -47,7 +47,7 @@ router.delete('/students/:id', asyncHandler(async (req: Request, res: Response) 
 
 // POST /students/:id/emergency-contact — Add emergency contact
 router.post('/students/:id/emergency-contact', asyncHandler(async (req: Request, res: Response) => {
-  const contact = await studentService.addEmergencyContact(req.params.id, req.body);
+  const contact = await studentService.addEmergencyContact(req.params.id, { ...req.body, createdById: (req as any).user?.id });
   res.status(201).json({ success: true, data: contact });
 }));
 
@@ -55,7 +55,7 @@ router.post('/students/:id/emergency-contact', asyncHandler(async (req: Request,
 router.put('/students/:id/emergency-contact/:contactId', asyncHandler(async (req: Request, res: Response) => {
   const updated = await prisma.emergencyContact.update({
     where: { id: req.params.contactId },
-    data: req.body,
+    data: { ...req.body, updatedById: (req as any).user?.id },
   });
   res.json({ success: true, data: updated });
 }));
@@ -68,14 +68,14 @@ router.delete('/students/:id/emergency-contact/:contactId', asyncHandler(async (
 
 // PUT /students/:id/health-record — Upsert health record
 router.put('/students/:id/health-record', asyncHandler(async (req: Request, res: Response) => {
-  const record = await studentService.upsertHealthRecord(req.params.id, req.body);
+  const record = await studentService.upsertHealthRecord(req.params.id, { ...req.body, updatedById: (req as any).user?.id });
   res.json({ success: true, data: record });
 }));
 
 // POST /students/:id/parents — Link parent
 router.post('/students/:id/parents', asyncHandler(async (req: Request, res: Response) => {
   const { parentUserId, relation, isPrimary } = req.body;
-  const link = await studentService.linkParent(req.params.id, parentUserId, relation, isPrimary);
+  const link = await studentService.linkParent(req.params.id, parentUserId, relation, isPrimary, (req as any).user?.id);
   res.status(201).json({ success: true, data: link });
 }));
 

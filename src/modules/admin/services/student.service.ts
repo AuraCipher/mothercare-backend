@@ -258,9 +258,9 @@ class StudentService {
   }
 
   // Parent linking
-  async linkParent(studentId: string, parentUserId: string, relation: string, isPrimary?: boolean) {
+  async linkParent(studentId: string, parentUserId: string, relation: string, isPrimary?: boolean, createdById?: string) {
     return prisma.studentParent.create({
-      data: { studentId, parentId: parentUserId, relation, isPrimary: isPrimary || false },
+      data: { studentId, parentId: parentUserId, relation, isPrimary: isPrimary || false, createdById },
     });
   }
 
