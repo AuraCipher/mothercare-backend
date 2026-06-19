@@ -78,7 +78,7 @@ router.post('/invitations', asyncHandler(async (req: Request, res: Response) => 
     return;
   }
 
-  const result = await invitationService.createInvitation(email, branchId);
+  const result = await invitationService.createInvitation(email, branchId, (req as any).user?.id);
   res.status(201).json({ success: true, data: result });
 }));
 

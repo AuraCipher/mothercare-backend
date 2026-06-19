@@ -20,7 +20,7 @@ router.get('/branches/:branchId/academic-years/:ayId/timetables', asyncHandler(a
 router.post('/branches/:branchId/academic-years/:ayId/timetables', asyncHandler(async (req: Request, res: Response) => {
   const { name, type } = req.body;
   if (!name) { res.status(400).json({ success: false, message: 'Name is required' }); return; }
-  const result = await timetableService.create(req.params.ayId, name, type || 'timetable');
+  const result = await timetableService.create(req.params.ayId, name, type || 'timetable', (req as any).user?.id);
   res.status(201).json({ success: true, data: result });
 }));
 
@@ -90,7 +90,7 @@ router.post('/branches/:branchId/timetables/:id/slots', asyncHandler(async (req:
     res.status(400).json({ success: false, message: 'End time must be after start time' });
     return;
   }
-  const slot = await timetableSlotService.create(req.params.id, { dayOfWeek: dayOfWeek ?? null, startTime, endTime });
+  const slot = await timetableSlotService.create(req.params.id, { dayOfWeek: dayOfWeek ?? null, startTime, endTime, createdById: (req as any).user?.id });
   res.status(201).json({ success: true, data: slot });
 }));
 

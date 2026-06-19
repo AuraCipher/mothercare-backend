@@ -2,14 +2,14 @@ import { prisma } from '../../../lib/prisma';
 
 class TimetableService {
   // Create a new timetable
-  async create(academicYearId: string, name: string, type: string = 'timetable') {
+  async create(academicYearId: string, name: string, type: string = 'timetable', createdById?: string) {
     const existing = await prisma.timetable.findUnique({
       where: { academicYearId_name: { academicYearId, name } },
     });
     if (existing) throw { status: 409, message: `Timetable "${name}" already exists` };
 
     const tt = await prisma.timetable.create({
-      data: { academicYearId, name, type },
+      data: { academicYearId, name, type, createdById },
     });
 
     // Create day configs (all days active by default)
@@ -77,7 +77,7 @@ class TimetableSlotService {
     });
   }
 
-  async create(timetableId: string, data: { dayOfWeek?: number | null; startTime: string; endTime: string }) {
+  async create(timetableId: string, data: { dayOfWeek?: number | null; startTime: string; endTime: string; createdById?: string }) {
     const lastSlot = await prisma.timetableSlot.findFirst({
       where: { timetableId },
       orderBy: { lectureNumber: 'desc' },
@@ -90,6 +90,7 @@ class TimetableSlotService {
         lectureNumber,
         dayOfWeek: data.dayOfWeek ?? null,
         startTime: data.startTime,
+        createdById: (data as any).createdById,
         endTime: data.endTime,
       },
     });

@@ -12,7 +12,7 @@ class InvitationService {
    * Create an invitation for a new branch admin.
    * Generates a one-time token, stores it, returns the registration link.
    */
-  async createInvitation(email: string, branchId: string) {
+  async createInvitation(email: string, branchId: string, createdById?: string) {
     // Check if email already has a pending invitation
     const existing = await prisma.adminInvitation.findFirst({
       where: { email, usedAt: null, expiresAt: { gt: new Date() } },
@@ -36,7 +36,7 @@ class InvitationService {
     const expiresAt = new Date(Date.now() + INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 
     await prisma.adminInvitation.create({
-      data: { email, branchId, token, expiresAt },
+      data: { email, branchId, token, expiresAt, createdById },
     });
 
     return {
