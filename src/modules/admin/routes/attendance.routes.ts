@@ -55,6 +55,12 @@ router.post('/attendance/batch', asyncHandler(async (req: Request, res: Response
 
   const userId = (req as any).user?.id;
   const dateObj = new Date(date as string);
+  // Block future dates
+  const checkDate = new Date(); checkDate.setHours(23, 59, 59, 999);
+  if (dateObj > checkDate) {
+    res.status(400).json({ success: false, message: 'Cannot mark attendance for future dates' });
+    return;
+  }
   let saved = 0;
 
   for (const record of records) {
