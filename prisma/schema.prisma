@@ -160,8 +160,11 @@ model FileRecord {
   profileUser    User?    @relation("UserProfilePhoto")
   profileStudent Student? @relation("StudentProfilePhoto")
 
+  updatedAt       DateTime      @updatedAt
+
   @@index([entityType, entityId])
   @@map("file_records")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -229,7 +232,10 @@ model AcademicCalendar {
 
   academicYears AcademicYear[]
 
+  updatedAt       DateTime      @updatedAt
+
   @@map("academic_calendars")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -282,8 +288,12 @@ model AcademicYearMember {
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
   @@unique([academicYearId, userId])
   @@map("academic_year_members")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -356,8 +366,12 @@ model GroupMember {
   group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
   @@unique([groupId, userId])
   @@map("group_members")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -385,8 +399,11 @@ model Subject {
   timetableEntries   TimetableEntry[]
   hod                User?               @relation("SubjectHOD", fields: [hodId], references: [id])
 
+  updatedAt       DateTime      @updatedAt
+
   @@unique([academicYearId, code])
   @@map("subjects")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -403,8 +420,12 @@ model GroupSubject {
   group   Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
   subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
 
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
   @@unique([groupId, subjectId])
   @@map("group_subjects")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -460,7 +481,11 @@ model TeacherAssignment {
   group        Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
   subject      Subject      @relation(fields: [subjectId], references: [id], onDelete: Cascade)
 
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
   @@map("teacher_assignments")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -506,7 +531,10 @@ model ParentProfile {
   user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   children StudentParent[]
 
+  updatedAt       DateTime      @updatedAt
+
   @@map("parent_profiles")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -544,10 +572,12 @@ model Student {
   profileFile     FileRecord?   @relation("StudentProfilePhoto", fields: [profilePhotoId], references: [id])
   userId          String?       @unique
   user            User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  username        String?
   status          StudentStatus @default(ACTIVE)
   isActive        Boolean       @default(true)
   admissionDate   DateTime      @default(now())
   createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   academicYear      AcademicYear       @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   group             Group?             @relation(fields: [groupId], references: [id], onDelete: SetNull)
@@ -573,8 +603,11 @@ model StudentParent {
   student Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
   parent  ParentProfile @relation(fields: [parentId], references: [id], onDelete: Cascade)
 
+  updatedAt       DateTime      @updatedAt
+
   @@unique([studentId, parentId])
   @@map("student_parents")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -593,7 +626,10 @@ model EmergencyContact {
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
+  updatedAt       DateTime      @updatedAt
+
   @@map("emergency_contacts")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -616,7 +652,10 @@ model HealthRecord {
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
+  createdAt       DateTime      @default(now())
+
   @@map("health_records")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -638,8 +677,12 @@ model Enrollment {
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   group        Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
   @@unique([studentId, academicYearId])
   @@map("enrollments")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -667,7 +710,10 @@ model AcademicYearSnapshot {
   triggeredBy     User            @relation("SnapshotTriggeredBy", fields: [triggeredById], references: [id])
   groupSnapshots  GroupSnapshot[]
 
+  updatedAt       DateTime      @updatedAt
+
   @@map("academic_year_snapshots")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -689,7 +735,11 @@ model GroupSnapshot {
 
   snapshot AcademicYearSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
 
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
   @@map("group_snapshots")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -708,8 +758,11 @@ model Announcement {
 
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
 
+  updatedAt       DateTime      @updatedAt
+
   @@index([academicYearId, createdAt])
   @@map("announcements")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -753,7 +806,10 @@ model BatchPromotion {
 
   promotedBy User @relation("PromotedByUser", fields: [promotedById], references: [id])
 
+  updatedAt       DateTime      @updatedAt
+
   @@map("batch_promotions")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -773,8 +829,11 @@ model NotificationRecipient {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  updatedAt       DateTime      @updatedAt
+
   @@index([userId, isRead])
   @@map("notification_recipients")
+
 }
 
 // Device tokens for push notifications
@@ -805,8 +864,11 @@ model PasswordResetToken {
 
   user User @relation(fields: [userId], references: [id])
 
+  updatedAt       DateTime      @updatedAt
+
   @@index([token])
   @@map("password_reset_tokens")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -826,9 +888,12 @@ model AuditLog {
 
   user User @relation(fields: [userId], references: [id])
 
+  updatedAt       DateTime      @updatedAt
+
   @@index([userId, createdAt])
   @@index([entity, entityId])
   @@map("audit_logs")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -847,10 +912,13 @@ model ApiKey {
   revokedAt  DateTime?
   createdAt  DateTime   @default(now())
 
+  updatedAt       DateTime      @updatedAt
+
   @@index([prefix])
   @@index([revokedAt])
   @@index([type])
   @@map("api_keys")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -870,10 +938,13 @@ model AdminInvitation {
 
   branch Branch @relation(fields: [branchId], references: [id])
 
+  updatedAt       DateTime      @updatedAt
+
   @@index([token])
   @@index([email])
   @@index([branchId])
   @@map("admin_invitations")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -900,8 +971,11 @@ model Timetable {
   slots        TimetableSlot[]
   dayConfigs   TimetableDayConfig[]
 
+  updatedAt       DateTime      @updatedAt
+
   @@unique([academicYearId, name])
   @@map("timetables")
+
 }
 
 model TimetableSlot {
@@ -917,8 +991,11 @@ model TimetableSlot {
   timetable Timetable        @relation(fields: [timetableId], references: [id], onDelete: Cascade)
   entries   TimetableEntry[]
 
+  updatedAt       DateTime      @updatedAt
+
   @@unique([timetableId, lectureNumber])
   @@map("timetable_slots")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -940,8 +1017,12 @@ model TimetableEntry {
   subject Subject?      @relation(fields: [subjectId], references: [id])
   teacher User?         @relation("TimetableTeacher", fields: [teacherId], references: [id])
 
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
   @@unique([slotId, groupId])
   @@map("timetable_entries")
+
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -958,6 +1039,9 @@ model TimetableDayConfig {
 
   timetable Timetable @relation(fields: [timetableId], references: [id], onDelete: Cascade)
 
+  updatedAt       DateTime      @updatedAt
+
   @@unique([timetableId, dayOfWeek])
   @@map("timetable_day_configs")
+
 }

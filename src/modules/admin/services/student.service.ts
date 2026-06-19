@@ -313,6 +313,12 @@ class StudentService {
       },
     });
 
+    // Also store username directly on Student for quick access
+    await prisma.student.update({
+      where: { id: student.id },
+      data: { username: finalUsername },
+    });
+
     return { username: user.username, password };
   }
 
