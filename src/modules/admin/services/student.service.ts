@@ -1,6 +1,7 @@
 import { prisma } from '../../../lib/prisma';
 import { storage } from '../../upload/storage.service';
 import { generateUsername, generatePassword } from '../../../utils/username';
+import notificationService from '../../../services/notification.service';
 
 export interface CreateStudentInput {
   name: string;
@@ -425,6 +426,83 @@ class StudentService {
     } catch { /* audit log is best-effort */ }
 
     return { message: 'Password updated successfully' };
+  }
+
+  // ─── Send credentials via WhatsApp ─────────────────────────
+
+  /**
+   * Send login credentials to a single student via WhatsApp.
+   * Generates a fresh temporary password so the student can log in immediately.
+   */
+  async sendCredentials(studentId: string, userId: string, ipAddress?: string) {
+    const bc = await import('bcryptjs');
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { id: true, name: true, studentWhatsapp: true, username: true, phone: true, user: { select: { id: true, username: true } } },
+    });
+    if (!student) throw { status: 404, message: 'Student not found' };
+    if (!student.user) throw { status: 400, message: 'No login credentials. Generate credentials first.' };
+
+    const whatsapp = student.studentWhatsapp || student.phone;
+    if (!whatsapp) throw { status: 400, message: 'No WhatsApp/phone number available for this student.' };
+
+    // Generate a fresh temporary password, hash it, save it
+    const tempPassword = generatePassword();
+    const hash = await bc.hash(tempPassword, 12);
+    await prisma.user.update({
+      where: { id: student.user.id },
+      data: { passwordHash: hash },
+    });
+
+    // Send via WhatsApp
+    const result = await notificationService.sendCredential({
+      to: whatsapp,
+      username: student.user.username || student.username || '—',
+      password: tempPassword,
+      name: student.name,
+    });
+
+    // Audit trail
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId,
+          action: 'credential_sent',
+          entity: 'Student',
+          entityId: studentId,
+          newValue: { sent: result.success, to: whatsapp.slice(0, 6) + '****' },
+          ipAddress,
+        },
+      });
+    } catch { /* best-effort */ }
+
+    return { sent: result.success, status: result.messageStatus, to: whatsapp.slice(0, 6) + '****' };
+  }
+
+  /**
+   * Send credentials via WhatsApp to multiple students.
+   * Processes sequentially with delay to avoid rate limits.
+   */
+  async sendAllCredentials(studentIds: string[], userId: string, ipAddress?: string) {
+    const results: { studentId: string; sent: boolean; reason?: string }[] = [];
+    let sent = 0, skipped = 0, failed = 0;
+
+    for (const sid of studentIds) {
+      try {
+        const result = await this.sendCredentials(sid, userId, ipAddress);
+        results.push({ studentId: sid, sent: result.sent });
+        if (result.sent) sent++; else failed++;
+      } catch (e: any) {
+        const reason = e.message || 'Unknown error';
+        results.push({ studentId: sid, sent: false, reason });
+        if (reason.includes('no WhatsApp') || reason.includes('credentials')) skipped++;
+        else failed++;
+      }
+      // Small delay to avoid rate limits
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    return { sent, skipped, failed, results };
   }
 }
 

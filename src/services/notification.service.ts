@@ -9,7 +9,12 @@ const twilioClient = twilio(
 
 interface NotificationService {
   sendOTP(params: { phone: string; otp: string; name: string }): Promise<void>;
-  // Other notification methods can be added here (email, WhatsApp, etc.)
+  sendCredential(params: {
+    to: string;
+    username: string;
+    password: string;
+    name: string;
+  }): Promise<{ success: boolean; messageStatus?: string }>;
 }
 
 const notificationService: NotificationService = {
@@ -34,6 +39,32 @@ const notificationService: NotificationService = {
       // For now, we'll log it but not fail the OTP generation process
       // The OTP is still valid in Redis, so user can still try to verify it
       throw new Error('Failed to send OTP. Please try again.');
+    }
+  },
+
+  /**
+   * Send login credentials via WhatsApp using Twilio
+   */
+  async sendCredential({ to, username, password, name }: {
+    to: string;
+    username: string;
+    password: string;
+    name: string;
+  }): Promise<{ success: boolean; messageStatus?: string }> {
+    try {
+      const formattedTo = to.startsWith('+') ? `whatsapp:${to}` : `whatsapp:+${to}`;
+      const from = `whatsapp:${env.TWILIO_WHATSAPP_NUMBER}`;
+
+      const message = await twilioClient.messages.create({
+        from,
+        to: formattedTo,
+        body: `Welcome to Mother Care School, ${name}!\n\nHere are your login credentials:\n\nUsername: ${username}\nPassword: ${password}\n\nPlease keep this information safe. Do not share your password with anyone.\n\nThank you!`,
+      });
+
+      return { success: true, messageStatus: message.status };
+    } catch (error: any) {
+      console.error('Failed to send WhatsApp credential:', error.message);
+      return { success: false, messageStatus: error.message || 'Failed' };
     }
   }
 };

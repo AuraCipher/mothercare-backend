@@ -140,4 +140,23 @@ router.put('/students/:id/set-password', passwordSetLimiter, asyncHandler(async 
   res.json({ success: true, message: result.message });
 }));
 
+// POST /students/:id/send-credentials — Send via WhatsApp
+router.post('/students/:id/send-credentials', passwordSetLimiter, asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  const result = await studentService.sendCredentials(req.params.id, userId, req.ip);
+  res.json({ success: true, data: result });
+}));
+
+// POST /students/send-all-credentials — Send to all selected
+router.post('/students/send-all-credentials', passwordSetLimiter, asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  const { studentIds } = req.body;
+  if (!studentIds || !Array.isArray(studentIds) || studentIds.length === 0) {
+    res.status(400).json({ success: false, message: 'studentIds array is required' });
+    return;
+  }
+  const result = await studentService.sendAllCredentials(studentIds, userId, req.ip);
+  res.json({ success: true, data: result });
+}));
+
 export default router;
