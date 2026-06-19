@@ -147,6 +147,21 @@ router.post('/students/:id/send-credentials', passwordSetLimiter, asyncHandler(a
   res.json({ success: true, data: result });
 }));
 
+// POST /students/send-to-new — Send only to students who haven't received yet
+router.post('/students/send-to-new', asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  const students = await prisma.student.findMany({
+    where: { credentialSentAt: null, user: { isNot: null } },
+    select: { id: true },
+  });
+  if (students.length === 0) {
+    res.json({ success: true, data: { sent: 0, skipped: 0, failed: 0, results: [], message: 'All students already have credentials sent' } });
+    return;
+  }
+  const result = await studentService.sendAllCredentials(students.map(s => s.id), userId, req.ip);
+  res.json({ success: true, data: result });
+}));
+
 // POST /students/send-all-credentials — Send to all selected
 router.post('/students/send-all-credentials', passwordSetLimiter, asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user?.id;

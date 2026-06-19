@@ -344,7 +344,7 @@ class StudentService {
     // Also store username directly on Student for quick access
     await prisma.student.update({
       where: { id: student.id },
-      data: { username: finalUsername },
+      data: { username: finalUsername, credentialGeneratedAt: new Date() },
     });
 
     return { username: user.username, password };
@@ -411,6 +411,12 @@ class StudentService {
       data: { passwordHash: newHash },
     });
 
+    // Track password change date on Student
+    await prisma.student.update({
+      where: { id: studentId },
+      data: { passwordSetAt: new Date() },
+    });
+
     // Audit trail
     try {
       await prisma.auditLog.create({
@@ -462,6 +468,32 @@ class StudentService {
       name: student.name,
     });
 
+    const status = result.success ? 'sent' : 'failed';
+    const now = new Date();
+
+    // Update student credential tracking fields
+    await prisma.student.update({
+      where: { id: studentId },
+      data: {
+        credentialSentAt: now,
+        credentialStatus: status,
+        passwordSetAt: now,
+        ...(result.success ? { credentialDeliveredAt: null, credentialSeenAt: null } : {}),
+      },
+    });
+
+    // Create CredentialSend history record (redacted — no passwords)
+    await prisma.credentialSend.create({
+      data: {
+        studentId,
+        sentAt: now,
+        status,
+        to: whatsapp.slice(0, 6) + '****',
+        errorMsg: result.success ? null : result.messageStatus || 'Unknown error',
+        sentById: userId,
+      },
+    });
+
     // Audit trail
     try {
       await prisma.auditLog.create({
@@ -470,13 +502,13 @@ class StudentService {
           action: 'credential_sent',
           entity: 'Student',
           entityId: studentId,
-          newValue: { sent: result.success, to: whatsapp.slice(0, 6) + '****' },
+          newValue: { sent: result.success, status, to: whatsapp.slice(0, 6) + '****' },
           ipAddress,
         },
       });
     } catch { /* best-effort */ }
 
-    return { sent: result.success, status: result.messageStatus, to: whatsapp.slice(0, 6) + '****' };
+    return { sent: result.success, status, to: whatsapp.slice(0, 6) + '****' };
   }
 
   /**
