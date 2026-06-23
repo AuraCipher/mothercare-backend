@@ -10,10 +10,6 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
 //   Range:      /attendance?from=2026-06-01&to=2026-06-30&groupId=xxx
 router.get('/attendance', asyncHandler(async (req: Request, res: Response) => {
   const { date, from, to, groupId } = req.query;
-  if (!groupId) {
-    res.status(400).json({ success: false, message: 'groupId is required' });
-    return;
-  }
 
   // Build date filter
   let dateFilter: any = {};
@@ -23,17 +19,21 @@ router.get('/attendance', asyncHandler(async (req: Request, res: Response) => {
     dateFilter = { equals: new Date(date as string) };
   }
 
+  const studentWhere: any = { isActive: true };
+  if (groupId) studentWhere.groupId = groupId as string;
+
   const students = await prisma.student.findMany({
-    where: { groupId: groupId as string, isActive: true },
+    where: studentWhere,
     select: {
       id: true, name: true, rollNumber: true, admissionNumber: true,
+      groupId: true,
       attendances: {
         where: Object.keys(dateFilter).length ? { date: dateFilter } : undefined,
         select: { date: true, status: true },
         orderBy: { date: 'asc' },
       },
     },
-    orderBy: { rollNumber: 'asc' },
+    orderBy: [{ groupId: 'asc' }, { rollNumber: 'asc' }],
   });
 
   res.json({ success: true, data: students, total: students.length });
