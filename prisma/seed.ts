@@ -635,6 +635,31 @@ async function main() {
     'Qudrat', 'Shafqat', 'Tayyab', 'Waheed', 'Zareen',
   ], 'CS');
 
+  // ─── Teacher attendance (last 30 days) ───────────────────────────────
+  console.log('  ✓ Generating teacher attendance…');
+  const allTeachers = await prisma.user.findMany({
+    where: { role: 'teacher', status: 'active' },
+    select: { id: true },
+  });
+  const todayTA = new Date();
+  todayTA.setHours(0, 0, 0, 0);
+  const activeAy = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } });
+  let teacherAtt = 0;
+  for (const t of allTeachers) {
+    for (let d = 29; d >= 0; d--) {
+      const dt = new Date(Date.UTC(todayTA.getFullYear(), todayTA.getMonth(), todayTA.getDate() - d));
+      const isSun = new Date(todayTA.getTime() - d * 86400000).getDay() === 0;
+      const status = isSun ? 'holiday' : (['present','present','present','present','absent','late','leave','function'] as const)[Math.floor(Math.random() * 8)];
+      await prisma.teacherAttendance.upsert({
+        where: { teacherId_date: { teacherId: t.id, date: dt } },
+        update: { status },
+        create: { teacherId: t.id, academicYearId: activeAy!.id, date: dt, status },
+      });
+      teacherAtt++;
+    }
+  }
+  console.log(`  ✓ ${teacherAtt} teacher attendance records created for ${allTeachers.length} teachers over 30 days`);
+
   // Sync the student number sequence to max + 1
   try {
     await prisma.$executeRawUnsafe(`SELECT setval('students_number_seq', (SELECT COALESCE(MAX("studentNumber"), 0) + 1 FROM students), false)`);
