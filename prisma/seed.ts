@@ -472,7 +472,7 @@ async function main() {
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const STATUSES = ['present', 'present', 'present', 'present', 'present', 'absent', 'late'];
+    const STATUSES = ['present', 'present', 'present', 'present', 'present', 'absent', 'late', 'leave', 'function'];
     const seededRandom = (seed: number) => {
       const x = Math.sin(seed * 9301 + 49297) * 49297;
       return x - Math.floor(x);
@@ -481,9 +481,14 @@ async function main() {
     let totalAtt = 0;
     for (const student of allStudents) {
       for (let dayOffset = 29; dayOffset >= 0; dayOffset--) {
-        const d = new Date(today);
-        d.setDate(d.getDate() - dayOffset);
-        const status = STATUSES[Math.floor(seededRandom(student.id.charCodeAt(0) * 1000 + dayOffset * 7 + student.id.charCodeAt(student.id.length - 1)) * STATUSES.length)];
+        const local = new Date(today);
+        local.setDate(local.getDate() - dayOffset);
+        // Use UTC date to avoid timezone shift in DB
+        const d = new Date(Date.UTC(local.getFullYear(), local.getMonth(), local.getDate()));
+        // Sundays default to holiday, rest get random attendance
+        const status = local.getDay() === 0
+          ? 'holiday'
+          : STATUSES[Math.floor(seededRandom(student.id.charCodeAt(0) * 1000 + dayOffset * 7 + student.id.charCodeAt(student.id.length - 1)) * STATUSES.length)];
         await prisma.attendance.upsert({
           where: { studentId_date: { studentId: student.id, date: d } },
           update: { status },
