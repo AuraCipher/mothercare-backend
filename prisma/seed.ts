@@ -679,10 +679,14 @@ async function main() {
     { order: 13, section: 'BIO',  name: 'Mr. Junaid Akram',    uname: 'junaid_class10',  emp: 'TCH-110', qual: 'M.Sc. (Zoology)',       spec: 'Class 10 BIO Head' },
     { order: 13, section: 'ARTS', name: 'Ms. Saima Riaz',      uname: 'saima_arts10',    emp: 'TCH-118', qual: 'B.Ed. (Fine Arts)',     spec: 'Class 10 ARTS Head' },
     { order: 13, section: 'CS',   name: 'Mr. Zubair Anwar',    uname: 'zubair_cs10',     emp: 'TCH-119', qual: 'B.Sc. (Computer Sci)',  spec: 'Class 10 CS Head' },
-    // subject specialists
+    // subject specialists (shared across classes)
     { order: 0,  section: null, name: 'Ms. Hina Rizvi',      uname: 'hina_spec',   emp: 'TCH-111', qual: 'M.A. (Islamic Studies)',   spec: 'Islamiyat & Quran' },
     { order: 0,  section: null, name: 'Mr. Shahid Mehmood',  uname: 'shahid_sci',  emp: 'TCH-112', qual: 'M.Sc. (General Science)',  spec: 'Science & Math' },
     { order: 0,  section: null, name: 'Ms. Farah Deeba',     uname: 'farah_lang',  emp: 'TCH-113', qual: 'M.A. (English Literature)', spec: 'Languages' },
+    // section specialists (dedicated to Class 8-10 sections, so they don't conflict with Class 1-7)
+    { order: 0,  section: null, name: 'Ms. Fariha Tariq',    uname: 'fariha_isl',  emp: 'TCH-120', qual: 'M.A. (Islamic Studies)',   spec: 'Islamiyat (Sections)' },
+    { order: 0,  section: null, name: 'Mr. Khalid Raza',     uname: 'khalid_qrn',  emp: 'TCH-121', qual: 'Hafiz-e-Quran',            spec: 'Quran (Sections)' },
+    { order: 0,  section: null, name: 'Ms. Rubina Shaheen',  uname: 'rubina_sci',  emp: 'TCH-122', qual: 'M.Sc. (Biology)',          spec: 'Science (Sections)' },
   ];
 
   // Build teacher users & profiles, collect IDs
@@ -706,10 +710,19 @@ async function main() {
   console.log(`  ✓ ${CLASS_TEACHERS.length} teachers ensured`);
 
   // Find ALL groups (including sections)
+  // Sort so uppercase sections come before lowercase (ARTS before Arts) to prefer new naming
   const allClassGroups = await prisma.group.findMany({
     where: { academicYearId: academicYear.id, displayOrder: { gte: 4, lte: 13 }, isActive: true },
     include: { groupSubjects: { include: { subject: true } } },
-    orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }, { section: 'asc' }],
+    orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
+  });
+  allClassGroups.sort((a, b) => {
+    const da = a.displayOrder, db = b.displayOrder;
+    if (da !== db) return da - db;
+    const na = a.name || '', nb = b.name || '';
+    if (na !== nb) return na.localeCompare(nb);
+    const sa = a.section || '', sb = b.section || '';
+    return sb.localeCompare(sa); // reverse: ARTS (upper) before Arts (lower)
   });
 
   if (allClassGroups.length === 0) { console.log('  ⚠ No classes found — skipping'); } else {
@@ -722,11 +735,21 @@ async function main() {
       return t ? teacherIds[t.uname] || null : null;
     };
 
-    // Heads get 3 core slots (L1, L2, L3). Specialists get L4, L5, L7, L8.
+    // Head teachers cover core subjects. Sections get full 7-slot coverage.
     const groupSlotPlan = (group: any): { slots: number[]; subjects: string[] } | null => {
       const order = group.displayOrder;
-      if (order >= 4 && order <= 13) return { slots: [1,2,3], subjects: ['MATH','ENG','URD'] };
+      const sec = group.section || '';
+      if (order >= 11 && sec) return { slots: [1,2,3,4,5,7,8], subjects: ['MATH','ENG','URD','ISL','QRN','SCI_OR_ART','PHY_OR_CSC'] };
+      if (order >= 4) return { slots: [1,2,3], subjects: ['MATH','ENG','URD'] };
       return null;
+    };
+
+    // Map placeholder codes to actual subjects per group
+    const resolveSubject = (group: any, code: string): string => {
+      const sec = group.section || '';
+      if (code === 'SCI_OR_ART') return sec === 'ARTS' ? 'ART' : sec === 'BIO' ? 'BIO' : sec === 'CS' ? 'CSC' : 'SCI';
+      if (code === 'PHY_OR_CSC') return sec === 'CS' ? 'CSC' : sec === 'BIO' ? 'PHY' : sec === 'ARTS' ? 'SCI' : 'PHY';
+      return code;
     };
 
     // Get timetable slots
@@ -737,6 +760,13 @@ async function main() {
       for (const g of allClassGroups) {
         for (const gs of g.groupSubjects) subjectMap.set(`${g.id}::${gs.subject.code}`, gs.subjectId);
       }
+
+      // Clear old teacher/subject assignments from all groups (fresh start each run)
+      const allGroupIds = allClassGroups.map(g => g.id);
+      await prisma.timetableEntry.updateMany({
+        where: { groupId: { in: allGroupIds }, note: { not: 'break' } },
+        data: { teacherId: null, subjectId: null },
+      });
 
       // Track used teacher+slot to prevent conflicts
       const teacherUsedSlots = new Map<string, Set<number>>();
@@ -750,13 +780,18 @@ async function main() {
         if (!headId) continue;
 
         // Skip if head teacher already has any of these slots (prevents duplicate-group conflicts)
-        const headSlotsUsed = plan.slots.some(s => teacherUsedSlots.get(headId)?.has(s));
-        if (headSlotsUsed) continue;
+        const headExisting = teacherUsedSlots.get(headId);
+        const headSlotsUsed = headExisting && plan.slots.some(s => headExisting.has(s));
+        if (headSlotsUsed) {
+          if (group.section) console.log(`  ↺ Skipped dupe group "${group.name} ${group.section}" — teacher already assigned`);
+          continue;
+        }
 
         // Assign head teacher's slots
         for (let i = 0; i < plan.slots.length; i++) {
           const slotNum = plan.slots[i];
-          const subjCode = plan.subjects[i];
+          const rawCode = plan.subjects[i];
+          const subjCode = resolveSubject(group, rawCode);
           const subId = subjectMap.get(`${group.id}::${subjCode}`);
           if (!subId) continue;
 
@@ -774,17 +809,19 @@ async function main() {
         // Skip groups with no subjects (old leftover groups)
         if (group.groupSubjects.length === 0) continue;
 
-        // Assign specialists: hina (ISL), shahid (science/CS), farah (QRN)
+        // Assign specialists: ISL, science, QRN
         // Free slots: L4, L5, L7, L8 (head uses L1, L2, L3)
         const freeSlots = [4, 5, 7, 8];
         const sec = group.section || '';
         const order = group.displayOrder;
-        // Determine science subject based on section/class level
+        // Use section-dedicated specialists (fariha/khalid/rubina) for Class 8-10,
+        // shared specialists (hina/shahid/farah) for Class 1-7
+        const isSection = order >= 11;
         const sciSubject = sec === 'CS' ? 'CSC' : sec === 'BIO' ? 'BIO' : order <= 8 ? 'SCI' : 'PHY';
         const specs: { uname: string; subject: string }[] = [
-          { uname: 'hina_spec', subject: 'ISL' },
-          { uname: 'shahid_sci', subject: sciSubject },
-          { uname: 'farah_lang', subject: 'QRN' },
+          { uname: isSection ? 'fariha_isl' : 'hina_spec', subject: 'ISL' },
+          { uname: isSection ? 'rubina_sci' : 'shahid_sci', subject: sciSubject },
+          { uname: isSection ? 'khalid_qrn' : 'farah_lang', subject: 'QRN' },
         ];
 
         // Filter specialists: only assign subjects that this group actually studies
