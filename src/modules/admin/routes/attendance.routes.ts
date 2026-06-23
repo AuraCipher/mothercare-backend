@@ -111,4 +111,83 @@ router.get('/students/:id/attendance', asyncHandler(async (req: Request, res: Re
   });
 }));
 
+// ═══════════════════════════════════════════════════════════════════
+// TEACHER ATTENDANCE
+// ═══════════════════════════════════════════════════════════════════
+
+// GET /attendance/teachers?date=... or ?from=...&to=... — Teacher attendance
+router.get('/attendance/teachers', asyncHandler(async (req: Request, res: Response) => {
+  const { date, from, to } = req.query;
+
+  let dateFilter: any = {};
+  if (from && to) {
+    dateFilter = { gte: new Date(from as string), lte: new Date(to as string) };
+  } else if (date) {
+    dateFilter = { equals: new Date(date as string) };
+  }
+
+  const teachers = await prisma.user.findMany({
+    where: { role: 'teacher', status: 'active' },
+    select: {
+      id: true, name: true,
+      teacherAttendances: {
+        where: Object.keys(dateFilter).length ? { date: dateFilter } : undefined,
+        select: { date: true, status: true },
+        orderBy: { date: 'asc' },
+      },
+    },
+    orderBy: { name: 'asc' },
+  });
+
+  // Map to the same format as student attendance (rename teacherAttendances → attendances)
+  const data = teachers.map(t => ({
+    id: t.id, name: t.name,
+    attendances: t.teacherAttendances.map(a => ({ date: a.date, status: a.status })),
+  }));
+
+  res.json({ success: true, data, total: data.length });
+}));
+
+// POST /attendance/teachers/batch — Save teacher attendance
+router.post('/attendance/teachers/batch', asyncHandler(async (req: Request, res: Response) => {
+  const { date, academicYearId, records } = req.body;
+  if (!date || !records || !Array.isArray(records)) {
+    res.status(400).json({ success: false, message: 'date and records[] are required' });
+    return;
+  }
+
+  if (!academicYearId) {
+    const activeAy = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } });
+    if (!activeAy) { res.status(400).json({ success: false, message: 'No active academic year' }); return; }
+    req.body.academicYearId = activeAy.id;
+  }
+
+  const userId = (req as any).user?.id;
+  const dateObj = new Date(date as string);
+  const checkDate = new Date(); checkDate.setHours(23, 59, 59, 999);
+  if (dateObj > checkDate) {
+    res.status(400).json({ success: false, message: 'Cannot mark attendance for future dates' });
+    return;
+  }
+
+  let saved = 0;
+  for (const record of records) {
+    if (!record.teacherId || !record.status) continue;
+    await prisma.teacherAttendance.upsert({
+      where: { teacherId_date: { teacherId: record.teacherId, date: dateObj } },
+      update: { status: record.status, markedById: userId },
+      create: {
+        teacherId: record.teacherId,
+        academicYearId: req.body.academicYearId,
+        date: dateObj,
+        status: record.status,
+        markedById: userId,
+      },
+    });
+    saved++;
+  }
+
+  res.json({ success: true, data: { saved, total: records.length } });
+}));
+
 export default router;

@@ -125,6 +125,7 @@ model User {
   resignedToMembers     BranchMember[]         @relation("ResignedInFavorOf")
   academicYearMembers   AcademicYearMember[]
   teacherAssignments    TeacherAssignment[]
+  teacherAttendances    TeacherAttendance[] @relation("TeacherAttendanceTeacher")
   academicYearSnapshots AcademicYearSnapshot[] @relation("SnapshotTriggeredBy")
   timetableEntries      TimetableEntry[]       @relation("TimetableTeacher")
   uploadedFiles         FileRecord[]
@@ -132,7 +133,8 @@ model User {
   createdStudents       Student[]  @relation("StudentCreatedBy")
   updatedStudents       Student[]  @relation("StudentUpdatedBy")
   credentialSends       CredentialSend[]
-  markedAttendances     Attendance[]
+  markedAttendances         Attendance[]
+  teacherAttendanceMarkedBy TeacherAttendance[] @relation("TeacherAttendanceMarkedBy")
 
   @@index([username])
   @@index([email])
@@ -286,6 +288,7 @@ model AcademicYear {
   announcements      Announcement[]
   timetables         Timetable[]
   attendances        Attendance[]
+  teacherAttendances TeacherAttendance[]
 
   createdById     String?
   updatedById     String?
@@ -690,6 +693,26 @@ model Attendance {
   @@unique([studentId, date])
   @@index([academicYearId, date])
   @@map("attendances")
+}
+
+model TeacherAttendance {
+  id             String   @id @default(uuid())
+  teacherId      String
+  academicYearId String
+  date           DateTime @db.Date
+  status         String   // "present" | "absent" | "late" | "leave" | "holiday" | "function"
+  markedById     String?
+
+  teacher      User         @relation("TeacherAttendanceTeacher", fields: [teacherId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
+  markedBy     User?        @relation("TeacherAttendanceMarkedBy", fields: [markedById], references: [id])
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([teacherId, date])
+  @@index([academicYearId, date])
+  @@map("teacher_attendances")
 }
 
 // Credential send history (redacted — no passwords stored)
