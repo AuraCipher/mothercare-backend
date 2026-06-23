@@ -63,10 +63,13 @@ const DEFAULT_TEACHERS = [
 
 const TIMETABLE_SLOTS = [
   { lecture: 1, start: '08:00', end: '08:40' },
-  { lecture: 2, start: '08:40', end: '09:20' },
+  { lecture: 2, start: '08:40', end: '09:30' },
   { lecture: 3, start: '09:30', end: '10:10' },
   { lecture: 4, start: '10:10', end: '10:50' },
-  { lecture: 5, start: '11:00', end: '11:40' },
+  { lecture: 5, start: '10:50', end: '11:30' },
+  { lecture: 6, start: '11:30', end: '12:00', isBreak: true },
+  { lecture: 7, start: '12:00', end: '12:40' },
+  { lecture: 8, start: '12:40', end: '13:30' },
 ];
 
 const DATESHEET_PAPERS = [
@@ -212,14 +215,17 @@ async function ensureTimetable(academicYearId: string, name: string, type: strin
   }
   // Slots
   for (const s of slots) {
-    const exists = await prisma.timetableSlot.findFirst({
-      where: { timetableId: tt.id, lectureNumber: s.lecture, dayOfWeek: (s as any).day || null },
+    await prisma.timetableSlot.upsert({
+      where: { timetableId_lectureNumber: { timetableId: tt.id, lectureNumber: s.lecture } },
+      update: { startTime: s.start, endTime: s.end },
+      create: {
+        timetableId: tt.id,
+        lectureNumber: s.lecture,
+        startTime: s.start,
+        endTime: s.end,
+        dayOfWeek: (s as any).day || null,
+      },
     });
-    if (!exists) {
-      await prisma.timetableSlot.create({
-        data: { timetableId: tt.id, lectureNumber: s.lecture, startTime: s.start, endTime: s.end, dayOfWeek: (s as any).day || null },
-      });
-    }
   }
   const slotCount = await prisma.timetableSlot.count({ where: { timetableId: tt.id } });
   console.log(`  ✓ "${name}" (${type}): ${slotCount} slots, ${activeDays.length} active days`);
@@ -352,23 +358,23 @@ async function main() {
   console.log(`  ✓ Branch admin assigned as branch_admin (Principal) at "${branch.name}"`);
 
   // Step 7: Subjects
-  console.log('\n[7/13] Subjects');
+  console.log('\n[7/14] Subjects');
   await ensureSubjects(academicYear.id);
 
   // Step 8: Teachers
-  console.log('\n[8/13] Teachers');
+  console.log('\n[8/14] Teachers');
   await ensureTeachers();
 
   // Step 9: Timetable
-  console.log('\n[9/13] Timetable');
+  console.log('\n[9/14] Timetable');
   await ensureTimetable(academicYear.id, 'Regular Timetable', 'timetable', TIMETABLE_SLOTS, [1,2,3,4,5,6]);
 
   // Step 10: Date Sheet
-  console.log('\n[10/13] Date Sheet');
+  console.log('\n[10/14] Date Sheet');
   await ensureTimetable(academicYear.id, 'Final Exams', 'datesheet', DATESHEET_PAPERS, [1,2,3]);
 
   // Step 11: Section Subjects (link subjects to Class 1-10 groups)
-  console.log('\n[11/13] Section Subjects');
+  console.log('\n[11/14] Section Subjects');
   const groups = await prisma.group.findMany({ where: { academicYearId: academicYear.id, isActive: true } });
   const subjects = await prisma.subject.findMany({ where: { academicYearId: academicYear.id } });
   let links = 0;
@@ -392,7 +398,7 @@ async function main() {
   console.log(`  ✓ ${links} subject-group links created`);
 
   // ─── Step 12: Demo Students + Random Attendance ─────────────────────
-  console.log('\n[12/13] Demo Students + Attendance (last 30 days)');
+  console.log('\n[12/14] Demo Students + Attendance (last 30 days)');
 
   const demoGroup = await prisma.group.findFirst({
     where: { academicYearId: academicYear.id, displayOrder: 1, isActive: true },
@@ -478,7 +484,7 @@ async function main() {
   }
 
   // ─── Step 13: Teacher Assignment + Timetable Entries for Playgroup ──
-  console.log('\n[13/13] Teacher Assignment + Timetable Entries for Playgroup');
+  console.log('\n[13/14] Teacher Assignment + Timetable Entries for Playgroup');
 
   const playgroup = await prisma.group.findFirst({
     where: { academicYearId: academicYear.id, displayOrder: 1, isActive: true },
@@ -488,12 +494,12 @@ async function main() {
   });
 
   if (playgroup && playgroup.groupSubjects.length > 0) {
-    // Create a new teacher
     const TEACHER_NAME = 'Ms. Samina Hassan';
     const TEACHER_UNAME = 'samina_playgroup';
 
-    const existingTeacher = await prisma.user.findUnique({ where: { username: TEACHER_UNAME } });
-    if (!existingTeacher) {
+    // Find or create teacher
+    let teacherId = (await prisma.user.findUnique({ where: { username: TEACHER_UNAME }, select: { id: true } }))?.id;
+    if (!teacherId) {
       const passHash = await bcrypt.hash('teacher123', 12);
       const user = await prisma.user.create({
         data: {
@@ -504,6 +510,7 @@ async function main() {
           status: 'active',
         },
       });
+      teacherId = user.id;
 
       await prisma.teacherProfile.create({
         data: {
@@ -517,7 +524,7 @@ async function main() {
       });
       console.log(`  ✓ Created teacher "${TEACHER_NAME}" (${TEACHER_UNAME} / teacher123)`);
 
-      // Add as group member of Playgroup
+      // Add as group member
       await prisma.groupMember.upsert({
         where: { groupId_userId: { groupId: playgroup.id, userId: user.id } },
         update: { role: 'teacher' },
@@ -525,7 +532,7 @@ async function main() {
       });
       console.log(`  ✓ Added "${TEACHER_NAME}" as member of "${playgroup.name}"`);
 
-      // Create TeacherAssignment for each subject
+      // TeacherAssignments
       for (const gs of playgroup.groupSubjects) {
         await prisma.teacherAssignment.create({
           data: {
@@ -538,49 +545,85 @@ async function main() {
           },
         });
       }
-      console.log(`  ✓ ${playgroup.groupSubjects.length} subject assignments created for "${TEACHER_NAME}"`);
-
-      // Get timetable + slots
-      const tt = await prisma.timetable.findFirst({
-        where: { academicYearId: academicYear.id, type: 'timetable', isActive: true },
-      });
-      if (tt) {
-        const slots = await prisma.timetableSlot.findMany({
-          where: { timetableId: tt.id, isActive: true },
-          orderBy: { lectureNumber: 'asc' },
-        });
-
-        // Assign subjects to slots: Math→1, English→2, Urdu→3, Science→4, Math→5
-        const slotSubjects: { slotId: string; subjectId: string }[] = [];
-        const subjectMap = new Map(playgroup.groupSubjects.map(gs => [gs.subject.code, gs.subjectId]));
-        const subjectCycle = ['MATH', 'ENG', 'URD', 'SCI', 'MATH'];
-
-        let created = 0;
-        for (let i = 0; i < slots.length; i++) {
-          const code = subjectCycle[i] || 'MATH';
-          const subId = subjectMap.get(code);
-          if (!subId) continue;
-
-          // Use upsert to handle re-runs
-          await prisma.timetableEntry.upsert({
-            where: { slotId_groupId: { slotId: slots[i].id, groupId: playgroup.id } },
-            update: { subjectId: subId, teacherId: user.id },
-            create: {
-              slotId: slots[i].id,
-              groupId: playgroup.id,
-              subjectId: subId,
-              teacherId: user.id,
-            },
-          });
-          created++;
-        }
-        console.log(`  ✓ ${created} timetable entries created for "${playgroup.name}"`);
-      }
+      console.log(`  ✓ ${playgroup.groupSubjects.length} subject assignments created`);
     } else {
-      console.log(`  ✓ Teacher "${TEACHER_NAME}" already exists — skipping`);
+      console.log(`  ✓ Teacher "${TEACHER_NAME}" already exists — updating entries`);
+    }
+
+    // Always upsert timetable entries for Playgroup (subjects + teacher)
+    const tt = await prisma.timetable.findFirst({
+      where: { academicYearId: academicYear.id, type: 'timetable', isActive: true },
+    });
+    if (tt && teacherId) {
+      const slots = await prisma.timetableSlot.findMany({
+        where: { timetableId: tt.id, isActive: true },
+        orderBy: { lectureNumber: 'asc' },
+      });
+
+      const subjectMap = new Map(playgroup.groupSubjects.map(gs => [gs.subject.code, gs.subjectId]));
+      const subjectCycle: (string | null)[] = ['MATH', 'ENG', 'URD', 'SCI', 'MATH', null, 'MATH', 'MATH'];
+
+      let created = 0;
+      for (let i = 0; i < slots.length; i++) {
+        const code = subjectCycle[i];
+        if (!code) continue; // break slot
+
+        const subId = subjectMap.get(code);
+        if (!subId) continue;
+
+        await prisma.timetableEntry.upsert({
+          where: { slotId_groupId: { slotId: slots[i].id, groupId: playgroup.id } },
+          update: { subjectId: subId, teacherId, note: null },
+          create: {
+            slotId: slots[i].id,
+            groupId: playgroup.id,
+            subjectId: subId,
+            teacherId,
+          },
+        });
+        created++;
+      }
+      console.log(`  ✓ ${created} timetable entries assigned for "${playgroup.name}"`);
     }
   } else {
     console.log('  ⚠ Playgroup not found or has no subjects — skipping teacher assignment');
+  }
+
+  // ─── Step 14: Timetable Entries for All Classes ─────────────────────
+  console.log('\n[14/14] Timetable Entries for All Classes');
+
+  const allGroups = await prisma.group.findMany({ where: { academicYearId: academicYear.id, isActive: true } });
+  const mainTt = await prisma.timetable.findFirst({
+    where: { academicYearId: academicYear.id, type: 'timetable', isActive: true },
+  });
+
+  if (mainTt && allGroups.length > 0) {
+    const ttSlots = await prisma.timetableSlot.findMany({
+      where: { timetableId: mainTt.id, isActive: true },
+      orderBy: { lectureNumber: 'asc' },
+    });
+
+    let totalEntries = 0;
+    for (const group of allGroups) {
+      for (const slot of ttSlots) {
+        const slotDef = TIMETABLE_SLOTS.find(s => s.lecture === slot.lectureNumber);
+        const isBreak = slotDef?.isBreak;
+
+        await prisma.timetableEntry.upsert({
+          where: { slotId_groupId: { slotId: slot.id, groupId: group.id } },
+          update: { note: isBreak ? 'break' : undefined },
+          create: {
+            slotId: slot.id,
+            groupId: group.id,
+            note: isBreak ? 'break' : null,
+          },
+        });
+        totalEntries++;
+      }
+    }
+    console.log(`  ✓ ${totalEntries} timetable entries created for ${allGroups.length} groups (${ttSlots.length} slots each)`);
+  } else {
+    console.log('  ⚠ No timetable or groups found — skipping all-class timetable entries');
   }
 
   // Summary
