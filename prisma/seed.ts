@@ -654,10 +654,10 @@ async function main() {
     console.log('  ⚠ No timetable or groups found — skipping all-class timetable entries');
   }
 
-  // ─── Step 15: Class 1–10 Teachers + Split Lectures ──────────────
+  // ─── Step 15: Class 1–10 Teachers & Split Lectures ──────────────
   console.log('\n[15/15] Class 1–10 Teachers & Split Lectures');
 
-  // 19 head teachers (7 standalone + 9 sections + 3 specialists) = 22 total
+  // 19 teachers total: 3 Montessori + 7 Class 1-7 + 9 section heads
   const CLASS_TEACHERS = [
     // Standalone heads (Class 1-7)
     { order: 4,  section: null, name: 'Ms. Sana Tariq',     uname: 'sana_class1',   emp: 'TCH-101', qual: 'B.Ed. (Primary)',           spec: 'Class 1 Head' },
@@ -679,14 +679,6 @@ async function main() {
     { order: 13, section: 'BIO',  name: 'Mr. Junaid Akram',    uname: 'junaid_class10',  emp: 'TCH-110', qual: 'M.Sc. (Zoology)',       spec: 'Class 10 BIO Head' },
     { order: 13, section: 'ARTS', name: 'Ms. Saima Riaz',      uname: 'saima_arts10',    emp: 'TCH-118', qual: 'B.Ed. (Fine Arts)',     spec: 'Class 10 ARTS Head' },
     { order: 13, section: 'CS',   name: 'Mr. Zubair Anwar',    uname: 'zubair_cs10',     emp: 'TCH-119', qual: 'B.Sc. (Computer Sci)',  spec: 'Class 10 CS Head' },
-    // subject specialists (shared across classes)
-    { order: 0,  section: null, name: 'Ms. Hina Rizvi',      uname: 'hina_spec',   emp: 'TCH-111', qual: 'M.A. (Islamic Studies)',   spec: 'Islamiyat & Quran' },
-    { order: 0,  section: null, name: 'Mr. Shahid Mehmood',  uname: 'shahid_sci',  emp: 'TCH-112', qual: 'M.Sc. (General Science)',  spec: 'Science & Math' },
-    { order: 0,  section: null, name: 'Ms. Farah Deeba',     uname: 'farah_lang',  emp: 'TCH-113', qual: 'M.A. (English Literature)', spec: 'Languages' },
-    // section specialists (dedicated to Class 8-10 sections, so they don't conflict with Class 1-7)
-    { order: 0,  section: null, name: 'Ms. Fariha Tariq',    uname: 'fariha_isl',  emp: 'TCH-120', qual: 'M.A. (Islamic Studies)',   spec: 'Islamiyat (Sections)' },
-    { order: 0,  section: null, name: 'Mr. Khalid Raza',     uname: 'khalid_qrn',  emp: 'TCH-121', qual: 'Hafiz-e-Quran',            spec: 'Quran (Sections)' },
-    { order: 0,  section: null, name: 'Ms. Rubina Shaheen',  uname: 'rubina_sci',  emp: 'TCH-122', qual: 'M.Sc. (Biology)',          spec: 'Science (Sections)' },
   ];
 
   // Build teacher users & profiles, collect IDs
@@ -707,7 +699,7 @@ async function main() {
       teacherIds[t.uname] = user.id;
     }
   }
-  console.log(`  ✓ ${CLASS_TEACHERS.length} teachers ensured`);
+  console.log(`  ✓ ${CLASS_TEACHERS.length} teachers ensured (16 class heads + 3 Montessori)`);
 
   // Find ALL groups (including sections)
   // Sort so uppercase sections come before lowercase (ARTS before Arts) to prefer new naming
@@ -735,12 +727,12 @@ async function main() {
       return t ? teacherIds[t.uname] || null : null;
     };
 
-    // Head teachers cover core subjects. Sections get full 7-slot coverage.
+    // All Class 1-10 groups get full 7-slot coverage (one teacher manages all)
     const groupSlotPlan = (group: any): { slots: number[]; subjects: string[] } | null => {
       const order = group.displayOrder;
       const sec = group.section || '';
+      if (order >= 4 && order <= 10) return { slots: [1,2,3,4,5,7,8], subjects: ['MATH','ENG','URD','SCI','ISL','ART','QRN'] };
       if (order >= 11 && sec) return { slots: [1,2,3,4,5,7,8], subjects: ['MATH','ENG','URD','ISL','QRN','SCI_OR_ART','PHY_OR_CSC'] };
-      if (order >= 4) return { slots: [1,2,3], subjects: ['MATH','ENG','URD'] };
       return null;
     };
 
@@ -806,49 +798,6 @@ async function main() {
           written++;
         }
 
-        // Skip groups with no subjects (old leftover groups)
-        if (group.groupSubjects.length === 0) continue;
-
-        // Assign specialists: ISL, science, QRN
-        // Free slots: L4, L5, L7, L8 (head uses L1, L2, L3)
-        const freeSlots = [4, 5, 7, 8];
-        const sec = group.section || '';
-        const order = group.displayOrder;
-        // Use section-dedicated specialists (fariha/khalid/rubina) for Class 8-10,
-        // shared specialists (hina/shahid/farah) for Class 1-7
-        const isSection = order >= 11;
-        const sciSubject = sec === 'CS' ? 'CSC' : sec === 'BIO' ? 'BIO' : order <= 8 ? 'SCI' : 'PHY';
-        const specs: { uname: string; subject: string }[] = [
-          { uname: isSection ? 'fariha_isl' : 'hina_spec', subject: 'ISL' },
-          { uname: isSection ? 'rubina_sci' : 'shahid_sci', subject: sciSubject },
-          { uname: isSection ? 'khalid_qrn' : 'farah_lang', subject: 'QRN' },
-        ];
-
-        // Filter specialists: only assign subjects that this group actually studies
-        for (const spec of specs) {
-          const subId = subjectMap.get(`${group.id}::${spec.subject}`);
-          if (!subId) continue;
-
-          const tId = teacherIds[spec.uname];
-          if (!tId) continue;
-
-          // Find a free slot — check if this teacher is already in this slot for another class
-          const availableSlot = freeSlots.find(sl => !teacherUsedSlots.get(tId)?.has(sl));
-          if (!availableSlot) continue; // all slots taken for this teacher
-
-          if (!teacherUsedSlots.has(tId)) teacherUsedSlots.set(tId, new Set());
-          teacherUsedSlots.get(tId)!.add(availableSlot);
-
-          const slotDef = ttSlots.find(s => s.lectureNumber === availableSlot);
-          if (!slotDef) continue;
-
-          await prisma.timetableEntry.upsert({
-            where: { slotId_groupId: { slotId: slotDef.id, groupId: group.id } },
-            update: { subjectId: subId, teacherId: tId, note: null },
-            create: { slotId: slotDef.id, groupId: group.id, subjectId: subId, teacherId: tId },
-          });
-          written++;
-        }
       }
 
       // Verify conflicts
