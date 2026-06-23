@@ -860,6 +860,24 @@ async function main() {
       if (conflictCount === 0) console.log('  ✓ Zero slot conflicts');
     }
   }
+
+  // Deactivate old duplicate section groups (e.g. "Arts" lowercase vs "ARTS" uppercase)
+  const dupeSections = ['Arts', 'Bio', 'Cs']; // lowercase variants that may exist from previous seeds
+  for (const name of ['Class 8', 'Class 9', 'Class 10']) {
+    const oldGroups = await prisma.group.findMany({
+      where: { academicYearId: academicYear.id, name, section: { in: dupeSections } },
+    });
+    for (const og of oldGroups) {
+      const hasNew = await prisma.group.findFirst({
+        where: { academicYearId: academicYear.id, name, section: og.section?.toUpperCase(), isActive: true },
+      });
+      if (hasNew && og.id !== hasNew.id) {
+        await prisma.group.update({ where: { id: og.id }, data: { isActive: false } });
+        console.log(`  🗑 Deactivated old duplicate: "${name} ${og.section}"`);
+      }
+    }
+  }
+
   const groupCount = await prisma.group.count({ where: { academicYearId: academicYear.id } });
   console.log('\n─── Seed Summary ───────────────────────────────');
   console.log(`  Branch:           ${branch.name} (${branch.code})`);
