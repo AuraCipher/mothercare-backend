@@ -427,10 +427,10 @@ async function main() {
   // ─── Step 12: Demo Students + Random Attendance ─────────────────────
   console.log('\n[12/15] Demo Students + Attendance (last 30 days)');
 
-  async function seedDemoStudents(groupOrder: number, studentNames: string[]) {
-    const group = await prisma.group.findFirst({
-      where: { academicYearId: academicYear.id, displayOrder: groupOrder, isActive: true },
-    });
+  async function seedDemoStudents(groupOrder: number, studentNames: string[], section?: string) {
+    const where: any = { academicYearId: academicYear.id, displayOrder: groupOrder, isActive: true };
+    if (section) where.section = { equals: section, mode: 'insensitive' };
+    const group = await prisma.group.findFirst({ where });
     if (!group) { console.log(`  ⚠ Group order ${groupOrder} not found — skipping`); return; }
 
     const existingCount = await prisma.student.count({ where: { groupId: group.id } });
@@ -575,6 +575,24 @@ async function main() {
     'Ramzan', 'Shafi', 'Tahir', 'Uzma', 'Wazir',
     'Yar', 'Zia',
   ]);
+
+  await seedDemoStudents(11, [
+    'Azeem', 'Benazir', 'Dostain', 'Falak', 'Gulab',
+    'Hidayat', 'Jahan', 'Kaleem', 'Muneer', 'Najma',
+    'Parveen', 'Rasool', 'Sakina', 'Taj', 'Wali',
+  ], 'BIO');
+
+  await seedDemoStudents(11, [
+    'Aamna', 'Babrak', 'Daulat', 'Farah', 'Gulshan',
+    'Hina', 'Jalil', 'Kareena', 'Mansoora', 'Najiba',
+    'Rafi', 'Shakeel', 'Tania', 'Wafaq', 'Zamurd',
+  ], 'ARTS');
+
+  await seedDemoStudents(11, [
+    'Adnan', 'Bakht', 'Daniyal', 'Feroz', 'Gohar',
+    'Irshad', 'Junaid', 'Kamal', 'Mehmooda', 'Nadeem',
+    'Rashid', 'Shahid', 'Tahir', 'Wahid', 'Zamir',
+  ], 'CS');
 
   // Sync the student number sequence to max + 1
   try {
