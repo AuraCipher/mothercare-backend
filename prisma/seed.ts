@@ -510,6 +510,13 @@ async function main() {
     console.log('  ⚠ No group with displayOrder 1 found — skipping demo data');
   }
 
+  // Sync the student number sequence to max + 1
+  try {
+    await prisma.$executeRawUnsafe(`SELECT setval('students_number_seq', (SELECT COALESCE(MAX("studentNumber"), 0) + 1 FROM students), false)`);
+  } catch {
+    // Sequence may not exist on first run — skip
+  }
+
   // ─── Step 13: Teacher Assignment + Timetable Entries per Class ──
   console.log('\n[13/15] Teacher Assignment + Timetable Entries per Class');
 
