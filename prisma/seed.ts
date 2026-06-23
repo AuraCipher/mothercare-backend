@@ -363,23 +363,23 @@ async function main() {
   console.log(`  ✓ Branch admin assigned as branch_admin (Principal) at "${branch.name}"`);
 
   // Step 7: Subjects
-  console.log('\n[7/14] Subjects');
+  console.log('\n[7/15] Subjects');
   await ensureSubjects(academicYear.id);
 
   // Step 8: Teachers
-  console.log('\n[8/14] Teachers');
+  console.log('\n[8/15] Teachers');
   await ensureTeachers();
 
   // Step 9: Timetable
-  console.log('\n[9/14] Timetable');
+  console.log('\n[9/15] Timetable');
   await ensureTimetable(academicYear.id, 'Regular Timetable', 'timetable', TIMETABLE_SLOTS, [1,2,3,4,5,6]);
 
   // Step 10: Date Sheet
-  console.log('\n[10/14] Date Sheet');
+  console.log('\n[10/15] Date Sheet');
   await ensureTimetable(academicYear.id, 'Final Exams', 'datesheet', DATESHEET_PAPERS, [1,2,3]);
 
   // Step 11: Section Subjects (link subjects to Class 1-10 groups)
-  console.log('\n[11/14] Section Subjects');
+  console.log('\n[11/15] Section Subjects');
   const groups = await prisma.group.findMany({ where: { academicYearId: academicYear.id, isActive: true } });
   const subjects = await prisma.subject.findMany({ where: { academicYearId: academicYear.id } });
   let links = 0;
@@ -404,7 +404,7 @@ async function main() {
   console.log(`  ✓ ${links} subject-group links created`);
 
   // ─── Step 12: Demo Students + Random Attendance ─────────────────────
-  console.log('\n[12/14] Demo Students + Attendance (last 30 days)');
+  console.log('\n[12/15] Demo Students + Attendance (last 30 days)');
 
   const demoGroup = await prisma.group.findFirst({
     where: { academicYearId: academicYear.id, displayOrder: 1, isActive: true },
@@ -490,7 +490,7 @@ async function main() {
   }
 
   // ─── Step 13: Teacher Assignment + Timetable Entries per Class ──
-  console.log('\n[13/14] Teacher Assignment + Timetable Entries per Class');
+  console.log('\n[13/15] Teacher Assignment + Timetable Entries per Class');
 
   async function assignTeacherToGroup(
     groupOrder: number,
@@ -543,6 +543,8 @@ async function main() {
       }
       console.log(`  ✓ ${group.groupSubjects.length} subject assignments for "${group.name}"`);
     } else {
+      // Update name in case it changed
+      await prisma.user.update({ where: { id: teacherId }, data: { name: teacherName } });
       console.log(`  ✓ Teacher "${teacherName}" already exists — updating entries`);
     }
 
@@ -577,7 +579,7 @@ async function main() {
   const pgCycle: (string | null)[] = ['MATH', 'ENG', 'URD', 'SCI', 'ISL', null, 'QRN', 'ART'];
 
   await assignTeacherToGroup(
-    1, 'Ms. Samina Hassan', 'samina_playgroup', 'TCH-004',
+    1, 'Ms. Samina Akhtar', 'samina_playgroup', 'TCH-004',
     'B.Ed. (Early Childhood Education)', 'Playgroup Lead', '+92 300 1111111',
     pgCycle,
   );
@@ -595,7 +597,7 @@ async function main() {
   );
 
   // ─── Step 14: Timetable Entries for All Classes ─────────────────────
-  console.log('\n[14/14] Timetable Entries for All Classes');
+  console.log('\n[14/15] Timetable Entries for All Classes');
 
   const allGroups = await prisma.group.findMany({ where: { academicYearId: academicYear.id, isActive: true } });
   const mainTt = await prisma.timetable.findFirst({
@@ -631,7 +633,211 @@ async function main() {
     console.log('  ⚠ No timetable or groups found — skipping all-class timetable entries');
   }
 
-  // Summary
+  // ─── Step 15: Class 1–10 Teachers + Split Lectures ──────────────
+  console.log('\n[15/15] Class 1–10 Teachers & Split Lectures');
+
+  // 10 class head teachers + 3 subject specialists = 13 new teachers
+  const CLASS_TEACHERS = [
+    // class heads (one per class, displayOrder 4–13)
+    { order: 4,  name: 'Ms. Sana Tariq',     uname: 'sana_class1',   emp: 'TCH-101', qual: 'B.Ed. (Primary)',          spec: 'Class 1 Head' },
+    { order: 5,  name: 'Mr. Kamran Haider',   uname: 'kamran_class2', emp: 'TCH-102', qual: 'B.Ed. (Primary)',          spec: 'Class 2 Head' },
+    { order: 6,  name: 'Ms. Rabia Anwar',     uname: 'rabia_class3',  emp: 'TCH-103', qual: 'B.Ed. (Primary)',          spec: 'Class 3 Head' },
+    { order: 7,  name: 'Mr. Tariq Mehmood',   uname: 'tariq_class4',  emp: 'TCH-104', qual: 'B.Ed. (Primary)',          spec: 'Class 4 Head' },
+    { order: 8,  name: 'Ms. Noreen Akhtar',   uname: 'noreen_class5', emp: 'TCH-105', qual: 'B.Ed. (Primary)',          spec: 'Class 5 Head' },
+    { order: 9,  name: 'Mr. Fahad Ali',       uname: 'fahad_class6',  emp: 'TCH-106', qual: 'M.Sc. (Physics)',          spec: 'Class 6 Head' },
+    { order: 10, name: 'Ms. Bushra Ansari',   uname: 'bushra_class7', emp: 'TCH-107', qual: 'M.Sc. (Chemistry)',        spec: 'Class 7 Head' },
+    { order: 11, name: 'Mr. Danish Iqbal',    uname: 'danish_class8', emp: 'TCH-108', qual: 'M.A. (English)',           spec: 'Class 8 Head' },
+    { order: 12, name: 'Ms. Farzana Kausar',  uname: 'farzana_class9',emp: 'TCH-109', qual: 'M.Sc. (Mathematics)',      spec: 'Class 9 Head' },
+    { order: 13, name: 'Mr. Junaid Akram',    uname: 'junaid_class10',emp: 'TCH-110', qual: 'M.A. (Urdu)',              spec: 'Class 10 Head' },
+    // subject specialists
+    { order: 0,  name: 'Ms. Hina Rizvi',      uname: 'hina_spec',    emp: 'TCH-111', qual: 'M.A. (Islamic Studies)',   spec: 'Islamiyat & Quran' },
+    { order: 0,  name: 'Mr. Shahid Mehmood',  uname: 'shahid_sci',   emp: 'TCH-112', qual: 'M.Sc. (General Science)',  spec: 'Science & Math' },
+    { order: 0,  name: 'Ms. Farah Deeba',     uname: 'farah_lang',   emp: 'TCH-113', qual: 'M.A. (English Literature)', spec: 'Languages' },
+  ];
+
+  // Build teacher users & profiles, collect IDs
+  const teacherIds: Record<string, string> = {};
+  for (const t of CLASS_TEACHERS) {
+    const existing = await prisma.user.findUnique({ where: { username: t.uname }, select: { id: true } });
+    if (existing) {
+      await prisma.user.update({ where: { id: existing.id }, data: { name: t.name } });
+      teacherIds[t.uname] = existing.id;
+    } else {
+      const hash = await bcrypt.hash('teacher123', 12);
+      const user = await prisma.user.create({
+        data: { name: t.name, username: t.uname, passwordHash: hash, role: 'teacher', status: 'active' },
+      });
+      await prisma.teacherProfile.create({
+        data: { userId: user.id, employeeId: t.emp, qualification: t.qual, specialization: t.spec, phone: '+92 300 4444444', joiningDate: new Date('2025-08-01') },
+      });
+      teacherIds[t.uname] = user.id;
+    }
+  }
+  console.log(`  ✓ ${CLASS_TEACHERS.length} teachers ensured`);
+
+  // Collect all groups by displayOrder
+  const classGroups = await prisma.group.findMany({
+    where: { academicYearId: academicYear.id, displayOrder: { gte: 4, lte: 13 }, isActive: true },
+    include: { groupSubjects: { include: { subject: true } } },
+  });
+  // Deduplicate by displayOrder (pick first one)
+  const seenOrders = new Set<number>();
+  const uniqueGroups = classGroups.filter(g => { if (seenOrders.has(g.displayOrder)) return false; seenOrders.add(g.displayOrder); return true; }).sort((a, b) => a.displayOrder - b.displayOrder);
+
+  // Get timetable slots
+  const tt = await prisma.timetable.findFirst({ where: { academicYearId: academicYear.id, type: 'timetable', isActive: true } });
+  if (!tt || uniqueGroups.length === 0) { console.log('  ⚠ No timetable or classes found — skipping'); } else {
+    const ttSlots = await prisma.timetableSlot.findMany({ where: { timetableId: tt.id, isActive: true }, orderBy: { lectureNumber: 'asc' } });
+    const subjectMap = new Map<string, string>();
+    for (const g of uniqueGroups) {
+      for (const gs of g.groupSubjects) subjectMap.set(`${g.id}::${gs.subject.code}`, gs.subjectId);
+    }
+
+    // ── Class head teachers ─────────────────────────────────────
+    // Each head teaches in their OWN class at L1, L2, L3, L8 → no slot conflicts
+    const headAssignments = [
+      // Class 1–5: MATH@L1, ENG@L2, URD@L3, ART@L5
+      { classOrder: 4,  slots: [1,2,3,5], subjects: ['MATH','ENG','URD','ART'] },
+      { classOrder: 5,  slots: [1,2,3,5], subjects: ['MATH','ENG','URD','ART'] },
+      { classOrder: 6,  slots: [1,2,3,5], subjects: ['MATH','ENG','URD','ART'] },
+      { classOrder: 7,  slots: [1,2,3,5], subjects: ['MATH','ENG','URD','ART'] },
+      { classOrder: 8,  slots: [1,2,3,5], subjects: ['MATH','ENG','URD','ART'] },
+      // Class 6–10: MATH@L1, ENG@L2, URD@L3 + science@L5
+      { classOrder: 9,  slots: [1,2,3,5], subjects: ['MATH','ENG','URD','PHY'] },
+      { classOrder: 10, slots: [1,2,3,5], subjects: ['MATH','ENG','URD','CHEM'] },
+      { classOrder: 11, slots: [1,2,3,5], subjects: ['MATH','ENG','URD','BIO'] },
+      { classOrder: 12, slots: [1,2,3,5], subjects: ['MATH','ENG','URD','CSC'] },
+      { classOrder: 13, slots: [1,2,3,5], subjects: ['MATH','ENG','URD','BIO'] },
+    ];
+
+    const unameToId = (uname: string) => teacherIds[uname];
+
+    // ── Subject specialists ──────────────────────────────────────
+    // We assign one class per slot per specialist. Since there are 7 non-break slots
+    // and 10 classes, each specialist can cover at most 7. Remaining classes get
+    // those subjects assigned to their class head via the fallback below.
+
+    // ── Specialists: hina (Islamiyat), shahid (Science), farah (Quran) ──
+    // Each specialist gets one unique slot, so max 3 classes each.
+    // Slots available: L4, L7, L8 (heads use L1, L2, L3, L5; L6 = break)
+    // Rotation ensures: each teacher at a different slot per class → zero conflicts
+    const specEntries: { uname: string; classOrder: number; slot: number; subject: string }[] = [
+      // hina → ISL
+      { uname: 'hina_spec', classOrder: 4,  slot: 4, subject: 'ISL' },
+      { uname: 'hina_spec', classOrder: 7,  slot: 7, subject: 'ISL' },
+      { uname: 'hina_spec', classOrder: 10, slot: 8, subject: 'ISL' },
+      // shahid → Science (SCI for <Class 6, PHY/CHEM for >=Class 6)
+      { uname: 'shahid_sci', classOrder: 5,  slot: 4, subject: 'SCI' },
+      { uname: 'shahid_sci', classOrder: 8,  slot: 7, subject: 'SCI' },
+      { uname: 'shahid_sci', classOrder: 11, slot: 8, subject: 'PHY' },
+      // farah → Quran
+      { uname: 'farah_lang', classOrder: 6,  slot: 4, subject: 'QRN' },
+      { uname: 'farah_lang', classOrder: 9,  slot: 7, subject: 'QRN' },
+      { uname: 'farah_lang', classOrder: 12, slot: 8, subject: 'QRN' },
+    ];
+
+    // Check for remaining slots per class — for non-assigned slots, fallback to class head
+    // First, build what each class has
+    const classSlotTeachers: Record<number, Record<number, { teacherId: string; subject: string }>> = {};
+    for (const grp of uniqueGroups) classSlotTeachers[grp.displayOrder] = { 6: { teacherId: '', subject: 'break' } };
+
+    // Fill class heads
+    for (const ha of headAssignments) {
+      const grp = uniqueGroups.find(g => g.displayOrder === ha.classOrder);
+      if (!grp) continue;
+      const teacherId = unameToId(CLASS_TEACHERS[ha.classOrder - 4].uname);
+      if (!teacherId) continue;
+      if (!classSlotTeachers[ha.classOrder]) classSlotTeachers[ha.classOrder] = {};
+      for (let i = 0; i < ha.slots.length; i++) {
+        classSlotTeachers[ha.classOrder][ha.slots[i]] = { teacherId, subject: ha.subjects[i] };
+      }
+    }
+
+    // Fill specialists (skip if slot already taken — specialist loses that class)
+    for (const entry of specEntries) {
+      if (!classSlotTeachers[entry.classOrder]) classSlotTeachers[entry.classOrder] = {};
+      const tId = teacherIds[entry.uname];
+      if (!classSlotTeachers[entry.classOrder][entry.slot]) {
+        const grp = uniqueGroups.find(g => g.displayOrder === entry.classOrder);
+        if (!grp || !tId) continue;
+        classSlotTeachers[entry.classOrder][entry.slot] = { teacherId: tId, subject: entry.subject };
+      } else {
+        // Slot already taken — give this subject to class head instead
+        const grp = uniqueGroups.find(g => g.displayOrder === entry.classOrder);
+        if (!grp) continue;
+        // Find the nearest free slot for this class
+        const freeSlot = [1,2,3,4,5,7,8].find(s => !classSlotTeachers[entry.classOrder][s]);
+        if (freeSlot) {
+          const headDef = headAssignments.find(h => h.classOrder === entry.classOrder);
+          const headId = headDef ? unameToId(CLASS_TEACHERS[entry.classOrder - 4].uname) : null;
+          classSlotTeachers[entry.classOrder][freeSlot] = { teacherId: headId || (tId || ''), subject: entry.subject };
+        }
+      }
+    }
+
+    // Fill any remaining empty slots with class head
+    for (const grp of uniqueGroups) {
+      const headDef = headAssignments.find(h => h.classOrder === grp.displayOrder);
+      const headId = headDef ? unameToId(CLASS_TEACHERS[grp.displayOrder - 4].uname) : null;
+      for (const slotNum of [1,2,3,4,5,7,8]) {
+        if (!classSlotTeachers[grp.displayOrder]) classSlotTeachers[grp.displayOrder] = {};
+        if (!classSlotTeachers[grp.displayOrder][slotNum] && headId) {
+          // Pick an unassigned subject from this class's pool
+          const unassignedSub = grp.groupSubjects.find(gs => {
+            return !Object.values(classSlotTeachers[grp.displayOrder] || {}).some((v: any) => v.subject === gs.subject.code);
+          });
+          classSlotTeachers[grp.displayOrder][slotNum] = { teacherId: headId, subject: unassignedSub?.subject.code || 'MATH' };
+        }
+      }
+    }
+
+    // ── Write timetable entries ────────────────────────────────
+    let entryCount = 0;
+    for (const grp of uniqueGroups) {
+      const slots = classSlotTeachers[grp.displayOrder];
+      if (!slots) continue;
+
+      for (const slotNum of [1,2,3,4,5,7,8]) {
+        const assignment = slots[slotNum];
+        if (!assignment || assignment.subject === 'break') continue;
+
+        const subKey = `${grp.id}::${assignment.subject}`;
+        const subId = subjectMap.get(subKey);
+        if (!subId) continue;
+
+        const slotDef = ttSlots.find(s => s.lectureNumber === slotNum);
+        if (!slotDef) continue;
+
+        await prisma.timetableEntry.upsert({
+          where: { slotId_groupId: { slotId: slotDef.id, groupId: grp.id } },
+          update: { subjectId: subId, teacherId: assignment.teacherId, note: null },
+          create: { slotId: slotDef.id, groupId: grp.id, subjectId: subId, teacherId: assignment.teacherId },
+        });
+        entryCount++;
+      }
+    }
+
+    // ── Verify no slot conflicts ───────────────────────────────
+    const teacherSlotUsage: Record<string, Set<number>> = {};
+    let conflicts = 0;
+    for (const grp of uniqueGroups) {
+      const slots = classSlotTeachers[grp.displayOrder];
+      if (!slots) continue;
+      for (const slotNum of [1,2,3,4,5,7,8]) {
+        const a = slots[slotNum];
+        if (!a || a.subject === 'break') continue;
+        if (!teacherSlotUsage[a.teacherId]) teacherSlotUsage[a.teacherId] = new Set();
+        if (teacherSlotUsage[a.teacherId].has(slotNum)) {
+          conflicts++;
+          console.log(`  ⚠ CONFLICT: Teacher ${a.teacherId} in 2 classes at L${slotNum}`);
+        }
+        teacherSlotUsage[a.teacherId].add(slotNum);
+      }
+    }
+
+    console.log(`  ✓ ${entryCount} timetable entries written for ${uniqueGroups.length} classes`);
+    if (conflicts === 0) console.log('  ✓ Zero slot conflicts — all teachers clear');
+  }
   const groupCount = await prisma.group.count({ where: { academicYearId: academicYear.id } });
   console.log('\n─── Seed Summary ───────────────────────────────');
   console.log(`  Branch:           ${branch.name} (${branch.code})`);
