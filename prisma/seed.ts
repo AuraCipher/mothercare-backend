@@ -513,6 +513,13 @@ async function main() {
     'Sufyan', 'Eman', 'Taha', 'Aleena', 'Hamza',
   ]);
 
+  await seedDemoStudents(3, [
+    'Areeba', 'Faizan', 'Mehwish', 'Rohaan', 'Sabeen',
+    'Talha', 'Umaima', 'Zayan', 'Aizal', 'Daniyal',
+    'Hareem', 'Junaid', 'Kashaf', 'Muneeb', 'Nimra',
+    'Owais', 'Rameen', 'Saim',
+  ]);
+
   // Sync the student number sequence to max + 1
   try {
     await prisma.$executeRawUnsafe(`SELECT setval('students_number_seq', (SELECT COALESCE(MAX("studentNumber"), 0) + 1 FROM students), false)`);
