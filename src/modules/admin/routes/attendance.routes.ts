@@ -33,7 +33,7 @@ router.get('/attendance', asyncHandler(async (req: Request, res: Response) => {
         orderBy: { date: 'asc' },
       },
     },
-    orderBy: [{ groupId: 'asc' }, { rollNumber: 'asc' }],
+    orderBy: groupId ? [{ rollNumber: 'asc' as const }] : [{ name: 'asc' as const }],
   });
 
   res.json({ success: true, data: students, total: students.length });
