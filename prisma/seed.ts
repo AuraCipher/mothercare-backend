@@ -594,6 +594,42 @@ async function main() {
     'Rashid', 'Shahid', 'Tahir', 'Wahid', 'Zamir',
   ], 'CS');
 
+  await seedDemoStudents(12, [
+    'Akram', 'Bano', 'Chaman', 'Dawar', 'Fakhra',
+    'Ghazala', 'Hayat', 'Jabeen', 'Karam', 'Lal',
+    'Mukhtar', 'Nazia', 'Riaz', 'Shamim', 'Zafar',
+  ], 'BIO');
+
+  await seedDemoStudents(12, [
+    'Anjum', 'Bashir', 'Chandni', 'Dilawar', 'Farkhanda',
+    'Ghulam', 'Huma', 'Javed', 'Khalid', 'Mahnoor',
+    'Nasreen', 'Rahat', 'Shahzadi', 'Tariq', 'Zeeshan',
+  ], 'ARTS');
+
+  await seedDemoStudents(12, [
+    'Aftab', 'Bilal', 'Daud', 'Faisal', 'Gulshan',
+    'Habib', 'Jamila', 'Kashif', 'Mehreen', 'Naeem',
+    'Parveen', 'Riaz', 'Sultana', 'Waseem', 'Yasmin',
+  ], 'CS');
+
+  await seedDemoStudents(13, [
+    'Arif', 'Bushra', 'Dhani', 'Farzana', 'Hakim',
+    'Iqbal', 'Jameel', 'Khusboo', 'Mazhar', 'Nighat',
+    'Qaiser', 'Shafiq', 'Tanveer', 'Wajid', 'Zulfiqar',
+  ], 'BIO');
+
+  await seedDemoStudents(13, [
+    'Aqeel', 'Batool', 'Durdana', 'Faryal', 'Hamza',
+    'Ismail', 'Jahanara', 'Khalil', 'Mubeen', 'Nayyar',
+    'Qadir', 'Shaista', 'Tasneem', 'Warda', 'Zahoor',
+  ], 'ARTS');
+
+  await seedDemoStudents(13, [
+    'Arslan', 'Bakhtawar', 'Danish', 'Farhat', 'Hafsa',
+    'Imtiaz', 'Jan', 'Khawar', 'Mehmood', 'Nasreen',
+    'Qudrat', 'Shafqat', 'Tayyab', 'Waheed', 'Zareen',
+  ], 'CS');
+
   // Sync the student number sequence to max + 1
   try {
     await prisma.$executeRawUnsafe(`SELECT setval('students_number_seq', (SELECT COALESCE(MAX("studentNumber"), 0) + 1 FROM students), false)`);
