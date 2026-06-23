@@ -26,6 +26,7 @@ export interface CreateStudentInput {
   groupId?: string;
   academicYearId?: string;
   admissionNumber?: string;
+  rollNumber?: string;
   profilePhotoId?: string;
   // Guardian fields — if provided, creates a parent profile and links it
   guardianName?: string;
@@ -147,6 +148,13 @@ class StudentService {
       : new Date().getFullYear();
     const username = generateUsername(data.name, studentNumber, admissionYear);
 
+    // Auto-assign roll number (sequential within the group)
+    let rollNumber = data.rollNumber || undefined;
+    if (!rollNumber && data.groupId) {
+      const count = await prisma.student.count({ where: { groupId: data.groupId } });
+      rollNumber = String(count + 1);
+    }
+
     const student = await prisma.student.create({
       data: {
         name: data.name, gender: data.gender as any,
@@ -163,6 +171,7 @@ class StudentService {
         profilePhotoId: data.profilePhotoId,
         createdById: (data as any).createdById,
         studentNumber,
+        rollNumber,
         username,
       },
       include: { group: { select: { id: true, name: true, section: true } } },
