@@ -427,27 +427,23 @@ async function main() {
   // ─── Step 12: Demo Students + Random Attendance ─────────────────────
   console.log('\n[12/15] Demo Students + Attendance (last 30 days)');
 
-  const demoGroup = await prisma.group.findFirst({
-    where: { academicYearId: academicYear.id, displayOrder: 1, isActive: true },
-  });
-  if (demoGroup) {
-    const existingStudents = await prisma.student.count({ where: { groupId: demoGroup.id } });
-    if (existingStudents < 20) {
-      const DEMO_STUDENTS = [
-        'Ahmed', 'Ali', 'Sara', 'Fatima', 'Hassan',
-        'Ayesha', 'Usman', 'Zainab', 'Omar', 'Hira',
-        'Bilal', 'Mariam', 'Hamza', 'Sana', 'Taha',
-        'Noor', 'Ibrahim', 'Khadija', 'Rayan', 'Amina',
-      ];
+  async function seedDemoStudents(groupOrder: number, studentNames: string[]) {
+    const group = await prisma.group.findFirst({
+      where: { academicYearId: academicYear.id, displayOrder: groupOrder, isActive: true },
+    });
+    if (!group) { console.log(`  ⚠ Group order ${groupOrder} not found — skipping`); return; }
 
-      // Get max existing studentNumber to continue from
+    const existingCount = await prisma.student.count({ where: { groupId: group.id } });
+    if (existingCount >= studentNames.length) {
+      console.log(`  ✓ ${existingCount} students already exist in "${group.name}" — skipping creation`);
+    } else {
       let maxSN = await prisma.student.findFirst({ orderBy: { studentNumber: 'desc' }, select: { studentNumber: true } });
       let nextSN = (maxSN?.studentNumber ?? 300) + 1;
       let nextAdm = nextSN;
 
-      const studentsToCreate = DEMO_STUDENTS.map((name, i) => ({
+      const studentsToCreate = studentNames.map((name, i) => ({
         academicYearId: academicYear.id,
-        groupId: demoGroup.id,
+        groupId: group.id,
         name,
         rollNumber: String(i + 1),
         admissionNumber: `ADM-${nextAdm + i}`,
@@ -464,51 +460,58 @@ async function main() {
           create: data,
         });
       }
-      console.log(`  ✓ ${DEMO_STUDENTS.length} demo students created in "${demoGroup.name}"`);
-    } else {
-      console.log(`  ✓ ${existingStudents} students already exist in "${demoGroup.name}" — skipping creation`);
+      console.log(`  ✓ ${studentNames.length} demo students created in "${group.name}"`);
     }
 
-    // ── Assign random attendance for last 30 days ──
+    // Random attendance for last 30 days
     const allStudents = await prisma.student.findMany({
-      where: { groupId: demoGroup.id, isActive: true },
+      where: { groupId: group.id, isActive: true },
       select: { id: true },
     });
+    if (allStudents.length === 0) return;
 
-    if (allStudents.length > 0) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const STATUSES = ['present', 'present', 'present', 'present', 'present', 'absent', 'late']; // ~71% P, ~14% A, ~14% L
-      const seededRandom = (seed: number) => {
-        const x = Math.sin(seed * 9301 + 49297) * 49297;
-        return x - Math.floor(x);
-      };
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const STATUSES = ['present', 'present', 'present', 'present', 'present', 'absent', 'late'];
+    const seededRandom = (seed: number) => {
+      const x = Math.sin(seed * 9301 + 49297) * 49297;
+      return x - Math.floor(x);
+    };
 
-      let totalAtt = 0;
-      for (const student of allStudents) {
-        for (let dayOffset = 29; dayOffset >= 0; dayOffset--) {
-          const d = new Date(today);
-          d.setDate(d.getDate() - dayOffset);
-          const status = STATUSES[Math.floor(seededRandom(student.id.charCodeAt(0) * 1000 + dayOffset * 7 + student.id.charCodeAt(student.id.length - 1)) * STATUSES.length)];
-
-          await prisma.attendance.upsert({
-            where: { studentId_date: { studentId: student.id, date: d } },
-            update: { status },
-            create: {
-              studentId: student.id,
-              academicYearId: academicYear.id,
-              date: d,
-              status,
-            },
-          });
-          totalAtt++;
-        }
+    let totalAtt = 0;
+    for (const student of allStudents) {
+      for (let dayOffset = 29; dayOffset >= 0; dayOffset--) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - dayOffset);
+        const status = STATUSES[Math.floor(seededRandom(student.id.charCodeAt(0) * 1000 + dayOffset * 7 + student.id.charCodeAt(student.id.length - 1)) * STATUSES.length)];
+        await prisma.attendance.upsert({
+          where: { studentId_date: { studentId: student.id, date: d } },
+          update: { status },
+          create: {
+            studentId: student.id,
+            academicYearId: academicYear.id,
+            date: d,
+            status,
+          },
+        });
+        totalAtt++;
       }
-      console.log(`  ✓ ${totalAtt} attendance records created for ${allStudents.length} students over 30 days`);
     }
-  } else {
-    console.log('  ⚠ No group with displayOrder 1 found — skipping demo data');
+    console.log(`  ✓ ${totalAtt} attendance records created for ${allStudents.length} students over 30 days`);
   }
+
+  await seedDemoStudents(1, [
+    'Ahmed', 'Ali', 'Sara', 'Fatima', 'Hassan',
+    'Ayesha', 'Usman', 'Zainab', 'Omar', 'Hira',
+    'Bilal', 'Mariam', 'Hamza', 'Sana', 'Taha',
+    'Noor', 'Ibrahim', 'Khadija', 'Rayan', 'Amina',
+  ]);
+
+  await seedDemoStudents(2, [
+    'Zara', 'Hania', 'Ehsan', 'Mahnoor', 'Rohan',
+    'Iqra', 'Shayan', 'Laiba', 'Rayan', 'Anaya',
+    'Sufyan', 'Eman', 'Taha', 'Aleena', 'Hamza',
+  ]);
 
   // Sync the student number sequence to max + 1
   try {
