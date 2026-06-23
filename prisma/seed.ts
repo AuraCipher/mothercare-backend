@@ -489,74 +489,64 @@ async function main() {
     console.log('  ⚠ No group with displayOrder 1 found — skipping demo data');
   }
 
-  // ─── Step 13: Teacher Assignment + Timetable Entries for Playgroup ──
-  console.log('\n[13/14] Teacher Assignment + Timetable Entries for Playgroup');
+  // ─── Step 13: Teacher Assignment + Timetable Entries per Class ──
+  console.log('\n[13/14] Teacher Assignment + Timetable Entries per Class');
 
-  const playgroup = await prisma.group.findFirst({
-    where: { academicYearId: academicYear.id, displayOrder: 1, isActive: true },
-    include: {
-      groupSubjects: { include: { subject: true } },
-    },
-  });
+  async function assignTeacherToGroup(
+    groupOrder: number,
+    teacherName: string,
+    username: string,
+    empId: string,
+    qual: string,
+    spec: string,
+    empPhone: string,
+    subjectCycle: (string | null)[],
+  ) {
+    const group = await prisma.group.findFirst({
+      where: { academicYearId: academicYear.id, displayOrder: groupOrder, isActive: true },
+      include: { groupSubjects: { include: { subject: true } } },
+    });
+    if (!group || group.groupSubjects.length === 0) {
+      console.log(`  ⚠ Group order ${groupOrder} not found or has no subjects — skipping`);
+      return;
+    }
 
-  if (playgroup && playgroup.groupSubjects.length > 0) {
-    const TEACHER_NAME = 'Ms. Samina Hassan';
-    const TEACHER_UNAME = 'samina_playgroup';
-
-    // Find or create teacher
-    let teacherId = (await prisma.user.findUnique({ where: { username: TEACHER_UNAME }, select: { id: true } }))?.id;
+    let teacherId = (await prisma.user.findUnique({ where: { username }, select: { id: true } }))?.id;
     if (!teacherId) {
-      const passHash = await bcrypt.hash('teacher123', 12);
+      const hash = await bcrypt.hash('teacher123', 12);
       const user = await prisma.user.create({
-        data: {
-          name: TEACHER_NAME,
-          username: TEACHER_UNAME,
-          passwordHash: passHash,
-          role: 'teacher',
-          status: 'active',
-        },
+        data: { name: teacherName, username, passwordHash: hash, role: 'teacher', status: 'active' },
       });
       teacherId = user.id;
 
       await prisma.teacherProfile.create({
         data: {
-          userId: user.id,
-          employeeId: 'TCH-004',
-          qualification: 'B.Ed. (Early Childhood Education)',
-          specialization: 'Playgroup Lead',
-          phone: '+92 300 1111111',
-          joiningDate: new Date('2025-08-01'),
+          userId: user.id, employeeId: empId, qualification: qual,
+          specialization: spec, phone: empPhone, joiningDate: new Date('2025-08-01'),
         },
       });
-      console.log(`  ✓ Created teacher "${TEACHER_NAME}" (${TEACHER_UNAME} / teacher123)`);
+      console.log(`  ✓ Created "${teacherName}" (${username} / teacher123)`);
 
-      // Add as group member
       await prisma.groupMember.upsert({
-        where: { groupId_userId: { groupId: playgroup.id, userId: user.id } },
+        where: { groupId_userId: { groupId: group.id, userId: user.id } },
         update: { role: 'teacher' },
-        create: { groupId: playgroup.id, userId: user.id, role: 'teacher' },
+        create: { groupId: group.id, userId: user.id, role: 'teacher' },
       });
-      console.log(`  ✓ Added "${TEACHER_NAME}" as member of "${playgroup.name}"`);
 
-      // TeacherAssignments
-      for (const gs of playgroup.groupSubjects) {
+      for (const gs of group.groupSubjects) {
         await prisma.teacherAssignment.create({
           data: {
-            academicYearId: academicYear.id,
-            teacherId: user.id,
-            groupId: playgroup.id,
-            subjectId: gs.subjectId,
-            isClassTeacher: gs.subject.code === 'MATH',
-            role: 'primary',
+            academicYearId: academicYear.id, teacherId: user.id, groupId: group.id,
+            subjectId: gs.subjectId, isClassTeacher: gs.subject.code === 'MATH', role: 'primary',
           },
         });
       }
-      console.log(`  ✓ ${playgroup.groupSubjects.length} subject assignments created`);
+      console.log(`  ✓ ${group.groupSubjects.length} subject assignments for "${group.name}"`);
     } else {
-      console.log(`  ✓ Teacher "${TEACHER_NAME}" already exists — updating entries`);
+      console.log(`  ✓ Teacher "${teacherName}" already exists — updating entries`);
     }
 
-    // Always upsert timetable entries for Playgroup (subjects + teacher)
+    // Always upsert timetable entries
     const tt = await prisma.timetable.findFirst({
       where: { academicYearId: academicYear.id, type: 'timetable', isActive: true },
     });
@@ -565,35 +555,44 @@ async function main() {
         where: { timetableId: tt.id, isActive: true },
         orderBy: { lectureNumber: 'asc' },
       });
+      const subjectMap = new Map(group.groupSubjects.map(gs => [gs.subject.code, gs.subjectId]));
 
-      const subjectMap = new Map(playgroup.groupSubjects.map(gs => [gs.subject.code, gs.subjectId]));
-      const subjectCycle: (string | null)[] = ['MATH', 'ENG', 'URD', 'SCI', 'ISL', null, 'QRN', 'ART'];
-
-      let created = 0;
+      let count = 0;
       for (let i = 0; i < slots.length; i++) {
         const code = subjectCycle[i];
-        if (!code) continue; // break slot
-
+        if (!code) continue;
         const subId = subjectMap.get(code);
         if (!subId) continue;
-
         await prisma.timetableEntry.upsert({
-          where: { slotId_groupId: { slotId: slots[i].id, groupId: playgroup.id } },
+          where: { slotId_groupId: { slotId: slots[i].id, groupId: group.id } },
           update: { subjectId: subId, teacherId, note: null },
-          create: {
-            slotId: slots[i].id,
-            groupId: playgroup.id,
-            subjectId: subId,
-            teacherId,
-          },
+          create: { slotId: slots[i].id, groupId: group.id, subjectId: subId, teacherId },
         });
-        created++;
+        count++;
       }
-      console.log(`  ✓ ${created} timetable entries assigned for "${playgroup.name}"`);
+      console.log(`  ✓ ${count} timetable entries assigned for "${group.name}"`);
     }
-  } else {
-    console.log('  ⚠ Playgroup not found or has no subjects — skipping teacher assignment');
   }
+
+  const pgCycle: (string | null)[] = ['MATH', 'ENG', 'URD', 'SCI', 'ISL', null, 'QRN', 'ART'];
+
+  await assignTeacherToGroup(
+    1, 'Ms. Samina Hassan', 'samina_playgroup', 'TCH-004',
+    'B.Ed. (Early Childhood Education)', 'Playgroup Lead', '+92 300 1111111',
+    pgCycle,
+  );
+
+  await assignTeacherToGroup(
+    2, 'Ms. Amina Khan', 'amina_jr_mont', 'TCH-005',
+    'B.Ed. (Montessori)', 'Jr Montessori Lead', '+92 300 2222222',
+    pgCycle,
+  );
+
+  await assignTeacherToGroup(
+    3, 'Mr. Imran Ali', 'imran_adv_mont', 'TCH-006',
+    'B.Ed. (Advanced Montessori)', 'Adv Montessori Lead', '+92 300 3333333',
+    pgCycle,
+  );
 
   // ─── Step 14: Timetable Entries for All Classes ─────────────────────
   console.log('\n[14/14] Timetable Entries for All Classes');
