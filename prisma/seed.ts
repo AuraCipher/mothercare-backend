@@ -53,6 +53,11 @@ const DEFAULT_SUBJECTS = [
   { name: 'Physics',     code: 'PHY' },
   { name: 'Chemistry',   code: 'CHEM' },
   { name: 'Computer',    code: 'CS' },
+  { name: 'Computer Science', code: 'CSC' },
+  { name: 'Islamiyat',   code: 'ISL' },
+  { name: 'Quran',       code: 'QRN' },
+  { name: 'Biology',     code: 'BIO' },
+  { name: 'Arts',        code: 'ART' },
 ];
 
 const DEFAULT_TEACHERS = [
@@ -380,11 +385,12 @@ async function main() {
   let links = 0;
   for (const group of groups) {
     const orderNum = group.displayOrder;
-    // Assign Math, English, Urdu to all classes; Science for Class 1-5; Physics/Chem for Class 6-10
+    // Assign subjects per class level
     const groupSubjects = subjects.filter(s => {
-      if (s.code === 'MATH' || s.code === 'ENG' || s.code === 'URD') return true;
-      if (orderNum <= 8 && s.code === 'SCI') return true;
-      if (orderNum >= 9 && (s.code === 'PHY' || s.code === 'CHEM')) return true;
+      const c = s.code || '';
+      if (['MATH','ENG','URD','ISL','QRN'].includes(c)) return true;          // All classes
+      if (orderNum <= 8 && ['SCI','ART'].includes(c)) return true;             // Playgroup - Class 5
+      if (orderNum >= 9 && (['PHY','CHEM','BIO','CSC'].includes(c))) return true; // Class 6-10
       return false;
     });
     for (const sub of groupSubjects) {
@@ -561,7 +567,7 @@ async function main() {
       });
 
       const subjectMap = new Map(playgroup.groupSubjects.map(gs => [gs.subject.code, gs.subjectId]));
-      const subjectCycle: (string | null)[] = ['MATH', 'ENG', 'URD', 'SCI', 'MATH', null, 'MATH', 'MATH'];
+      const subjectCycle: (string | null)[] = ['MATH', 'ENG', 'URD', 'SCI', 'ISL', null, 'QRN', 'ART'];
 
       let created = 0;
       for (let i = 0; i < slots.length; i++) {
