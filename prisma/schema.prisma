@@ -665,6 +665,7 @@ model Student {
   credentialStatus       String?       @default("none")
   credentialSends        CredentialSend[]
   statusLogs             StudentStatusLog[]
+  attendanceNotifications AttendanceNotification[]
 
   academicYear      AcademicYear       @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   group             Group?             @relation(fields: [groupId], references: [id], onDelete: SetNull)
@@ -957,6 +958,24 @@ model Message {
 
   @@index([groupId, createdAt])
   @@map("messages")
+}
+
+// Attendance notifications for parents (queued for chat app pickup)
+model AttendanceNotification {
+  id          String   @id @default(uuid())
+  studentId   String
+  date        DateTime @db.Date
+  status      String
+  message     String
+  sent        Boolean  @default(false)
+  sentAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@index([sent])
+  @@map("attendance_notifications")
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗

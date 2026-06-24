@@ -192,4 +192,29 @@ router.post('/attendance/teachers/batch', asyncHandler(async (req: Request, res:
   res.json({ success: true, data: { saved, total: records.length } });
 }));
 
+// POST /attendance/notify — Queue attendance notifications for parents
+router.post('/attendance/notify', asyncHandler(async (req: Request, res: Response) => {
+  const { date, records } = req.body;
+  if (!date || !records || !Array.isArray(records)) {
+    res.status(400).json({ success: false, message: 'date and records[] required' });
+    return;
+  }
+  const dateObj = new Date(date as string);
+  let queued = 0;
+  for (const r of records) {
+    if (!r.studentId || !r.status) continue;
+    const labels: Record<string, string> = { absent: 'was absent', late: 'arrived late', leave: 'is on leave' };
+    const msg = `Your child ${labels[r.status] || r.status} on ${date}.`;
+    const exists = await prisma.attendanceNotification.findFirst({
+      where: { studentId: r.studentId, date: dateObj, status: r.status },
+    });
+    if (exists) continue;
+    await prisma.attendanceNotification.create({
+      data: { studentId: r.studentId, date: dateObj, status: r.status, message: msg },
+    });
+    queued++;
+  }
+  res.json({ success: true, data: { queued, message: 'Notifications queued. Will be sent via chat app.' } });
+}));
+
 export default router;
