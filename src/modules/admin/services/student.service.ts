@@ -69,7 +69,8 @@ class StudentService {
     page?: number;
     limit?: number;
   }) {
-    const { search, groupId, academicYearId, rollNumber, page = 1, limit = 20 } = params;
+    const { search, groupId, academicYearId, rollNumber, page = 1, limit: rawLimit } = params;
+    const limit = rawLimit || 20;
     const skip = (page - 1) * limit;
     const where: any = {};
     if (groupId) where.groupId = groupId;
@@ -83,7 +84,7 @@ class StudentService {
     }
     const [data, total] = await Promise.all([
       prisma.student.findMany({
-        where, skip, take: limit, orderBy: { createdAt: 'desc' },
+        where, skip, take: limit > 0 ? limit : undefined, orderBy: { createdAt: 'desc' },
         include: { group: { select: { id: true, name: true, section: true } } },
       }),
       prisma.student.count({ where }),
