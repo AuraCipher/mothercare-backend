@@ -685,7 +685,8 @@ model Attendance {
   studentId      String
   academicYearId String
   date           DateTime @db.Date
-  status         String   // "present" | "absent" | "late" | "half-day"
+  status         String   // "present" | "absent" | "late" | "leave" | "holiday" | "function"
+  note           String?
   markedById     String?
 
   student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
@@ -706,6 +707,7 @@ model TeacherAttendance {
   academicYearId String
   date           DateTime @db.Date
   status         String   // "present" | "absent" | "late" | "leave" | "holiday" | "function"
+  note           String?
   markedById     String?
 
   teacher      User         @relation("TeacherAttendanceTeacher", fields: [teacherId], references: [id], onDelete: Cascade)

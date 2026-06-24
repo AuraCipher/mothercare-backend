@@ -29,7 +29,7 @@ router.get('/attendance', asyncHandler(async (req: Request, res: Response) => {
       groupId: true,
       attendances: {
         where: Object.keys(dateFilter).length ? { date: dateFilter } : undefined,
-        select: { date: true, status: true },
+        select: { date: true, status: true, note: true },
         orderBy: { date: 'asc' },
       },
     },
@@ -67,12 +67,13 @@ router.post('/attendance/batch', asyncHandler(async (req: Request, res: Response
     if (!record.studentId || !record.status) continue;
     await prisma.attendance.upsert({
       where: { studentId_date: { studentId: record.studentId, date: dateObj } },
-      update: { status: record.status, markedById: userId },
+      update: { status: record.status, markedById: userId, note: record.note || null },
       create: {
         studentId: record.studentId,
         academicYearId: req.body.academicYearId,
         date: dateObj,
         status: record.status,
+        note: record.note || null,
         markedById: userId,
       },
     });
@@ -94,7 +95,7 @@ router.get('/students/:id/attendance', asyncHandler(async (req: Request, res: Re
   const records = await prisma.attendance.findMany({
     where,
     orderBy: { date: 'asc' },
-    select: { date: true, status: true },
+    select: { date: true, status: true, note: true },
   });
 
   const present = records.filter(r => r.status === 'present').length;
@@ -132,7 +133,7 @@ router.get('/attendance/teachers', asyncHandler(async (req: Request, res: Respon
       id: true, name: true,
       teacherAttendances: {
         where: Object.keys(dateFilter).length ? { date: dateFilter } : undefined,
-        select: { date: true, status: true },
+        select: { date: true, status: true, note: true },
         orderBy: { date: 'asc' },
       },
     },
@@ -142,7 +143,7 @@ router.get('/attendance/teachers', asyncHandler(async (req: Request, res: Respon
   // Map to the same format as student attendance (rename teacherAttendances → attendances)
   const data = teachers.map(t => ({
     id: t.id, name: t.name,
-    attendances: t.teacherAttendances.map(a => ({ date: a.date, status: a.status })),
+    attendances: t.teacherAttendances.map(a => ({ date: a.date, status: a.status, note: a.note })),
   }));
 
   res.json({ success: true, data, total: data.length });
@@ -175,12 +176,13 @@ router.post('/attendance/teachers/batch', asyncHandler(async (req: Request, res:
     if (!record.teacherId || !record.status) continue;
     await prisma.teacherAttendance.upsert({
       where: { teacherId_date: { teacherId: record.teacherId, date: dateObj } },
-      update: { status: record.status, markedById: userId },
+      update: { status: record.status, markedById: userId, note: record.note || null },
       create: {
         teacherId: record.teacherId,
         academicYearId: req.body.academicYearId,
         date: dateObj,
         status: record.status,
+        note: record.note || null,
         markedById: userId,
       },
     });
