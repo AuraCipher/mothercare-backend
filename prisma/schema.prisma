@@ -67,6 +67,9 @@ enum StudentStatus {
   GRADUATED
   WITHDRAWN
   TRANSFERRED
+  SUSPENDED
+  EXPELED
+  DECEASED
 }
 
 enum ApiKeyType {
@@ -135,6 +138,7 @@ model User {
   credentialSends       CredentialSend[]
   markedAttendances         Attendance[]
   teacherAttendanceMarkedBy TeacherAttendance[] @relation("TeacherAttendanceMarkedBy")
+  studentStatusChanges      StudentStatusLog[]
 
   @@index([username])
   @@index([email])
@@ -660,6 +664,7 @@ model Student {
   passwordSetAt          DateTime?
   credentialStatus       String?       @default("none")
   credentialSends        CredentialSend[]
+  statusLogs             StudentStatusLog[]
 
   academicYear      AcademicYear       @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   group             Group?             @relation(fields: [groupId], references: [id], onDelete: SetNull)
@@ -1235,4 +1240,25 @@ model TimetableDayConfig {
   @@map("timetable_day_configs")
 
 
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    STUDENT STATUS LOG                            ║
+// ║  Tracks every status change with reason and who changed it.     ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model StudentStatusLog {
+  id              String        @id @default(uuid())
+  studentId       String
+  previousStatus  StudentStatus?
+  newStatus       StudentStatus
+  reason          String?
+  changedById     String?
+  createdAt       DateTime      @default(now())
+
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  changedBy User?   @relation(fields: [changedById], references: [id])
+
+  @@index([studentId])
+  @@map("student_status_logs")
 }

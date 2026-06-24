@@ -174,4 +174,50 @@ router.post('/students/send-all-credentials', passwordSetLimiter, asyncHandler(a
   res.json({ success: true, data: result });
 }));
 
+// PUT /students/:id/status — Update student status (with log)
+router.put('/students/:id/status', asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { status, reason } = req.body;
+  if (!status) { res.status(400).json({ success: false, message: 'status is required' }); return; }
+  const validStatuses = ['ACTIVE','GRADUATED','WITHDRAWN','TRANSFERRED','SUSPENDED','EXPELED','DECEASED'];
+  if (!validStatuses.includes(status)) { res.status(400).json({ success: false, message: 'Invalid status' }); return; }
+
+  const student = await prisma.student.findUnique({ where: { id }, select: { id: true, status: true, isActive: true } });
+  if (!student) { res.status(404).json({ success: false, message: 'Student not found' }); return; }
+
+  const previousStatus = student.status;
+  const userId = (req as any).user?.id;
+
+  await prisma.$transaction([
+    prisma.student.update({ where: { id }, data: { status: status as any, isActive: status === 'ACTIVE' } }),
+    prisma.studentStatusLog.create({
+      data: { studentId: id, previousStatus, newStatus: status as any, reason: reason || null, changedById: userId },
+    }),
+  ]);
+
+  res.json({ success: true, message: `Status changed from ${previousStatus} to ${status}` });
+}));
+
+// GET /students/:id/status-logs — Get status change history
+router.get('/students/:id/status-logs', asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const logs = await prisma.studentStatusLog.findMany({
+    where: { studentId: id }, orderBy: { createdAt: 'desc' },
+    include: { changedBy: { select: { id: true, name: true } } },
+  });
+  res.json({ success: true, data: logs });
+}));
+
+// DELETE /students/:id — Delete student (with cascade)
+router.delete('/students/:id', asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const student = await prisma.student.findUnique({ where: { id }, select: { id: true, name: true } });
+  if (!student) { res.status(404).json({ success: false, message: 'Student not found' }); return; }
+  await prisma.attendance.deleteMany({ where: { studentId: id } });
+  await prisma.credentialSend.deleteMany({ where: { studentId: id } });
+  await prisma.studentStatusLog.deleteMany({ where: { studentId: id } });
+  await prisma.student.delete({ where: { id } });
+  res.json({ success: true, message: `Student "${student.name}" deleted` });
+}));
+
 export default router;
