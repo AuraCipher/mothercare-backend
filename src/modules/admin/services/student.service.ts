@@ -84,7 +84,7 @@ class StudentService {
     }
     const [data, total] = await Promise.all([
       prisma.student.findMany({
-        where, skip, take: limit > 0 ? limit : undefined, orderBy: { createdAt: 'desc' },
+        where, skip, take: limit > 0 ? limit : undefined, orderBy: [{ group: { displayOrder: 'asc' } }, { rollNumber: 'asc' }],
         include: { group: { select: { id: true, name: true, section: true } } },
       }),
       prisma.student.count({ where }),
