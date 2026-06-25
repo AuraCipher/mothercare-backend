@@ -424,8 +424,8 @@ async function main() {
   }
   console.log(`  ✓ ${links} subject-group links created`);
 
-  // ─── Step 12: Demo Students + Random Attendance ─────────────────────
-  console.log('\n[12/15] Demo Students + Attendance (last 30 days)');
+  // ─── Step 12: Demo Students + Full AY Attendance ────────────────────
+  console.log('\n[12/15] Demo Students + Full AY Attendance');
 
   async function seedDemoStudents(groupOrder: number, studentNames: string[], section?: string) {
     const where: any = { academicYearId: academicYear.id, displayOrder: groupOrder, isActive: true };
@@ -463,7 +463,7 @@ async function main() {
       console.log(`  ✓ ${studentNames.length} demo students created in "${group.name}"`);
     }
 
-    // Random attendance for last 30 days
+    // Full AY attendance from CALENDAR_START to today
     const allStudents = await prisma.student.findMany({
       where: { groupId: group.id, isActive: true },
       select: { id: true },
@@ -472,15 +472,18 @@ async function main() {
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const startDate = new Date(CALENDAR_START);
+    startDate.setHours(0, 0, 0, 0);
     const STATUSES = ['present', 'present', 'present', 'present', 'present', 'absent', 'late', 'leave', 'function'];
     const seededRandom = (seed: number) => {
       const x = Math.sin(seed * 9301 + 49297) * 49297;
       return x - Math.floor(x);
     };
+    const daysInAy = Math.ceil((today.getTime() - startDate.getTime()) / 86400000);
 
     let totalAtt = 0;
     for (const student of allStudents) {
-      for (let dayOffset = 179; dayOffset >= 0; dayOffset--) {
+      for (let dayOffset = daysInAy; dayOffset >= 0; dayOffset--) {
         const local = new Date(today);
         local.setDate(local.getDate() - dayOffset);
         // Use UTC date to avoid timezone shift in DB
@@ -502,7 +505,7 @@ async function main() {
         totalAtt++;
       }
     }
-    console.log(`  ✓ ${totalAtt} attendance records created for ${allStudents.length} students over 30 days`);
+    console.log(`  ✓ ${totalAtt} attendance records created for ${allStudents.length} students over ${daysInAy + 1} AY days`);
   }
 
   await seedDemoStudents(1, [
@@ -635,7 +638,7 @@ async function main() {
     'Qudrat', 'Shafqat', 'Tayyab', 'Waheed', 'Zareen',
   ], 'CS');
 
-  // ─── Teacher attendance (last 30 days) ───────────────────────────────
+  // ─── Teacher attendance (full AY) ────────────────────────────────────
   console.log('  ✓ Generating teacher attendance…');
   const allTeachers = await prisma.user.findMany({
     where: { role: 'teacher', status: 'active' },
@@ -643,10 +646,13 @@ async function main() {
   });
   const todayTA = new Date();
   todayTA.setHours(0, 0, 0, 0);
+  const ayStartTA = new Date(CALENDAR_START);
+  ayStartTA.setHours(0, 0, 0, 0);
+  const daysInAyTA = Math.ceil((todayTA.getTime() - ayStartTA.getTime()) / 86400000);
   const activeAy = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } });
   let teacherAtt = 0;
   for (const t of allTeachers) {
-    for (let d = 179; d >= 0; d--) {
+    for (let d = daysInAyTA; d >= 0; d--) {
       const dt = new Date(Date.UTC(todayTA.getFullYear(), todayTA.getMonth(), todayTA.getDate() - d));
       const isSun = new Date(todayTA.getTime() - d * 86400000).getDay() === 0;
       const status = isSun ? 'holiday' : (['present','present','present','present','absent','late','leave','function'] as const)[Math.floor(Math.random() * 8)];
@@ -658,7 +664,7 @@ async function main() {
       teacherAtt++;
     }
   }
-  console.log(`  ✓ ${teacherAtt} teacher attendance records created for ${allTeachers.length} teachers over 30 days`);
+  console.log(`  ✓ ${teacherAtt} teacher attendance records created for ${allTeachers.length} teachers over ${daysInAyTA + 1} AY days`);
 
   // Sync the student number sequence to max + 1
   try {

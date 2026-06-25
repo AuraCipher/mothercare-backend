@@ -61,6 +61,20 @@ router.post('/attendance/batch', asyncHandler(async (req: Request, res: Response
     res.status(400).json({ success: false, message: 'Cannot mark attendance for future dates' });
     return;
   }
+  // Block dates outside academic year
+  const ayWithCalendar = await prisma.academicYear.findUnique({
+    where: { id: req.body.academicYearId },
+    select: { calendar: { select: { startDate: true, endDate: true } } },
+  });
+  if (ayWithCalendar?.calendar) {
+    const ayStart = new Date(ayWithCalendar.calendar.startDate);
+    const ayEnd = new Date(ayWithCalendar.calendar.endDate);
+    ayEnd.setHours(23, 59, 59, 999);
+    if (dateObj < ayStart || dateObj > ayEnd) {
+      res.status(400).json({ success: false, message: 'Date is outside the academic year range' });
+      return;
+    }
+  }
   let saved = 0;
 
   for (const record of records) {
@@ -169,6 +183,20 @@ router.post('/attendance/teachers/batch', asyncHandler(async (req: Request, res:
   if (dateObj > checkDate) {
     res.status(400).json({ success: false, message: 'Cannot mark attendance for future dates' });
     return;
+  }
+  // Block dates outside academic year
+  const ayWithCalendarTA = await prisma.academicYear.findUnique({
+    where: { id: req.body.academicYearId },
+    select: { calendar: { select: { startDate: true, endDate: true } } },
+  });
+  if (ayWithCalendarTA?.calendar) {
+    const ayStart = new Date(ayWithCalendarTA.calendar.startDate);
+    const ayEnd = new Date(ayWithCalendarTA.calendar.endDate);
+    ayEnd.setHours(23, 59, 59, 999);
+    if (dateObj < ayStart || dateObj > ayEnd) {
+      res.status(400).json({ success: false, message: 'Date is outside the academic year range' });
+      return;
+    }
   }
 
   let saved = 0;
