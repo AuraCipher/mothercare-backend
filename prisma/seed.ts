@@ -480,7 +480,7 @@ async function main() {
 
     let totalAtt = 0;
     for (const student of allStudents) {
-      for (let dayOffset = 29; dayOffset >= 0; dayOffset--) {
+      for (let dayOffset = 179; dayOffset >= 0; dayOffset--) {
         const local = new Date(today);
         local.setDate(local.getDate() - dayOffset);
         // Use UTC date to avoid timezone shift in DB
@@ -646,7 +646,7 @@ async function main() {
   const activeAy = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } });
   let teacherAtt = 0;
   for (const t of allTeachers) {
-    for (let d = 29; d >= 0; d--) {
+    for (let d = 179; d >= 0; d--) {
       const dt = new Date(Date.UTC(todayTA.getFullYear(), todayTA.getMonth(), todayTA.getDate() - d));
       const isSun = new Date(todayTA.getTime() - d * 86400000).getDay() === 0;
       const status = isSun ? 'holiday' : (['present','present','present','present','absent','late','leave','function'] as const)[Math.floor(Math.random() * 8)];
