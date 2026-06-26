@@ -158,6 +158,20 @@ router.get('/students/:id/fee', asyncHandler(async (req: Request, res: Response)
   res.json({ success: true, data: student });
 }));
 
+// PUT /admin/student-fees/:id/extra — Set extra charges on a StudentFee
+router.put('/student-fees/:id/extra', asyncHandler(async (req: Request, res: Response) => {
+  const { extraCharges, extraReason } = req.body;
+  if (extraCharges == null || extraCharges < 0) {
+    res.status(400).json({ success: false, message: 'extraCharges (>=0) required' });
+    return;
+  }
+  const updated = await prisma.studentFee.update({
+    where: { id: req.params.id },
+    data: { extraCharges, extraReason: extraReason || null },
+  });
+  res.json({ success: true, data: updated });
+}));
+
 // ═══════════════════════════════════════════════════════════════════
 // ALL STUDENTS WITH FEE STATUS (for Collections page)
 // ═══════════════════════════════════════════════════════════════════
@@ -393,7 +407,7 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
     return;
   }
 
-  const totalRemaining = fees.reduce((sum, f) => sum + (f.netAmount - f.paidAmount), 0);
+  const totalRemaining = fees.reduce((sum, f) => sum + (f.netAmount + f.extraCharges - f.paidAmount), 0);
   if (remaining > totalRemaining) {
     res.status(400).json({ success: false, message: `Amount exceeds total remaining (${(totalRemaining / 100).toLocaleString()} PKR)` });
     return;
@@ -411,7 +425,7 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
 
   for (const fee of fees) {
     if (remaining <= 0) break;
-    const due = fee.netAmount - fee.paidAmount;
+    const due = fee.netAmount + fee.extraCharges - fee.paidAmount;
     if (due <= 0) continue;
 
     const payAmount = Math.min(remaining, due);

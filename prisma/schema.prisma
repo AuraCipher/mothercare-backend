@@ -1385,6 +1385,8 @@ model StudentFee {
   concession     Int      @default(0)
   lateFee        Int      @default(0)
   netAmount      Int      // totalAmount - concession + lateFee
+  extraCharges   Int      @default(0) // Additional charges on top of base fee
+  extraReason    String?  // Reason for extra charges
   paidAmount     Int      @default(0)
   status         String   @default("UNPAID") // UNPAID | PARTIAL | PAID | OVERPAID | WAIVED
   dueDate        DateTime?
