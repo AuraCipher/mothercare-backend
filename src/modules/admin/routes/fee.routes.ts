@@ -125,6 +125,40 @@ router.delete('/fee-structures/:id', asyncHandler(async (req: Request, res: Resp
 }));
 
 // ═══════════════════════════════════════════════════════════════════
+// PER-STUDENT CUSTOM FEE (Scholarship / Concession)
+// ═══════════════════════════════════════════════════════════════════
+
+// PUT /admin/students/:id/custom-fee — Set custom fee for a student
+router.put('/students/:id/custom-fee', asyncHandler(async (req: Request, res: Response) => {
+  const { customFeeAmount, concessionReason } = req.body;
+  const student = await prisma.student.update({
+    where: { id: req.params.id },
+    data: {
+      customFeeAmount: customFeeAmount != null ? customFeeAmount : null,
+      concessionReason: concessionReason || null,
+    },
+  });
+  res.json({ success: true, data: { id: student.id, customFeeAmount: student.customFeeAmount, concessionReason: student.concessionReason } });
+}));
+
+// GET /admin/students/:id/fee — Get student with fee info
+router.get('/students/:id/fee', asyncHandler(async (req: Request, res: Response) => {
+  const student = await prisma.student.findUnique({
+    where: { id: req.params.id },
+    include: {
+      group: { select: { name: true, section: true } },
+      parents: { include: { parent: { include: { user: { select: { name: true } } }, select: { relation: true, phone: true, occupation: true } } } },
+      studentFees: {
+        include: { payments: { where: { revertedAt: null }, orderBy: { createdAt: 'desc' } } },
+        orderBy: [{ year: 'desc' }, { month: 'desc' }],
+      },
+    },
+  });
+  if (!student) { res.status(404).json({ success: false, message: 'Student not found' }); return; }
+  res.json({ success: true, data: student });
+}));
+
+// ═══════════════════════════════════════════════════════════════════
 // STUDENT FEE GENERATION
 // ═══════════════════════════════════════════════════════════════════
 
@@ -144,7 +178,13 @@ router.get('/student-fees', asyncHandler(async (req: Request, res: Response) => 
   const fees = await prisma.studentFee.findMany({
     where,
     include: {
-      student: { select: { id: true, name: true, rollNumber: true, admissionNumber: true, familyId: true } },
+      student: {
+        select: {
+          id: true, name: true, rollNumber: true, admissionNumber: true, familyId: true, customFeeAmount: true,
+          parents: { include: { parent: { include: { user: { select: { name: true } } }, select: { relation: true, phone: true } } } },
+          group: { select: { name: true, section: true } },
+        },
+      },
       payments: { where: { revertedAt: null } },
     },
     orderBy: [{ netAmount: 'desc' }],
