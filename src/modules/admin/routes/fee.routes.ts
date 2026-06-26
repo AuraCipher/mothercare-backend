@@ -372,6 +372,84 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
   res.status(201).json({ success: true, data: { payment, receiptNumber, status } });
 }));
 
+// POST /admin/payments/waterfall — Waterfall payment across unpaid months (oldest first)
+router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Response) => {
+  const { studentId, amount, paymentMethod, reference, note } = req.body;
+  if (!studentId || !amount || amount <= 0) {
+    res.status(400).json({ success: false, message: 'studentId and amount (>0) required' });
+    return;
+  }
+  const userId = (req as any).user?.id;
+  let remaining = amount;
+
+  // Find all unpaid/partial fees for this student, oldest first
+  const fees = await prisma.studentFee.findMany({
+    where: { studentId, status: { in: ['UNPAID', 'PARTIAL'] } },
+    orderBy: [{ year: 'asc' }, { month: 'asc' }],
+  });
+
+  if (fees.length === 0) {
+    res.status(400).json({ success: false, message: 'No unpaid fees found for this student' });
+    return;
+  }
+
+  const totalRemaining = fees.reduce((sum, f) => sum + (f.netAmount - f.paidAmount), 0);
+  if (remaining > totalRemaining) {
+    res.status(400).json({ success: false, message: `Amount exceeds total remaining (${(totalRemaining / 100).toLocaleString()} PKR)` });
+    return;
+  }
+
+  // Generate single receipt number
+  const now = new Date();
+  const yymm = now.getFullYear().toString() + String(now.getMonth() + 1).padStart(2, '0');
+  const count = await prisma.payment.count({ where: { receiptNumber: { startsWith: `RCP-${yymm}` } } });
+  const receiptNumber = `RCP-${yymm}-${String(count + 1).padStart(4, '0')}`;
+
+  const allocations: any[] = [];
+  let remainingForReceipt = remaining;
+  const updates: any[] = [];
+
+  for (const fee of fees) {
+    if (remaining <= 0) break;
+    const due = fee.netAmount - fee.paidAmount;
+    if (due <= 0) continue;
+
+    const payAmount = Math.min(remaining, due);
+    remaining -= payAmount;
+
+    // Create payment record
+    const payment = await prisma.payment.create({
+      data: {
+        studentFeeId: fee.id,
+        studentId,
+        amount: payAmount,
+        paymentMethod: paymentMethod || 'CASH',
+        receiptNumber: `${receiptNumber}-${allocations.length + 1}`,
+        reference, note, recordedById: userId,
+      },
+    });
+    allocations.push(payment);
+
+    // Update StudentFee
+    const newPaid = fee.paidAmount + payAmount;
+    const newStatus = newPaid >= fee.netAmount ? 'PAID' : 'PARTIAL';
+    await prisma.studentFee.update({
+      where: { id: fee.id },
+      data: { paidAmount: newPaid, status: newStatus, paidAt: newStatus === 'PAID' ? new Date() : undefined },
+    });
+  }
+
+  res.status(201).json({
+    success: true,
+    data: {
+      receiptNumber,
+      totalAmount: amount,
+      allocations: allocations.map(a => ({ id: a.id, studentFeeId: a.studentFeeId, amount: a.amount, receiptNumber: a.receiptNumber })),
+      monthsCovered: allocations.length,
+    },
+  });
+}));
+
 // POST /admin/payments/:id/revert — Revert a payment
 router.post('/payments/:id/revert', asyncHandler(async (req: Request, res: Response) => {
   const { reason } = req.body;
