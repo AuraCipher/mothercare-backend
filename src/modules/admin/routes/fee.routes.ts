@@ -147,7 +147,7 @@ router.get('/students/:id/fee', asyncHandler(async (req: Request, res: Response)
     where: { id: req.params.id },
     include: {
       group: { select: { name: true, section: true } },
-      parents: { include: { parent: { include: { user: { select: { name: true } } }, select: { relation: true, phone: true, occupation: true } } } },
+      parents: { include: { parent: { select: { relation: true, phone: true, occupation: true, user: { select: { name: true } } } } } },
       studentFees: {
         include: { payments: { where: { revertedAt: null }, orderBy: { createdAt: 'desc' } } },
         orderBy: [{ year: 'desc' }, { month: 'desc' }],
@@ -181,7 +181,7 @@ router.get('/student-fees', asyncHandler(async (req: Request, res: Response) => 
       student: {
         select: {
           id: true, name: true, rollNumber: true, admissionNumber: true, familyId: true, customFeeAmount: true,
-          parents: { include: { parent: { include: { user: { select: { name: true } } }, select: { relation: true, phone: true } } } },
+          parents: { include: { parent: { select: { relation: true, phone: true, user: { select: { name: true } } } } } },
           group: { select: { name: true, section: true } },
         },
       },
