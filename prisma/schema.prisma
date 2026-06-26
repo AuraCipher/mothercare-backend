@@ -139,6 +139,10 @@ model User {
   markedAttendances         Attendance[]
   teacherAttendanceMarkedBy TeacherAttendance[] @relation("TeacherAttendanceMarkedBy")
   studentStatusChanges      StudentStatusLog[]
+  feeChangeLogs             FeeChangeLog[]
+  recordedPayments          Payment[]         @relation("PaymentRecordedBy")
+  revertedPayments          Payment[]         @relation("PaymentRevertedBy")
+  recordedFamilyPayments    FamilyPayment[]
 
   @@index([username])
   @@index([email])
@@ -298,6 +302,9 @@ model AcademicYear {
   updatedById     String?
 
   @@unique([branchId, calendarId])
+  feeStructures    FeeStructure[]
+  studentFees      StudentFee[]
+
   @@map("academic_years")
 
 }
@@ -391,6 +398,9 @@ model Group {
   updatedById     String?
 
   @@unique([academicYearId, name, section])
+  feeStructures    FeeStructure[]
+  studentFees      StudentFee[]
+
   @@map("groups")
 
 }
@@ -621,6 +631,7 @@ model Student {
   id              String        @id @default(uuid())
   academicYearId  String
   groupId         String?
+  familyId        String?
   name            String
   rollNumber      String?
   admissionNumber String?       @unique
@@ -669,13 +680,17 @@ model Student {
 
   academicYear      AcademicYear       @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   group             Group?             @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  family            Family?            @relation("StudentFamily", fields: [familyId], references: [id], onDelete: SetNull)
   parents           StudentParent[]
   enrollments       Enrollment[]
   emergencyContacts EmergencyContact[]
   healthRecord      HealthRecord?
   attendances       Attendance[]
+  studentFees       StudentFee[]
+  feePayments       Payment[]     @relation("PaymentStudent")
 
   @@index([groupId])
+  @@index([familyId])
   @@index([academicYearId])
   @@map("students")
 }
@@ -1282,4 +1297,153 @@ model StudentStatusLog {
 
   @@index([studentId])
   @@map("student_status_logs")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                     FEE / PAYMENT SYSTEM                        ║
+// ║  Family grouping, fee heads, structures, student fees,          ║
+// ║  payments, receipts, and sibling combined payments.             ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model Family {
+  id         String    @id @default(uuid())
+  name       String?
+  fatherName String?
+  motherName String?
+  phone      String?
+  address    String?
+  createdAt  DateTime  @default(now())
+
+  students Student[]       @relation("StudentFamily")
+  payments FamilyPayment[]
+
+  @@map("families")
+}
+
+model FeeHead {
+  id          String   @id @default(uuid())
+  name        String   // Tuition, Transport, Lab, Library, etc.
+  description String?
+  isOptional  Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  category    String   @default("MONTHLY") // MONTHLY | TERM | ANNUAL | ONE_TIME
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  structures FeeStructure[]
+
+  @@map("fee_heads")
+}
+
+model FeeStructure {
+  id             String    @id @default(uuid())
+  academicYearId String
+  groupId        String
+  feeHeadId      String
+  amount         Int       // In paise (500000 = 5000 PKR)
+  effectiveFrom  DateTime  @default(now())
+  effectiveTo    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
+  group        Group        @relation(fields: [groupId], references: [id])
+  feeHead      FeeHead      @relation(fields: [feeHeadId], references: [id])
+  changeLogs   FeeChangeLog[]
+
+  @@unique([academicYearId, groupId, feeHeadId, effectiveFrom])
+  @@index([academicYearId, groupId])
+  @@map("fee_structures")
+}
+
+model FeeChangeLog {
+  id             String   @id @default(uuid())
+  feeStructureId String
+  previousAmount Int
+  newAmount      Int
+  reason         String?
+  changedById    String
+  changedAt      DateTime @default(now())
+
+  feeStructure FeeStructure @relation(fields: [feeStructureId], references: [id])
+  changedBy    User         @relation(fields: [changedById], references: [id])
+
+  @@index([feeStructureId])
+  @@map("fee_change_logs")
+}
+
+model StudentFee {
+  id             String   @id @default(uuid())
+  academicYearId String
+  studentId      String
+  groupId        String?  // Snapshot of class at generation time
+  month          Int      // 1-12
+  year           Int
+  totalAmount    Int      // Sum of all applicable heads (paise)
+  concession     Int      @default(0)
+  lateFee        Int      @default(0)
+  netAmount      Int      // totalAmount - concession + lateFee
+  paidAmount     Int      @default(0)
+  status         String   @default("UNPAID") // UNPAID | PARTIAL | PAID | OVERPAID | WAIVED
+  dueDate        DateTime?
+  paidAt         DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
+  student      Student      @relation(fields: [studentId], references: [id])
+  group        Group?       @relation(fields: [groupId], references: [id])
+  payments     Payment[]
+
+  @@unique([studentId, month, year])
+  @@index([month, year, status])
+  @@index([academicYearId, status])
+  @@map("student_fees")
+}
+
+model FamilyPayment {
+  id            String    @id @default(uuid())
+  familyId      String
+  receiptNumber String    @unique // FMP-YYYYMM-XXXX
+  totalAmount   Int
+  paymentDate   DateTime  @default(now())
+  recordedById  String
+  createdAt     DateTime  @default(now())
+
+  family   Family    @relation(fields: [familyId], references: [id])
+  payments Payment[]
+  recordedBy User    @relation(fields: [recordedById], references: [id])
+
+  @@index([familyId])
+  @@map("family_payments")
+}
+
+model Payment {
+  id              String    @id @default(uuid())
+  studentFeeId    String
+  studentId       String
+  familyPaymentId String?
+  amount          Int       // In paise
+  paymentMethod   String    // CASH | CHEQUE | BANK_TRANSFER
+  receiptNumber   String    @unique // RCP-YYYYMM-XXXX
+  reference       String?   // Cheque number / transaction ID
+  paymentDate     DateTime  @default(now())
+  recordedById    String
+  note            String?
+  revertedAt      DateTime?
+  revertedById    String?
+  revertReason    String?
+  createdAt       DateTime  @default(now())
+
+  studentFee    StudentFee     @relation(fields: [studentFeeId], references: [id])
+  student       Student        @relation("PaymentStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  familyPayment FamilyPayment? @relation(fields: [familyPaymentId], references: [id])
+  recordedBy    User           @relation("PaymentRecordedBy", fields: [recordedById], references: [id])
+  revertedBy    User?          @relation("PaymentRevertedBy", fields: [revertedById], references: [id])
+
+  @@index([studentFeeId])
+  @@index([familyPaymentId])
+  @@index([receiptNumber])
+  @@index([studentId])
+  @@map("payments")
 }
