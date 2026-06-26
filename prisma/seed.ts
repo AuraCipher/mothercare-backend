@@ -1057,7 +1057,7 @@ async function main() {
     const adjY = y + Math.floor((m - 1) / 12);
     const students = await prisma.student.findMany({
       where: { academicYearId: academicYear.id, isActive: true },
-      take: 50,
+
     });
     let genCount = 0;
     for (const student of students) {
@@ -1078,12 +1078,12 @@ async function main() {
     console.log(`  ✓ ${genCount} fees generated for ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][adjM - 1]} ${adjY}`);
 
     // Record payments for ~60% of generated fees
-    const unpaid = await prisma.studentFee.findMany({
+    const unpaidAll = await prisma.studentFee.findMany({
       where: { month: adjM, year: adjY, status: 'UNPAID' },
-      take: Math.ceil(genCount * 0.6),
     });
+    const unpaidBatch = unpaidAll.slice(0, Math.ceil(unpaidAll.length * 0.6));
     let payCount = 0;
-    for (const fee of unpaid) {
+    for (const fee of unpaidBatch) {
       const amount = Math.round(fee.netAmount * (0.7 + Math.random() * 0.3));
       await prisma.payment.create({
         data: {
