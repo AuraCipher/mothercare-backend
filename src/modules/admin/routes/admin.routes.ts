@@ -43,8 +43,8 @@ router.use(sectionRoutes); // Contains /branches/:branchId/academic-years/:ayId/
 router.use(subjectRoutes); // Contains /branches/:branchId/academic-years/:ayId/subjects, /branches/:branchId/subjects/:id
 router.use(timetableRoutes); // Contains /branches/:branchId/academic-years/:ayId/timetable/slots, /branches/:branchId/sections/:sectionId/timetable
 router.use(attendanceRoutes); // Contains /attendance, /attendance/batch
-router.use(studentRoutes); // Contains /students, /students/:id, /students/:id/emergency-contact, etc.
 router.use(feeRoutes); // Contains /fee-heads, /fee-structures, /student-fees, /payments, /families, /fees/*
+router.use(studentRoutes); // Contains /students, /students/:id, /students/:id/emergency-contact, etc.
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
