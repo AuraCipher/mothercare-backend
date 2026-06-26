@@ -990,6 +990,118 @@ async function main() {
     }
   }
 
+  // ─── Step 16: Demo Fee Data ────────────────────────────────────────
+  console.log('\n[16/16] Demo Fee Data');
+  const feeHeadsData = [
+    { name: 'Tuition', category: 'MONTHLY', description: 'Monthly tuition fee' },
+    { name: 'Transport', category: 'MONTHLY', description: 'Transport/Conveyance', isOptional: true },
+    { name: 'Lab Fee', category: 'MONTHLY', description: 'Science lab charges' },
+    { name: 'Library', category: 'MONTHLY', description: 'Library & reading material' },
+    { name: 'Sports', category: 'MONTHLY', description: 'Sports & extracurricular' },
+    { name: 'Annual Charges', category: 'ANNUAL', description: 'Annual registration & misc' },
+    { name: 'Admission Fee', category: 'ONE_TIME', description: 'One-time admission charge' },
+  ];
+  const feeHeadIds: Record<string, string> = {};
+  for (const f of feeHeadsData) {
+    const existing = await prisma.feeHead.findFirst({ where: { name: f.name } });
+    if (existing) { feeHeadIds[f.name] = existing.id; continue; }
+    const h = await prisma.feeHead.create({ data: f });
+    feeHeadIds[f.name] = h.id;
+  }
+  console.log(`  ✓ ${Object.keys(feeHeadIds).length} fee heads ensured`);
+
+  // Fee structures per class (amount in paise)
+  const feeAmounts: Record<string, { Tuition: number; Transport: number; Lab: number; Library: number; Sports: number }> = {
+    'Playgroup': { Tuition: 300000, Transport: 150000, Lab: 0, Library: 50000, Sports: 30000 },
+    'Jr Montessori': { Tuition: 350000, Transport: 150000, Lab: 0, Library: 50000, Sports: 30000 },
+    'Adv Montessori': { Tuition: 380000, Transport: 180000, Lab: 0, Library: 50000, Sports: 30000 },
+    'Class 1': { Tuition: 450000, Transport: 200000, Lab: 50000, Library: 50000, Sports: 50000 },
+    'Class 2': { Tuition: 480000, Transport: 200000, Lab: 50000, Library: 50000, Sports: 50000 },
+    'Class 3': { Tuition: 500000, Transport: 200000, Lab: 50000, Library: 50000, Sports: 50000 },
+    'Class 4': { Tuition: 520000, Transport: 250000, Lab: 50000, Library: 100000, Sports: 50000 },
+    'Class 5': { Tuition: 550000, Transport: 250000, Lab: 50000, Library: 100000, Sports: 50000 },
+    'Class 6': { Tuition: 580000, Transport: 250000, Lab: 100000, Library: 100000, Sports: 50000 },
+    'Class 7': { Tuition: 600000, Transport: 300000, Lab: 100000, Library: 100000, Sports: 80000 },
+    'Class 8': { Tuition: 650000, Transport: 300000, Lab: 100000, Library: 100000, Sports: 80000 },
+    'Class 9': { Tuition: 700000, Transport: 350000, Lab: 150000, Library: 100000, Sports: 80000 },
+    'Class 10': { Tuition: 750000, Transport: 350000, Lab: 150000, Library: 100000, Sports: 80000 },
+  };
+
+  const feeGroups = await prisma.group.findMany({ where: { academicYearId: academicYear.id, isActive: true } });
+  for (const g of feeGroups) {
+    const baseName = g.name.split(' ')[0];
+    const amounts = feeAmounts[g.name] || feeAmounts[baseName] || feeAmounts['Class 1'];
+    if (!amounts) continue;
+    for (const [headName, amount] of Object.entries(amounts)) {
+      if (amount === 0) continue;
+      const headId = feeHeadIds[headName];
+      if (!headId) continue;
+      const existing = await prisma.feeStructure.findFirst({
+        where: { academicYearId: academicYear.id, groupId: g.id, feeHeadId: headId, effectiveTo: null },
+      });
+      if (!existing) {
+        await prisma.feeStructure.create({
+          data: { academicYearId: academicYear.id, groupId: g.id, feeHeadId: headId, amount, effectiveFrom: new Date('2025-08-01') },
+        });
+      }
+    }
+  }
+  console.log('  ✓ Fee structures created for all groups');
+
+  // Generate fees for last 3 months with some payments
+  const now = new Date();
+  for (let offset = 2; offset >= 0; offset--) {
+    const m = now.getMonth() + 1 - offset;
+    const y = now.getFullYear();
+    const adjM = ((m - 1) % 12 + 12) % 12 + 1;
+    const adjY = y + Math.floor((m - 1) / 12);
+    const students = await prisma.student.findMany({
+      where: { academicYearId: academicYear.id, isActive: true },
+      take: 50,
+    });
+    let genCount = 0;
+    for (const student of students) {
+      const existing = await prisma.studentFee.findUnique({
+        where: { studentId_month_year: { studentId: student.id, month: adjM, year: adjY } },
+      });
+      if (existing) continue;
+      const groupStructures = await prisma.feeStructure.findMany({
+        where: { academicYearId: academicYear.id, groupId: student.groupId || '', effectiveTo: null },
+      });
+      const total = groupStructures.reduce((s, fs) => s + fs.amount, 0);
+      if (total === 0) continue;
+      await prisma.studentFee.create({
+        data: { academicYearId: academicYear.id, studentId: student.id, groupId: student.groupId, month: adjM, year: adjY, totalAmount: total, netAmount: total },
+      });
+      genCount++;
+    }
+    console.log(`  ✓ ${genCount} fees generated for ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][adjM - 1]} ${adjY}`);
+
+    // Record payments for ~60% of generated fees
+    const unpaid = await prisma.studentFee.findMany({
+      where: { month: adjM, year: adjY, status: 'UNPAID' },
+      take: Math.ceil(genCount * 0.6),
+    });
+    let payCount = 0;
+    for (const fee of unpaid) {
+      const amount = Math.round(fee.netAmount * (0.7 + Math.random() * 0.3));
+      await prisma.payment.create({
+        data: {
+          studentFeeId: fee.id, studentId: fee.studentId,
+          amount, paymentMethod: 'CASH',
+          receiptNumber: `RCP-${adjY}${String(adjM).padStart(2, '0')}-${String(payCount + 1).padStart(4, '0')}`,
+          recordedById: adminUser.id,
+        },
+      });
+      await prisma.studentFee.update({
+        where: { id: fee.id },
+        data: { paidAmount: amount, status: amount >= fee.netAmount ? 'PAID' : 'PARTIAL', paidAt: amount >= fee.netAmount ? new Date() : undefined },
+      });
+      payCount++;
+    }
+    console.log(`  ✓ ${payCount} payments recorded for ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][adjM - 1]} ${adjY}`);
+  }
+
   const groupCount = await prisma.group.count({ where: { academicYearId: academicYear.id } });
   console.log('\n─── Seed Summary ───────────────────────────────');
   console.log(`  Branch:           ${branch.name} (${branch.code})`);
