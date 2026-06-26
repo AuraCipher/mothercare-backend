@@ -162,7 +162,7 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
 
   const students = await prisma.student.findMany({
     where: { academicYearId: ayId, isActive: true, status: 'ACTIVE' },
-    select: { id: true, groupId: true },
+    select: { id: true, groupId: true, customFeeAmount: true },
   });
 
   // Get fee structures that were effective for this month
@@ -185,7 +185,8 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
 
     // Find structures for this student's group
     const groupStructures = structures.filter(s => s.groupId === student.groupId);
-    const totalAmount = groupStructures.reduce((sum, s) => sum + s.amount, 0);
+    const baseAmount = groupStructures.reduce((sum, s) => sum + s.amount, 0);
+	    const totalAmount = student.customFeeAmount ?? baseAmount;
 
     if (totalAmount > 0) {
       await prisma.studentFee.create({
