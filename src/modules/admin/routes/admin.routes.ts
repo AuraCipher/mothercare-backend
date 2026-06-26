@@ -13,6 +13,7 @@ import subjectRoutes from './subject.routes';
 import timetableRoutes from './timetable.routes';
 import attendanceRoutes from './attendance.routes';
 import studentRoutes from './student.routes';
+import feeRoutes from './fee.routes';
 
 const router = Router();
 const meRouter = Router();
@@ -43,6 +44,7 @@ router.use(subjectRoutes); // Contains /branches/:branchId/academic-years/:ayId/
 router.use(timetableRoutes); // Contains /branches/:branchId/academic-years/:ayId/timetable/slots, /branches/:branchId/sections/:sectionId/timetable
 router.use(attendanceRoutes); // Contains /attendance, /attendance/batch
 router.use(studentRoutes); // Contains /students, /students/:id, /students/:id/emergency-contact, etc.
+router.use(feeRoutes); // Contains /fee-heads, /fee-structures, /student-fees, /payments, /families, /fees/*
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
