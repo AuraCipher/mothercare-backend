@@ -159,6 +159,58 @@ router.get('/students/:id/fee', asyncHandler(async (req: Request, res: Response)
 }));
 
 // ═══════════════════════════════════════════════════════════════════
+// ALL STUDENTS WITH FEE STATUS (for Collections page)
+// ═══════════════════════════════════════════════════════════════════
+
+// GET /admin/fees/students-list — All active students with their fee for given month
+router.get('/fees/students-list', asyncHandler(async (req: Request, res: Response) => {
+  const { month, year, groupId, search } = req.query;
+  const m = parseInt(month as string, 10) || (new Date().getMonth() + 1);
+  const y = parseInt(year as string, 10) || new Date().getFullYear();
+
+  const where: any = { isActive: true, status: 'ACTIVE' };
+  if (groupId) where.groupId = groupId as string;
+  if (search) {
+    where.OR = [
+      { name: { contains: search as string, mode: 'insensitive' } },
+      { rollNumber: { contains: search as string } },
+    ];
+  }
+
+  const students = await prisma.student.findMany({
+    where,
+    select: {
+      id: true, name: true, rollNumber: true, admissionNumber: true,
+      groupId: true, customFeeAmount: true, concessionReason: true,
+      group: { select: { name: true, section: true } },
+      parents: {
+        include: {
+          parent: { select: { relation: true, phone: true, user: { select: { name: true } } } },
+        },
+      },
+      studentFees: {
+        where: { month: m, year: y },
+        include: { payments: { where: { revertedAt: null }, select: { id: true, amount: true, receiptNumber: true, paymentMethod: true, createdAt: true } } },
+      },
+    },
+    orderBy: [{ group: { displayOrder: 'asc' } }, { rollNumber: 'asc' }],
+  });
+
+  const data = students.map(s => ({
+    student: s,
+    fee: s.studentFees[0] || null,
+    // Include fee fields at top level for compatibility with existing code
+    id: s.studentFees[0]?.id || null,
+    netAmount: s.studentFees[0]?.netAmount || 0,
+    paidAmount: s.studentFees[0]?.paidAmount || 0,
+    status: s.studentFees[0]?.status || 'NO_FEE',
+    payments: s.studentFees[0]?.payments || [],
+  }));
+
+  res.json({ success: true, data });
+}));
+
+// ═══════════════════════════════════════════════════════════════════
 // STUDENT FEE GENERATION
 // ═══════════════════════════════════════════════════════════════════
 
