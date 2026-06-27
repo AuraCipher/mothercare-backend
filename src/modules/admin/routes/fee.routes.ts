@@ -412,6 +412,7 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
   // Find all unpaid/partial fees for this student, oldest first
   const fees = await prisma.studentFee.findMany({
     where: { studentId, status: { in: ['UNPAID', 'PARTIAL'] } },
+    include: { extraItems: true },
     orderBy: [{ year: 'asc' }, { month: 'asc' }],
   });
 
@@ -420,7 +421,11 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
     return;
   }
 
-  const totalRemaining = fees.reduce((sum, f) => sum + (f.netAmount + f.extraCharges - f.paidAmount), 0);
+  const getTotalDue = (f: typeof fees[0]) => {
+    const extraSum = (f as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
+    return f.netAmount + extraSum - f.paidAmount;
+  };
+  const totalRemaining = fees.reduce((sum, f) => sum + getTotalDue(f), 0);
   if (remaining > totalRemaining) {
     res.status(400).json({ success: false, message: `Amount exceeds total remaining (${(totalRemaining / 100).toLocaleString()} PKR)` });
     return;
@@ -438,7 +443,7 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
 
   for (const fee of fees) {
     if (remaining <= 0) break;
-    const due = fee.netAmount + fee.extraCharges - fee.paidAmount;
+    const due = getTotalDue(fee);
     if (due <= 0) continue;
 
     const payAmount = Math.min(remaining, due);
