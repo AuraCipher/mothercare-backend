@@ -323,7 +323,7 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     select: { id: true, groupId: true, customFeeAmount: true },
   });
 
-  // Get fee structures that were effective for this month
+  // Get fee structures with their head categories
   const monthStart = new Date(year, month - 1, 1);
   const monthEnd = new Date(year, month, 0);
   const structures = await prisma.feeStructure.findMany({
@@ -332,7 +332,19 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
       effectiveFrom: { lte: monthEnd },
       AND: [{ effectiveTo: null }, { effectiveTo: { gte: monthStart } }],
     },
+    include: { feeHead: { select: { category: true } } },
   });
+
+  // For ONE_TIME fee: check if student already has any fee record (ever)
+  const oneTimeStudents = new Set<string>();
+  if (structures.some(s => s.feeHead.category === 'ONE_TIME')) {
+    const existingFees = await prisma.studentFee.findMany({
+      where: { academicYearId: ayId },
+      select: { studentId: true },
+      distinct: ['studentId'],
+    });
+    existingFees.forEach(f => oneTimeStudents.add(f.studentId));
+  }
 
   let generated = 0, skipped = 0;
   for (const student of students) {
@@ -341,10 +353,22 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     });
     if (existing) { skipped++; continue; }
 
-    // Find structures for this student's group
-    const groupStructures = structures.filter(s => s.groupId === student.groupId);
+    // Find structures for this student's group, filtered by category
+    const groupStructures = structures.filter(s => {
+      if (s.groupId !== student.groupId) return false;
+      const cat = s.feeHead.category;
+      // MONTHLY: always include (default)
+      if (cat === 'MONTHLY' || !cat) return true;
+      // TERM: months 1 (Aug), 4 (Nov), 7 (Feb), 10 (May)
+      if (cat === 'TERM') return [1, 4, 7, 10].includes(month);
+      // ANNUAL: only in first month of AY (Aug = month 1)
+      if (cat === 'ANNUAL') return month === 1;
+      // ONE_TIME: only if student has NO existing fee records
+      if (cat === 'ONE_TIME') return !oneTimeStudents.has(student.id);
+      return true;
+    });
     const baseAmount = groupStructures.reduce((sum, s) => sum + s.amount, 0);
-	    const totalAmount = student.customFeeAmount ?? baseAmount;
+    const totalAmount = student.customFeeAmount ?? baseAmount;
 
     if (totalAmount > 0) {
       await prisma.studentFee.create({
