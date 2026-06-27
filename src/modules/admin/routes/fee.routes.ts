@@ -359,10 +359,10 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
       const cat = s.feeHead.category;
       // MONTHLY: always include (default)
       if (cat === 'MONTHLY' || !cat) return true;
-      // TERM: months 1 (Aug), 4 (Nov), 7 (Feb), 10 (May)
-      if (cat === 'TERM') return [1, 4, 7, 10].includes(month);
-      // ANNUAL: only in first month of AY (Aug = month 1)
-      if (cat === 'ANNUAL') return month === 1;
+      // TERM: calendar months 8 (Aug), 11 (Nov), 2 (Feb), 5 (May) — start of each AY term
+      if (cat === 'TERM') return [2, 5, 8, 11].includes(month);
+      // ANNUAL: only in first month of AY (Aug = month 8)
+      if (cat === 'ANNUAL') return month === 8;
       // ONE_TIME: only if student has NO existing fee records
       if (cat === 'ONE_TIME') return !oneTimeStudents.has(student.id);
       return true;

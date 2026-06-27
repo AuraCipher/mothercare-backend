@@ -995,9 +995,9 @@ async function main() {
   const feeHeadsData = [
     { name: 'Tuition', category: 'MONTHLY', description: 'Monthly tuition fee' },
     { name: 'Transport', category: 'MONTHLY', description: 'Transport/Conveyance', isOptional: true },
-    { name: 'Lab Fee', category: 'MONTHLY', description: 'Science lab charges' },
+    { name: 'Lab Fee', category: 'TERM', description: 'Science lab charges (per term)' },
+    { name: 'Sports', category: 'TERM', description: 'Sports & extracurricular (per term)' },
     { name: 'Library', category: 'MONTHLY', description: 'Library & reading material' },
-    { name: 'Sports', category: 'MONTHLY', description: 'Sports & extracurricular' },
     { name: 'Annual Charges', category: 'ANNUAL', description: 'Annual registration & misc' },
     { name: 'Admission Fee', category: 'ONE_TIME', description: 'One-time admission charge' },
   ];
