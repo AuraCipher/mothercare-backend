@@ -218,38 +218,46 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
       },
       studentFees: {
         where: isFull ? {} : { month: m, year: y },
-        include: { payments: { where: { revertedAt: null }, select: { id: true, amount: true, receiptNumber: true, paymentMethod: true, createdAt: true } } },
+        include: { payments: { where: { revertedAt: null }, select: { id: true, amount: true, receiptNumber: true, paymentMethod: true, createdAt: true } }, extraItems: true },
       },
     },
     orderBy: [{ group: { displayOrder: 'asc' } }, { rollNumber: 'asc' }],
   });
 
+  const getExtra = (f: any) => (f.extraItems || []).reduce((s: number, e: any) => s + e.amount, 0);
   const data = students.map(s => {
     if (isFull) {
       // Aggregate all months for full AY view
       const totalFees = s.studentFees || [];
       const netAmount = totalFees.reduce((sum, f) => sum + f.netAmount, 0);
+      const extraAmount = totalFees.reduce((sum, f) => sum + getExtra(f), 0);
+      const totalDue = netAmount + extraAmount;
       const paidAmount = totalFees.reduce((sum, f) => sum + f.paidAmount, 0);
       const allPayments = totalFees.flatMap(f => f.payments);
       return {
         student: { ...s, studentFees: undefined },
         fee: totalFees.length > 0 ? totalFees[0] : null,
         id: 'full-ay-' + s.id,
-        netAmount,
+        netAmount: totalDue,
         paidAmount,
-        status: paidAmount >= netAmount ? 'PAID' : paidAmount > 0 ? 'PARTIAL' : netAmount > 0 ? 'UNPAID' : 'NO_FEE',
+        status: paidAmount >= totalDue ? 'PAID' : paidAmount > 0 ? 'PARTIAL' : totalDue > 0 ? 'UNPAID' : 'NO_FEE',
         payments: allPayments,
         _monthCount: totalFees.length,
+        _extraAmount: extraAmount,
       };
     }
+    const mf = s.studentFees[0];
+    const mfExtra = mf ? getExtra(mf) : 0;
+    const mfDue = mf ? (mf.netAmount + mfExtra) : 0;
     return {
       student: { ...s, studentFees: undefined },
-      fee: s.studentFees[0] || null,
-      id: s.studentFees[0]?.id || s.id,
-      netAmount: s.studentFees[0]?.netAmount || 0,
-      paidAmount: s.studentFees[0]?.paidAmount || 0,
-      status: s.studentFees[0]?.status || 'NO_FEE',
-      payments: s.studentFees[0]?.payments || [],
+      fee: mf || null,
+      id: mf?.id || s.id,
+      netAmount: mfDue,
+      paidAmount: mf?.paidAmount || 0,
+      status: mf?.status || 'NO_FEE',
+      payments: mf?.payments || [],
+      _extraAmount: mfExtra,
     };
   });
 
