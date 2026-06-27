@@ -331,7 +331,7 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     where: {
       academicYearId: ayId,
       effectiveFrom: { lte: monthEnd },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gte: monthStart } }],
+      OR: [{ effectiveTo: null }, { effectiveTo: { gt: monthEnd } }],
     },
     include: { feeHead: { select: { category: true } } },
   });
@@ -451,7 +451,7 @@ router.post('/student-fees/recalculate', asyncHandler(async (req: Request, res: 
     const effectiveStructures = allStructures.filter(s =>
       s.groupId === student.groupId
       && s.effectiveFrom <= monthEnd
-      && (!s.effectiveTo || s.effectiveTo >= monthStart)
+      && (!s.effectiveTo || s.effectiveTo > monthEnd)
     );
 
     const baseAmount = effectiveStructures.reduce((sum, s) => sum + s.amount, 0);
