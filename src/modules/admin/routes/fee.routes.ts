@@ -692,8 +692,11 @@ router.get('/fees/summary', asyncHandler(async (req: Request, res: Response) => 
   const where: any = { month: m, year: y };
   if (academicYearId) where.academicYearId = academicYearId as string;
 
-  const allFees = await prisma.studentFee.findMany({ where, select: { netAmount: true, paidAmount: true, status: true } });
-  const totalDue = allFees.reduce((s, f) => s + f.netAmount, 0);
+  const allFees = await prisma.studentFee.findMany({
+    where,
+    select: { netAmount: true, paidAmount: true, status: true, extraItems: { select: { amount: true } } },
+  });
+  const totalDue = allFees.reduce((s, f) => s + f.netAmount + f.extraItems.reduce((es, e) => es + e.amount, 0), 0);
   const totalCollected = allFees.reduce((s, f) => s + f.paidAmount, 0);
   const pendingCount = allFees.filter(f => f.status === 'UNPAID' || f.status === 'PARTIAL').length;
 
