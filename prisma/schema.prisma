@@ -641,6 +641,7 @@ model Student {
   nationality     String?       @default("Pakistani")
   customFeeAmount Int?          // Per-student fee override (paise). Null = use class structure.
   concessionReason String?        // Reason: scholarship, discount, teachers child, etc.
+  feeOverrides    Json?           // Per-head overrides: {"headId": amount}
   address         String?
   phone           String?
   bloodGroup      String?

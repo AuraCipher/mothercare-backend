@@ -142,7 +142,7 @@ router.put('/students/:id/custom-fee', asyncHandler(async (req: Request, res: Re
     where: { id: req.params.id },
     data,
   });
-  res.json({ success: true, data: { id: student.id, customFeeAmount: student.customFeeAmount, concessionReason: student.concessionReason, feeOverrides: student.feeOverrides } });
+  res.json({ success: true, data: { id: student.id, customFeeAmount: student.customFeeAmount, concessionReason: student.concessionReason, feeOverrides: student.feeOverrides as any } });
 }));
 
 // GET /admin/students/:id/fee — Get student with fee info
