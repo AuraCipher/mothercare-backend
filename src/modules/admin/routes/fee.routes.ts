@@ -149,7 +149,7 @@ router.get('/students/:id/fee', asyncHandler(async (req: Request, res: Response)
       group: { select: { name: true, section: true } },
       parents: { include: { parent: { select: { relation: true, phone: true, occupation: true, user: { select: { name: true } } } } } },
       studentFees: {
-        include: { payments: { where: { revertedAt: null }, orderBy: { createdAt: 'desc' } } },
+        include: { payments: { where: { revertedAt: null }, orderBy: { createdAt: 'desc' } }, extraItems: true },
         orderBy: [{ year: 'desc' }, { month: 'desc' }],
       },
     },
@@ -158,18 +158,31 @@ router.get('/students/:id/fee', asyncHandler(async (req: Request, res: Response)
   res.json({ success: true, data: student });
 }));
 
-// PUT /admin/student-fees/:id/extra — Set extra charges on a StudentFee
-router.put('/student-fees/:id/extra', asyncHandler(async (req: Request, res: Response) => {
-  const { extraCharges, extraReason } = req.body;
-  if (extraCharges == null || extraCharges < 0) {
-    res.status(400).json({ success: false, message: 'extraCharges (>=0) required' });
+// POST /admin/student-fees/:id/extra-items — Add extra item to a month
+router.post('/student-fees/:id/extra-items', asyncHandler(async (req: Request, res: Response) => {
+  const { name, amount } = req.body;
+  if (!name || !amount || amount < 0) {
+    res.status(400).json({ success: false, message: 'name and amount (>=0) required' });
     return;
   }
-  const updated = await prisma.studentFee.update({
-    where: { id: req.params.id },
-    data: { extraCharges, extraReason: extraReason || null },
+  const fee = await prisma.studentFee.findUnique({ where: { id: req.params.id } });
+  if (!fee) { res.status(404).json({ success: false, message: 'StudentFee not found' }); return; }
+  const item = await prisma.feeExtraItem.create({
+    data: { studentFeeId: req.params.id, name, amount },
   });
-  res.json({ success: true, data: updated });
+  res.status(201).json({ success: true, data: item });
+}));
+
+// DELETE /admin/student-fees/:id/extra-items/:itemId — Remove an extra item
+router.delete('/student-fees/:id/extra-items/:itemId', asyncHandler(async (req: Request, res: Response) => {
+  await prisma.feeExtraItem.delete({ where: { id: req.params.itemId } });
+  res.json({ success: true, message: 'Deleted' });
+}));
+
+// GET /admin/student-fees/:id/extra-items — List extra items for a month
+router.get('/student-fees/:id/extra-items', asyncHandler(async (req: Request, res: Response) => {
+  const items = await prisma.feeExtraItem.findMany({ where: { studentFeeId: req.params.id } });
+  res.json({ success: true, data: items });
 }));
 
 // ═══════════════════════════════════════════════════════════════════

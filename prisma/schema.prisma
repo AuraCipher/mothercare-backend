@@ -1398,11 +1398,25 @@ model StudentFee {
   student      Student      @relation(fields: [studentId], references: [id])
   group        Group?       @relation(fields: [groupId], references: [id])
   payments     Payment[]
+  extraItems   FeeExtraItem[]
 
   @@unique([studentId, month, year])
   @@index([month, year, status])
   @@index([academicYearId, status])
   @@map("student_fees")
+}
+
+model FeeExtraItem {
+  id           String   @id @default(uuid())
+  studentFeeId String
+  name         String
+  amount       Int      // in paise
+  createdAt    DateTime @default(now())
+
+  studentFee StudentFee @relation(fields: [studentFeeId], references: [id], onDelete: Cascade)
+
+  @@index([studentFeeId])
+  @@map("fee_extra_items")
 }
 
 model FamilyPayment {
