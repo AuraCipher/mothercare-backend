@@ -390,6 +390,85 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
   res.json({ success: true, data: { generated, skipped, total: students.length } });
 }));
 
+// POST /admin/student-fees/recalculate — Recalculate existing StudentFee records
+// Useful after fee structure amounts change, custom fee updates, or feeOverrides modification
+router.post('/student-fees/recalculate', asyncHandler(async (req: Request, res: Response) => {
+  const { month, year, academicYearId, studentId } = req.body;
+
+  const ayId = academicYearId || (await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } }))?.id;
+  if (!ayId) { res.status(400).json({ success: false, message: 'No active academic year' }); return; }
+
+  // Build filter: if studentId provided, only recalculate that student; if month/year, only that period
+  const where: any = { academicYearId: ayId };
+  if (studentId) where.studentId = studentId;
+  if (month) where.month = month;
+  if (year) where.year = year;
+
+  const studentFees = await prisma.studentFee.findMany({
+    where,
+    select: { id: true, studentId: true, groupId: true, month: true, year: true, totalAmount: true, extraItems: { select: { amount: true } } },
+  });
+  if (studentFees.length === 0) {
+    res.json({ success: true, data: { updated: 0, unchanged: 0, total: 0, message: 'No records found for the given criteria' } });
+    return;
+  }
+
+  // Get all students with overrides
+  const studentIds = [...new Set(studentFees.map(sf => sf.studentId))];
+  const students = await prisma.student.findMany({
+    where: { id: { in: studentIds } },
+    select: { id: true, groupId: true, customFeeAmount: true, feeOverrides: true },
+  });
+  const studentMap = new Map(students.map(s => [s.id, s]));
+
+  // Pre-load ALL fee structures for the academic year — we'll filter by effective dates in memory
+  const allStructures = await prisma.feeStructure.findMany({
+    where: { academicYearId: ayId },
+    include: { feeHead: { select: { category: true } } },
+  });
+
+  let updated = 0, unchanged = 0;
+
+  for (const sf of studentFees) {
+    const student = studentMap.get(sf.studentId);
+    if (!student) { unchanged++; continue; }
+
+    // Filter structures effective for this student's group at this month
+    const monthStart = new Date(sf.year, sf.month - 1, 1);
+    const monthEnd = new Date(sf.year, sf.month, 0);
+    const effectiveStructures = allStructures.filter(s =>
+      s.groupId === student.groupId
+      && s.effectiveFrom <= monthEnd
+      && (!s.effectiveTo || s.effectiveTo >= monthStart)
+    );
+
+    const baseAmount = effectiveStructures.reduce((sum, s) => sum + s.amount, 0);
+
+    // Apply overrides (same priority as generation)
+    let totalAmount: number;
+    const fOverrides = (student as any).feeOverrides as Record<string, number> | null;
+    if (fOverrides && Object.keys(fOverrides).length > 0) {
+      totalAmount = Object.values(fOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
+    } else if (student.customFeeAmount != null) {
+      totalAmount = student.customFeeAmount;
+    } else {
+      totalAmount = baseAmount;
+    }
+
+    if (totalAmount > 0 && totalAmount !== sf.totalAmount) {
+      await prisma.studentFee.update({
+        where: { id: sf.id },
+        data: { totalAmount, netAmount: totalAmount },
+      });
+      updated++;
+    } else {
+      unchanged++;
+    }
+  }
+
+  res.json({ success: true, data: { updated, unchanged, total: studentFees.length } });
+}));
+
 // ═══════════════════════════════════════════════════════════════════
 // PAYMENTS
 // ═══════════════════════════════════════════════════════════════════
