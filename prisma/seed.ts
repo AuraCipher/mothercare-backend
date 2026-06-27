@@ -1057,8 +1057,8 @@ async function main() {
     const adjY = y + Math.floor((m - 1) / 12);
     const students = await prisma.student.findMany({
       where: { academicYearId: academicYear.id, isActive: true },
-
     });
+
     let genCount = 0;
     for (const student of students) {
       const existing = await prisma.studentFee.findUnique({
@@ -1067,8 +1067,18 @@ async function main() {
       if (existing) continue;
       const groupStructures = await prisma.feeStructure.findMany({
         where: { academicYearId: academicYear.id, groupId: student.groupId || '', effectiveTo: null },
+        include: { feeHead: { select: { category: true } } },
       });
-      const total = groupStructures.reduce((s, fs) => s + fs.amount, 0);
+      // Filter structures by category based on month
+      const filtered = groupStructures.filter(s => {
+        const cat = s.feeHead.category || 'MONTHLY';
+        if (cat === 'MONTHLY') return true;
+        if (cat === 'TERM') return [2, 5, 8, 11].includes(adjM);
+        if (cat === 'ANNUAL') return adjM === 8;
+        if (cat === 'ONE_TIME') return false;
+        return true;
+      });
+      const total = filtered.reduce((s, fs) => s + fs.amount, 0);
       if (total === 0) continue;
       await prisma.studentFee.create({
         data: { academicYearId: academicYear.id, studentId: student.id, groupId: student.groupId, month: adjM, year: adjY, totalAmount: total, netAmount: total },
