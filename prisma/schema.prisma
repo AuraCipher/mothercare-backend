@@ -1389,6 +1389,7 @@ model StudentFee {
   extraCharges   Int      @default(0) // Additional charges on top of base fee
   extraReason    String?  // Reason for extra charges
   paidAmount     Int      @default(0)
+  feeHeadBreakdown Json?   // Array of {name, amount, category} from generation
   status         String   @default("UNPAID") // UNPAID | PARTIAL | PAID | OVERPAID | WAIVED
   dueDate        DateTime?
   paidAt         DateTime?

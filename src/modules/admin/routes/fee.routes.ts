@@ -333,7 +333,7 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
       effectiveFrom: { lte: monthEnd },
       OR: [{ effectiveTo: null }, { effectiveTo: { gt: monthEnd } }],
     },
-    include: { feeHead: { select: { category: true } } },
+    include: { feeHead: { select: { name: true, category: true } } },
   });
 
   // For ONE_TIME fee: check if this specific head was already charged
@@ -378,10 +378,20 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     const baseAmount = groupStructures.reduce((sum, s) => sum + s.amount, 0);
     const sOverrides = (student as any).feeOverrides as Record<string, number> | null;
     let totalAmount = baseAmount;
+    let breakdown: any[] = [];
+
     if (sOverrides && Object.keys(sOverrides).length > 0) {
       totalAmount = Object.values(sOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
+      // Build breakdown from override heads — match by feeHeadId
+      breakdown = groupStructures
+        .filter(s => (sOverrides as any)[(s as any).feeHeadId] !== undefined)
+        .map(s => ({ name: s.feeHead.name, amount: (sOverrides as any)[(s as any).feeHeadId], category: s.feeHead.category }));
     } else if ((student as any).customFeeAmount != null) {
       totalAmount = (student as any).customFeeAmount;
+      breakdown = [{ name: 'Custom Fee', amount: (student as any).customFeeAmount, category: 'CUSTOM' }];
+    } else {
+      // Base fee — build breakdown from all group structures
+      breakdown = groupStructures.map(s => ({ name: s.feeHead.name, amount: s.amount, category: s.feeHead.category }));
     }
 
     if (totalAmount > 0) {
@@ -393,6 +403,7 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
           month, year,
           totalAmount,
           netAmount: totalAmount,
+          feeHeadBreakdown: breakdown,
         },
       });
       generated++;
@@ -436,7 +447,7 @@ router.post('/student-fees/recalculate', asyncHandler(async (req: Request, res: 
   // Pre-load ALL fee structures for the academic year — we'll filter by effective dates in memory
   const allStructures = await prisma.feeStructure.findMany({
     where: { academicYearId: ayId },
-    include: { feeHead: { select: { category: true } } },
+    include: { feeHead: { select: { name: true, category: true } } },
   });
 
   let updated = 0, unchanged = 0;
@@ -458,19 +469,25 @@ router.post('/student-fees/recalculate', asyncHandler(async (req: Request, res: 
 
     // Apply overrides (same priority as generation)
     let totalAmount: number;
+    let breakdown: any[] = [];
     const fOverrides = (student as any).feeOverrides as Record<string, number> | null;
     if (fOverrides && Object.keys(fOverrides).length > 0) {
       totalAmount = Object.values(fOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
+      breakdown = effectiveStructures
+        .filter(s => (fOverrides as any)[(s as any).feeHeadId] !== undefined)
+        .map(s => ({ name: s.feeHead.name, amount: (fOverrides as any)[(s as any).feeHeadId], category: s.feeHead.category }));
     } else if (student.customFeeAmount != null) {
       totalAmount = student.customFeeAmount;
+      breakdown = [{ name: 'Custom Fee', amount: student.customFeeAmount, category: 'CUSTOM' }];
     } else {
       totalAmount = baseAmount;
+      breakdown = effectiveStructures.map(s => ({ name: s.feeHead.name, amount: s.amount, category: s.feeHead.category }));
     }
 
     if (totalAmount > 0 && totalAmount !== sf.totalAmount) {
       await prisma.studentFee.update({
         where: { id: sf.id },
-        data: { totalAmount, netAmount: totalAmount },
+        data: { totalAmount, netAmount: totalAmount, feeHeadBreakdown: breakdown },
       });
       updated++;
     } else {
