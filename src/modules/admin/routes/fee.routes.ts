@@ -336,16 +336,10 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     include: { feeHead: { select: { category: true } } },
   });
 
-  // For ONE_TIME fee: check if student already has any fee record (ever)
-  const oneTimeStudents = new Set<string>();
-  if (structures.some(s => s.feeHead.category === 'ONE_TIME')) {
-    const existingFees = await prisma.studentFee.findMany({
-      where: { academicYearId: ayId },
-      select: { studentId: true },
-      distinct: ['studentId'],
-    });
-    existingFees.forEach(f => oneTimeStudents.add(f.studentId));
-  }
+  // For ONE_TIME fee: check if this specific head was already charged
+  // by comparing structure creation date vs student's first fee record
+  const oneTimeStructures = structures.filter(s => s.feeHead.category === 'ONE_TIME');
+  const studentFirstFeeCache = new Map<string, { createdAt: Date; totalAmount: number } | null>();
 
   let generated = 0, skipped = 0;
   for (const student of students) {
@@ -354,13 +348,31 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     });
     if (existing) { skipped++; continue; }
 
+    // Pre-compute which ONE_TIME structures to skip for this student
+    const skippedOneTimeIds = new Set<string>();
+    for (const ots of oneTimeStructures) {
+      if (ots.groupId === student.groupId) {
+        if (!studentFirstFeeCache.has(student.id)) {
+          const firstFee = await prisma.studentFee.findFirst({
+            where: { studentId: student.id, academicYearId: ayId },
+            orderBy: [{ year: 'asc' }, { month: 'asc' }],
+            select: { createdAt: true, totalAmount: true },
+          });
+          studentFirstFeeCache.set(student.id, firstFee);
+        }
+        const firstFee = studentFirstFeeCache.get(student.id);
+        if (firstFee && ots.createdAt <= firstFee.createdAt) {
+          skippedOneTimeIds.add(ots.id);
+        }
+      }
+    }
+
     // Find structures for this student's group, filtered by selected categories
     const groupStructures = structures.filter(s => {
       if (s.groupId !== student.groupId) return false;
       const cat = s.feeHead.category || 'MONTHLY';
-      // Only include if this category is selected AND passes its rules
       if (!selectedCats.includes(cat)) return false;
-      if (cat === 'ONE_TIME' && oneTimeStudents.has(student.id)) return false;
+      if (cat === 'ONE_TIME' && skippedOneTimeIds.has(s.id)) return false;
       return true;
     });
     const baseAmount = groupStructures.reduce((sum, s) => sum + s.amount, 0);
