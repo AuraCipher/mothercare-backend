@@ -219,8 +219,8 @@ describe('PUT /admin/students/:id/custom-fee', () => {
 describe('GET /admin/fees/summary', () => {
   test('returns summary stats', async () => {
     prismaMock.studentFee.findMany.mockResolvedValue([
-      { netAmount: 500000, paidAmount: 500000, status: 'PAID' },
-      { netAmount: 500000, paidAmount: 0, status: 'UNPAID' },
+      { netAmount: 500000, paidAmount: 500000, status: 'PAID', extraItems: [] },
+      { netAmount: 500000, paidAmount: 0, status: 'UNPAID', extraItems: [] },
     ] as any);
     const res = await request(app).get('/admin/fees/summary?month=6&year=2026').set('Authorization', adminToken);
     expect(res.status).toBe(200);
