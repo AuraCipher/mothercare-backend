@@ -213,7 +213,7 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
     where,
     select: {
       id: true, name: true, rollNumber: true, admissionNumber: true,
-      groupId: true, customFeeAmount: true, concessionReason: true,
+      groupId: true, customFeeAmount: true, concessionReason: true, feeOverrides: true,
       group: { select: { name: true, section: true } },
       parents: {
         include: {
@@ -252,14 +252,22 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
     }
     const mf = s.studentFees[0];
     const mfExtra = mf ? getExtra(mf) : 0;
-    const mfDue = mf ? (mf.netAmount + mfExtra) : 0;
+    // Check for per-student overrides (feeOverrides or customFeeAmount)
+    const sOverrides = (s as any).feeOverrides as Record<string, number> | null;
+    let effectiveNet = mf ? (mf.netAmount + mfExtra) : 0;
+    if (sOverrides && Object.keys(sOverrides).length > 0) {
+      // Sum up overrides to get effective amount
+      effectiveNet = Object.values(sOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
+    } else if ((s as any).customFeeAmount != null) {
+      effectiveNet = (s as any).customFeeAmount;
+    }
     return {
-      student: { ...s, studentFees: undefined },
+      student: { ...s, studentFees: undefined, feeOverrides: undefined },
       fee: mf || null,
       id: mf?.id || s.id,
-      netAmount: mfDue,
+      netAmount: effectiveNet,
       paidAmount: mf?.paidAmount || 0,
-      status: mf?.status || 'NO_FEE',
+      status: mf?.paidAmount >= effectiveNet ? 'PAID' : mf?.paidAmount > 0 ? 'PARTIAL' : effectiveNet > 0 ? 'UNPAID' : 'NO_FEE',
       payments: mf?.payments || [],
       _extraAmount: mfExtra,
     };
