@@ -128,17 +128,21 @@ router.delete('/fee-structures/:id', asyncHandler(async (req: Request, res: Resp
 // PER-STUDENT CUSTOM FEE (Scholarship / Concession)
 // ═══════════════════════════════════════════════════════════════════
 
-// PUT /admin/students/:id/custom-fee — Set custom fee for a student
+// PUT /admin/students/:id/custom-fee — Set custom fee for a student (supports per-head overrides)
 router.put('/students/:id/custom-fee', asyncHandler(async (req: Request, res: Response) => {
-  const { customFeeAmount, concessionReason } = req.body;
+  const { customFeeAmount, concessionReason, feeOverrides } = req.body;
+  const data: any = {
+    customFeeAmount: customFeeAmount != null ? customFeeAmount : null,
+    concessionReason: concessionReason || null,
+  };
+  if (feeOverrides !== undefined) {
+    data.feeOverrides = feeOverrides;
+  }
   const student = await prisma.student.update({
     where: { id: req.params.id },
-    data: {
-      customFeeAmount: customFeeAmount != null ? customFeeAmount : null,
-      concessionReason: concessionReason || null,
-    },
+    data,
   });
-  res.json({ success: true, data: { id: student.id, customFeeAmount: student.customFeeAmount, concessionReason: student.concessionReason } });
+  res.json({ success: true, data: { id: student.id, customFeeAmount: student.customFeeAmount, concessionReason: student.concessionReason, feeOverrides: student.feeOverrides } });
 }));
 
 // GET /admin/students/:id/fee — Get student with fee info
