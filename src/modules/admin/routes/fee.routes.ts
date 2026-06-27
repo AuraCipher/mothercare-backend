@@ -310,10 +310,11 @@ router.get('/student-fees', asyncHandler(async (req: Request, res: Response) => 
   res.json({ success: true, data: fees });
 }));
 
-// POST /admin/student-fees/generate — Generate monthly fees for all active students
+// POST /admin/student-fees/generate — Generate monthly fees with selected categories
 router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Response) => {
-  const { month, year, academicYearId } = req.body;
+  const { month, year, academicYearId, categories } = req.body;
   if (!month || !year) { res.status(400).json({ success: false, message: 'month and year required' }); return; }
+  const selectedCats: string[] = categories || ['MONTHLY'];
 
   const ayId = academicYearId || (await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } }))?.id;
   if (!ayId) { res.status(400).json({ success: false, message: 'No active academic year' }); return; }
@@ -353,18 +354,13 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     });
     if (existing) { skipped++; continue; }
 
-    // Find structures for this student's group, filtered by category
+    // Find structures for this student's group, filtered by selected categories
     const groupStructures = structures.filter(s => {
       if (s.groupId !== student.groupId) return false;
-      const cat = s.feeHead.category;
-      // MONTHLY: always include (default)
-      if (cat === 'MONTHLY' || !cat) return true;
-      // TERM: calendar months 8 (Aug), 11 (Nov), 2 (Feb), 5 (May) — start of each AY term
-      if (cat === 'TERM') return [2, 5, 8, 11].includes(month);
-      // ANNUAL: only in first month of AY (Aug = month 8)
-      if (cat === 'ANNUAL') return month === 8;
-      // ONE_TIME: only if student has NO existing fee records
-      if (cat === 'ONE_TIME') return !oneTimeStudents.has(student.id);
+      const cat = s.feeHead.category || 'MONTHLY';
+      // Only include if this category is selected AND passes its rules
+      if (!selectedCats.includes(cat)) return false;
+      if (cat === 'ONE_TIME' && oneTimeStudents.has(student.id)) return false;
       return true;
     });
     const baseAmount = groupStructures.reduce((sum, s) => sum + s.amount, 0);
