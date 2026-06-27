@@ -331,7 +331,7 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     where: {
       academicYearId: ayId,
       effectiveFrom: { lte: monthEnd },
-      AND: [{ effectiveTo: null }, { effectiveTo: { gte: monthStart } }],
+      OR: [{ effectiveTo: null }, { effectiveTo: { gte: monthStart } }],
     },
     include: { feeHead: { select: { category: true } } },
   });
