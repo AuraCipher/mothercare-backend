@@ -150,7 +150,7 @@ router.get('/students/:id/fee', asyncHandler(async (req: Request, res: Response)
   const student = await prisma.student.findUnique({
     where: { id: req.params.id },
     include: {
-      group: { select: { name: true, section: true } },
+      group: { select: { name: true, section: true, displayOrder: true } },
       parents: { include: { parent: { select: { relation: true, phone: true, occupation: true, user: { select: { name: true } } } } } },
       studentFees: {
         include: { payments: { where: { revertedAt: null }, orderBy: { createdAt: 'desc' } }, extraItems: true },
@@ -214,7 +214,7 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
     select: {
       id: true, name: true, rollNumber: true, admissionNumber: true,
       groupId: true, customFeeAmount: true, concessionReason: true, feeOverrides: true,
-      group: { select: { name: true, section: true } },
+      group: { select: { name: true, section: true, displayOrder: true } },
       parents: {
         include: {
           parent: { select: { relation: true, phone: true, user: { select: { name: true } } } },
@@ -300,7 +300,7 @@ router.get('/student-fees', asyncHandler(async (req: Request, res: Response) => 
         select: {
           id: true, name: true, rollNumber: true, admissionNumber: true, familyId: true, customFeeAmount: true,
           parents: { include: { parent: { select: { relation: true, phone: true, user: { select: { name: true } } } } } },
-          group: { select: { name: true, section: true } },
+          group: { select: { name: true, section: true, displayOrder: true } },
         },
       },
       payments: { where: { revertedAt: null } },
@@ -711,7 +711,7 @@ router.get('/families', asyncHandler(async (req: Request, res: Response) => {
       students: {
         include: {
           studentFees: { where: { status: { in: ['UNPAID', 'PARTIAL'] } }, take: 5 },
-          group: { select: { name: true, section: true } },
+          group: { select: { name: true, section: true, displayOrder: true } },
         },
       },
     },
