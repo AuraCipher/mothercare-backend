@@ -312,9 +312,10 @@ router.get('/student-fees', asyncHandler(async (req: Request, res: Response) => 
 
 // POST /admin/student-fees/generate — Generate monthly fees with selected categories
 router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Response) => {
-  const { month, year, academicYearId, categories } = req.body;
+  const { month, year, academicYearId, categories, headIds } = req.body;
   if (!month || !year) { res.status(400).json({ success: false, message: 'month and year required' }); return; }
   const selectedCats: string[] = categories || ['MONTHLY'];
+  const selectedHeadIds: string[] | null = headIds?.length > 0 ? headIds : null;
 
   const ayId = academicYearId || (await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } }))?.id;
   if (!ayId) { res.status(400).json({ success: false, message: 'No active academic year' }); return; }
@@ -367,11 +368,17 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
       }
     }
 
-    // Find structures for this student's group, filtered by selected categories
+    // Find structures for this student's group, filtered by selected heads or categories
     const groupStructures = structures.filter(s => {
       if (s.groupId !== student.groupId) return false;
       const cat = s.feeHead.category || 'MONTHLY';
-      if (!selectedCats.includes(cat)) return false;
+      // If specific headIds provided, filter by them (precise)
+      if (selectedHeadIds) {
+        if (!selectedHeadIds.includes(s.feeHeadId)) return false;
+      } else {
+        // Fall back to category-based filtering
+        if (!selectedCats.includes(cat)) return false;
+      }
       if (cat === 'ONE_TIME' && skippedOneTimeIds.has(s.id)) return false;
       return true;
     });
