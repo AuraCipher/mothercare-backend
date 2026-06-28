@@ -342,13 +342,8 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
   const oneTimeStructures = structures.filter(s => s.feeHead.category === 'ONE_TIME');
   const studentFirstFeeCache = new Map<string, { createdAt: Date; totalAmount: number } | null>();
 
-  let generated = 0, skipped = 0;
+  let generated = 0, skipped = 0, updated = 0;
   for (const student of students) {
-    const existing = await prisma.studentFee.findUnique({
-      where: { studentId_month_year: { studentId: student.id, month, year } },
-    });
-    if (existing) { skipped++; continue; }
-
     // Pre-compute which ONE_TIME structures to skip for this student
     const skippedOneTimeIds = new Set<string>();
     for (const ots of oneTimeStructures) {
@@ -368,15 +363,13 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
       }
     }
 
-    // Find structures for this student's group, filtered by selected heads or categories
+    // Compute what would be generated with the current head/category selection
     const groupStructures = structures.filter(s => {
       if (s.groupId !== student.groupId) return false;
       const cat = s.feeHead.category || 'MONTHLY';
-      // If specific headIds provided, filter by them (precise)
       if (selectedHeadIds) {
         if (!selectedHeadIds.includes(s.feeHeadId)) return false;
       } else {
-        // Fall back to category-based filtering
         if (!selectedCats.includes(cat)) return false;
       }
       if (cat === 'ONE_TIME' && skippedOneTimeIds.has(s.id)) return false;
@@ -389,7 +382,6 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
 
     if (sOverrides && Object.keys(sOverrides).length > 0) {
       totalAmount = Object.values(sOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
-      // Build breakdown from override heads — match by feeHeadId
       breakdown = groupStructures
         .filter(s => (sOverrides as any)[(s as any).feeHeadId] !== undefined)
         .map(s => ({ name: s.feeHead.name, amount: (sOverrides as any)[(s as any).feeHeadId], category: s.feeHead.category }));
@@ -397,8 +389,25 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
       totalAmount = (student as any).customFeeAmount;
       breakdown = [{ name: 'Custom Fee', amount: (student as any).customFeeAmount, category: 'CUSTOM' }];
     } else {
-      // Base fee — build breakdown from all group structures
       breakdown = groupStructures.map(s => ({ name: s.feeHead.name, amount: s.amount, category: s.feeHead.category }));
+    }
+
+    const existing = await prisma.studentFee.findUnique({
+      where: { studentId_month_year: { studentId: student.id, month, year } },
+    });
+
+    if (existing) {
+      // If headIds specified and amount differs (or breakdown missing), update existing
+      if (selectedHeadIds && totalAmount > 0 && (totalAmount !== existing.netAmount || !(existing as any).feeHeadBreakdown)) {
+        await prisma.studentFee.update({
+          where: { id: existing.id },
+          data: { totalAmount, netAmount: totalAmount, feeHeadBreakdown: breakdown },
+        });
+        updated++;
+      } else {
+        skipped++;
+      }
+      continue;
     }
 
     if (totalAmount > 0) {
@@ -417,7 +426,7 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     }
   }
 
-  res.json({ success: true, data: { generated, skipped, total: students.length } });
+  res.json({ success: true, data: { generated, skipped, updated, total: students.length } });
 }));
 
 // POST /admin/student-fees/recalculate — Recalculate existing StudentFee records
