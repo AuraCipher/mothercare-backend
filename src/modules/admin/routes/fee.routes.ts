@@ -397,8 +397,8 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     });
 
     if (existing) {
-      // If headIds specified and amount differs (or breakdown missing), update existing
-      if (selectedHeadIds && totalAmount > 0 && (totalAmount !== existing.netAmount || !(existing as any).feeHeadBreakdown)) {
+      // Update existing record if amount differs or breakdown is missing
+      if (totalAmount > 0 && (totalAmount !== existing.netAmount || !(existing as any).feeHeadBreakdown)) {
         await prisma.studentFee.update({
           where: { id: existing.id },
           data: { totalAmount, netAmount: totalAmount, feeHeadBreakdown: breakdown },

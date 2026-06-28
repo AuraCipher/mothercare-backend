@@ -992,6 +992,16 @@ async function main() {
 
   // ─── Step 16: Demo Fee Data ────────────────────────────────────────
   console.log('\n[16/16] Demo Fee Data');
+
+  // Clean up existing fee records to make seed idempotent
+  await prisma.familyPayment.deleteMany();
+  await prisma.payment.deleteMany();
+  await prisma.feeExtraItem.deleteMany();
+  await prisma.studentFee.deleteMany();
+  await prisma.feeChangeLog.deleteMany();
+  await prisma.feeStructure.deleteMany();
+  await prisma.feeHead.deleteMany();
+  console.log('  ✓ Cleared existing fee records');
   const feeHeadsData = [
     { name: 'Tuition', category: 'MONTHLY', description: 'Monthly tuition fee' },
     { name: 'Transport', category: 'MONTHLY', description: 'Transport/Conveyance', isOptional: true },
@@ -1067,7 +1077,7 @@ async function main() {
       if (existing) continue;
       const groupStructures = await prisma.feeStructure.findMany({
         where: { academicYearId: academicYear.id, groupId: student.groupId || '', effectiveTo: null },
-        include: { feeHead: { select: { category: true } } },
+        include: { feeHead: { select: { name: true, category: true } } },
       });
       // Filter structures by category based on month
       const filtered = groupStructures.filter(s => {
@@ -1080,8 +1090,9 @@ async function main() {
       });
       const total = filtered.reduce((s, fs) => s + fs.amount, 0);
       if (total === 0) continue;
+      const breakdown = filtered.map(s => ({ name: s.feeHead.name, amount: s.amount, category: s.feeHead.category }));
       await prisma.studentFee.create({
-        data: { academicYearId: academicYear.id, studentId: student.id, groupId: student.groupId, month: adjM, year: adjY, totalAmount: total, netAmount: total },
+        data: { academicYearId: academicYear.id, studentId: student.id, groupId: student.groupId, month: adjM, year: adjY, totalAmount: total, netAmount: total, feeHeadBreakdown: breakdown },
       });
       genCount++;
     }
@@ -1099,7 +1110,7 @@ async function main() {
         data: {
           studentFeeId: fee.id, studentId: fee.studentId,
           amount, paymentMethod: 'CASH',
-          receiptNumber: `RCP-${adjY}${String(adjM).padStart(2, '0')}-${String(payCount + 1).padStart(4, '0')}`,
+          receiptNumber: `RCP-${adjY}${String(adjM).padStart(2, '0')}-${String(payCount + 1 + offset * 1000).padStart(4, '0')}`,
           recordedById: adminUser.id,
         },
       });
