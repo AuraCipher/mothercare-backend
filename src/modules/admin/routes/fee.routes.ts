@@ -391,6 +391,10 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     } else {
       breakdown = groupStructures.map(s => ({ name: s.feeHead.name, amount: s.amount, category: s.feeHead.category }));
     }
+    // Fallback: if breakdown is empty but total > 0, show a generic entry
+    if (breakdown.length === 0 && totalAmount > 0) {
+      breakdown = [{ name: 'Fee', amount: totalAmount, category: 'OTHER' }];
+    }
 
     const existing = await prisma.studentFee.findUnique({
       where: { studentId_month_year: { studentId: student.id, month, year } },
@@ -498,6 +502,10 @@ router.post('/student-fees/recalculate', asyncHandler(async (req: Request, res: 
     } else {
       totalAmount = baseAmount;
       breakdown = effectiveStructures.map(s => ({ name: s.feeHead.name, amount: s.amount, category: s.feeHead.category }));
+    }
+    // Fallback: if breakdown is empty but total > 0, show a generic entry
+    if (breakdown.length === 0 && totalAmount > 0) {
+      breakdown = [{ name: 'Fee', amount: totalAmount, category: 'OTHER' }];
     }
 
     if (totalAmount > 0 && totalAmount !== sf.totalAmount) {
