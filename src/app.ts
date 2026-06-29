@@ -37,7 +37,13 @@ app.use((req, res, next) => {
   return helmet()(req, res, next);
 });
 app.use(cors({
-  origin: env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [],
+  origin: (origin, cb) => {
+    // In development mode, allow any origin (local dev, ngrok, etc.)
+    if (env.APP_MODE === 'development' && origin) return cb(null, true);
+    const allowed = env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [];
+    if (!origin || allowed.includes(origin)) return cb(null, true);
+    cb(new Error('Not allowed by CORS'));
+  },
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'x-publishable-api-key'],
 }));
