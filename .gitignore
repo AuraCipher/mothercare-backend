@@ -8,3 +8,4 @@ tests/results/
 .next/
 # Uploaded files
 uploads/
+cloudflared.deb
