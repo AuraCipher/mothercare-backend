@@ -228,3 +228,135 @@ describe('GET /admin/fees/summary', () => {
     expect(res.body.data.pendingCount).toBe(1);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// EXTRA ITEMS STATUS RECALCULATION
+// ═══════════════════════════════════════════════════════════════════
+
+describe('POST /admin/student-fees/:id/extra-items — status recalculation', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('changes status from PAID to PARTIAL when extra added to a fully-paid fee', async () => {
+    // A fee that was fully paid (500000/500000 = PAID)
+    prismaMock.studentFee.findUnique.mockResolvedValue({
+      id: 'sf1', netAmount: 500000, totalAmount: 500000, paidAmount: 500000, status: 'PAID', month: 6, year: 2026,
+    } as any);
+    prismaMock.feeExtraItem.create.mockResolvedValue({ id: 'extra1', studentFeeId: 'sf1', name: 'Lab Charges', amount: 50000 } as any);
+    // After creation, aggregate returns the extra sum
+    prismaMock.feeExtraItem.aggregate.mockResolvedValue({ _sum: { amount: 50000 } } as any);
+
+    const res = await request(app).post('/admin/student-fees/sf1/extra-items')
+      .set('Authorization', adminToken)
+      .send({ name: 'Lab Charges', amount: 50000 });
+    expect(res.status).toBe(201);
+
+    // Verify status was updated to PARTIAL (500k paid vs 550k total due)
+    expect(prismaMock.studentFee.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'sf1' }, data: expect.objectContaining({ status: 'PARTIAL' }) })
+    );
+  });
+
+  test('returns OVERPAID when extra added but payment already exceeds total due', async () => {
+    prismaMock.studentFee.findUnique.mockResolvedValue({
+      id: 'sf1', netAmount: 500000, totalAmount: 500000, paidAmount: 600000, status: 'OVERPAID', month: 6, year: 2026,
+    } as any);
+    prismaMock.feeExtraItem.create.mockResolvedValue({ id: 'extra2', studentFeeId: 'sf1', name: 'Fine', amount: 50000 } as any);
+    // 600k paid vs 550k total due — still OVERPAID
+    prismaMock.feeExtraItem.aggregate.mockResolvedValue({ _sum: { amount: 50000 } } as any);
+
+    const res = await request(app).post('/admin/student-fees/sf1/extra-items')
+      .set('Authorization', adminToken)
+      .send({ name: 'Fine', amount: 50000 });
+    expect(res.status).toBe(201);
+    expect(prismaMock.studentFee.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'sf1' }, data: expect.objectContaining({ status: 'OVERPAID' }) })
+    );
+  });
+
+  test('rejects without name or amount', async () => {
+    const res = await request(app).post('/admin/student-fees/sf1/extra-items')
+      .set('Authorization', adminToken)
+      .send({});
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('DELETE /admin/student-fees/:id/extra-items/:itemId — status recalculation', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('reverts status back to PAID when extra removed', async () => {
+    // Delete returns the original item with its studentFeeId
+    prismaMock.feeExtraItem.delete.mockResolvedValue({ id: 'extra1', studentFeeId: 'sf1', name: 'Lab Charges', amount: 50000 } as any);
+    // After deletion, no extras remain
+    prismaMock.feeExtraItem.aggregate.mockResolvedValue({ _sum: { amount: 0 } } as any);
+    prismaMock.studentFee.findUnique.mockResolvedValue({
+      id: 'sf1', netAmount: 500000, totalAmount: 500000, paidAmount: 500000, status: 'PARTIAL', month: 6, year: 2026,
+    } as any);
+
+    const res = await request(app).delete('/admin/student-fees/sf1/extra-items/extra1')
+      .set('Authorization', adminToken);
+    expect(res.status).toBe(200);
+
+    // Status should go back to PAID (500k paid = 500k due, no extras)
+    expect(prismaMock.studentFee.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'sf1' }, data: expect.objectContaining({ status: 'PAID' }) })
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// WATERFALL STATUS WITH EXTRAS
+// ═══════════════════════════════════════════════════════════════════
+
+describe('POST /admin/payments/waterfall — status accounts for extras', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('sets PAID only after extras are covered', async () => {
+    // Two fees, one with extra items
+    prismaMock.studentFee.findMany.mockResolvedValue([
+      { id: 'sf1', studentId: 's1', netAmount: 400000, paidAmount: 0, extraItems: [{ amount: 50000 }], month: 4, year: 2026 },
+      { id: 'sf2', studentId: 's1', netAmount: 300000, paidAmount: 0, extraItems: [], month: 5, year: 2026 },
+    ] as any);
+    prismaMock.payment.count.mockResolvedValue(0);
+    prismaMock.payment.create.mockResolvedValue({
+      id: 'p1', studentFeeId: 'sf1', studentId: 's1', amount: 450000, paymentMethod: 'CASH',
+      receiptNumber: 'RCP-202607-0003', reference: null, note: null, recordedById: 'admin-1',
+      revertedAt: null, revertedById: null, revertReason: null, createdAt: new Date(),
+    } as any);
+    prismaMock.studentFee.update.mockResolvedValue({} as any);
+
+    // Pay 450k — enough to cover sf1's 400k net + 50k extra
+    const res = await request(app).post('/admin/payments/waterfall').set('Authorization', adminToken).send({
+      studentId: 's1', amount: 450000, paymentMethod: 'CASH',
+    });
+    expect(res.status).toBe(201);
+
+    // sf1: 450k paid = 450k total due → PAID (was 400k net + 50k extra)
+    expect(prismaMock.studentFee.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'sf1' }, data: expect.objectContaining({ status: 'PAID' }) })
+    );
+  });
+
+  test('sets PARTIAL when payment falls short of netAmount + extras with waterfall', async () => {
+    prismaMock.studentFee.findMany.mockResolvedValue([
+      { id: 'sf1', studentId: 's1', netAmount: 400000, paidAmount: 0, extraItems: [{ amount: 100000 }], month: 4, year: 2026 },
+    ] as any);
+    prismaMock.payment.count.mockResolvedValue(0);
+    prismaMock.payment.create.mockResolvedValue({
+      id: 'p2', studentFeeId: 'sf1', studentId: 's1', amount: 420000, paymentMethod: 'CASH',
+      receiptNumber: 'RCP-202607-0004', reference: null, note: null, recordedById: 'admin-1',
+      revertedAt: null, revertedById: null, revertReason: null, createdAt: new Date(),
+    } as any);
+    prismaMock.studentFee.update.mockResolvedValue({} as any);
+
+    const res = await request(app).post('/admin/payments/waterfall').set('Authorization', adminToken).send({
+      studentId: 's1', amount: 420000, paymentMethod: 'CASH',
+    });
+    expect(res.status).toBe(201);
+
+    // sf1: 420k paid < 500k total due (400k net + 100k extra) → PARTIAL
+    expect(prismaMock.studentFee.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'sf1' }, data: expect.objectContaining({ status: 'PARTIAL' }) })
+    );
+  });
+});
