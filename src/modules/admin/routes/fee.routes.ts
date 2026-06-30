@@ -264,11 +264,25 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
     if (isFull) {
       // Aggregate all months for full AY view
       const totalFees = s.studentFees || [];
-      const netAmount = totalFees.reduce((sum, f) => sum + f.netAmount, 0);
       const extraAmount = totalFees.reduce((sum, f) => sum + getExtra(f), 0);
-      const totalDue = netAmount + extraAmount;
       const paidAmount = totalFees.reduce((sum, f) => sum + f.paidAmount, 0);
       const allPayments = totalFees.flatMap(f => f.payments);
+
+      // Compute effective net amount applying overrides for each month
+      let netAmount: number;
+      const sOverrides = (s as any).feeOverrides as Record<string, number> | null;
+      if (sOverrides && Object.keys(sOverrides).length > 0) {
+        // Override per-month value × months with generated fees
+        const perMonthAmt = Object.values(sOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
+        netAmount = perMonthAmt * totalFees.length;
+      } else if ((s as any).customFeeAmount != null) {
+        // Custom fee per month × months with generated fees
+        netAmount = (s as any).customFeeAmount * totalFees.length;
+      } else {
+        netAmount = totalFees.reduce((sum, f) => sum + f.netAmount, 0);
+      }
+
+      const totalDue = netAmount + extraAmount;
       return {
         student: { ...s, studentFees: undefined },
         fee: totalFees.length > 0 ? totalFees[0] : null,
