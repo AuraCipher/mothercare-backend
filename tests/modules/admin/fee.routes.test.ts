@@ -230,6 +230,97 @@ describe('GET /admin/fees/summary', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// RECEIPT SNAPSHOT & AUDIT LOG
+// ═══════════════════════════════════════════════════════════════════
+
+describe('GET /admin/payments/:id/receipt — snapshot', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('returns 404 when no snapshot exists', async () => {
+    prismaMock.paymentReceipt.findUnique.mockResolvedValue(null);
+    const res = await request(app).get('/admin/payments/p1/receipt').set('Authorization', adminToken);
+    expect(res.status).toBe(404);
+  });
+
+  test('returns snapshot when it exists', async () => {
+    const mockSnapshot = {
+      id: 'rs1', paymentId: 'p1', receiptNumber: 'RCP-001',
+      currentMonthLabel: 'Jun 2026', currentMonthTotal: 500000,
+      currentMonthHeads: [{ name: 'Tuition', amount: 500000 }],
+      currentMonthExtras: [],
+      previousBalancePaise: 200000, previousMonthsCount: 1,
+      totalDuePaise: 700000, amountPaidPaise: 500000, balanceAfterPaise: 200000,
+      paymentMethod: 'CASH', reference: null,
+      studentName: 'Ahmed', studentClass: 'Class 1', studentRoll: null, fatherName: null,
+      isFullyPaid: false,
+      paymentDate: new Date(), printedAt: null, printCount: 0, createdAt: new Date(),
+    };
+    prismaMock.paymentReceipt.findUnique.mockResolvedValue(mockSnapshot as any);
+    const res = await request(app).get('/admin/payments/p1/receipt').set('Authorization', adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data.receiptNumber).toBe('RCP-001');
+    expect(res.body.data.currentMonthLabel).toBe('Jun 2026');
+    expect(res.body.data.totalDuePaise).toBe(700000);
+    expect(res.body.data.balanceAfterPaise).toBe(200000);
+  });
+});
+
+describe('POST /admin/payments/:id/print-receipt', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('tracks first print', async () => {
+    prismaMock.paymentReceipt.findUnique.mockResolvedValue({
+      id: 'rs1', paymentId: 'p1', printedAt: null, printCount: 0,
+    } as any);
+    prismaMock.paymentReceipt.update.mockResolvedValue({
+      id: 'rs1', printedAt: new Date(), printCount: 1,
+    } as any);
+    const res = await request(app).post('/admin/payments/p1/print-receipt').set('Authorization', adminToken);
+    expect(res.status).toBe(200);
+    expect(prismaMock.paymentReceipt.update).toHaveBeenCalled();
+  });
+
+  test('returns 404 when no snapshot', async () => {
+    prismaMock.paymentReceipt.findUnique.mockResolvedValue(null);
+    const res = await request(app).post('/admin/payments/p1/print-receipt').set('Authorization', adminToken);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('POST /admin/payments/:id/audit-log', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('records a REPRINTED event', async () => {
+    prismaMock.paymentAuditLog.create.mockResolvedValue({
+      id: 'al1', paymentId: 'p1', action: 'REPRINTED', performedById: 'admin-1', createdAt: new Date(),
+    } as any);
+    const res = await request(app).post('/admin/payments/p1/audit-log')
+      .set('Authorization', adminToken)
+      .send({ action: 'REPRINTED' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.action).toBe('REPRINTED');
+  });
+
+  test('rejects invalid action', async () => {
+    const res = await request(app).post('/admin/payments/p1/audit-log')
+      .set('Authorization', adminToken)
+      .send({ action: 'INVALID' });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /admin/payments/:id/audit-log', () => {
+  test('returns audit trail', async () => {
+    prismaMock.paymentAuditLog.findMany.mockResolvedValue([
+      { id: 'al1', paymentId: 'p1', action: 'CREATED', createdAt: new Date() },
+    ] as any);
+    const res = await request(app).get('/admin/payments/p1/audit-log').set('Authorization', adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // EXTRA ITEMS STATUS RECALCULATION
 // ═══════════════════════════════════════════════════════════════════
 

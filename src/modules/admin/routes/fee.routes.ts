@@ -554,6 +554,70 @@ router.post('/student-fees/recalculate', asyncHandler(async (req: Request, res: 
 }));
 
 // ═══════════════════════════════════════════════════════════════════
+// RECEIPT SNAPSHOT HELPER
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Create receipt snapshot + audit log after a payment.
+ * `input` fields are pre-computed by each caller (single / waterfall / family).
+ */
+async function createReceiptSnapshot(
+  paymentId: string,
+  receiptNumber: string,
+  input: {
+    amountPaidPaise: number;
+    currentMonthLabel: string;
+    currentMonthHeads: any[];
+    currentMonthExtras: any[];
+    previousBalancePaise: number;
+    previousMonthsCount: number;
+    totalDuePaise: number;
+    balanceAfterPaise: number;
+    paymentMethod: string;
+    reference: string | null;
+    studentName: string;
+    studentClass: string;
+    studentRoll: string | null;
+    fatherName: string | null;
+    isFullyPaid: boolean;
+  },
+  userId: string,
+) {
+  await prisma.paymentReceipt.create({
+    data: {
+      paymentId,
+      receiptNumber,
+      currentMonthLabel: input.currentMonthLabel,
+      currentMonthTotal: input.currentMonthHeads.reduce((s: number, h: any) => s + (h.amount || 0), 0),
+      currentMonthHeads: input.currentMonthHeads,
+      currentMonthExtras: input.currentMonthExtras,
+      previousBalancePaise: input.previousBalancePaise,
+      previousMonthsCount: input.previousMonthsCount,
+      totalDuePaise: input.totalDuePaise,
+      amountPaidPaise: input.amountPaidPaise,
+      balanceAfterPaise: input.balanceAfterPaise,
+      paymentMethod: input.paymentMethod,
+      reference: input.reference,
+      studentName: input.studentName,
+      studentClass: input.studentClass,
+      studentRoll: input.studentRoll,
+      fatherName: input.fatherName,
+      isFullyPaid: input.isFullyPaid,
+      paymentDate: new Date(),
+    },
+  });
+  await prisma.paymentAuditLog.create({
+    data: {
+      paymentId,
+      action: 'CREATED',
+      newValue: input as any,
+      performedById: userId,
+      performedByName: input.studentName,
+    },
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // PAYMENTS
 // ═══════════════════════════════════════════════════════════════════
 
@@ -607,6 +671,59 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
     where: { id: studentFeeId },
     data: { paidAmount, status, paidAt: status === 'PAID' ? new Date() : undefined },
   });
+
+  // Compute receipt snapshot
+  const today = new Date();
+  const studentName = studentFee.student?.name || '';
+  const studentData = await prisma.student.findUnique({
+    where: { id: studentFee.studentId },
+    select: { name: true, rollNumber: true, group: { select: { name: true, section: true } }, parents: { include: { parent: { select: { relation: true, phone: true, user: { select: { name: true } } } } } } },
+  });
+  const father = studentData?.parents?.find((p: any) => p.parent?.relation === 'Father');
+  const fatherName = father?.parent?.user?.name || father?.parent?.phone || null;
+  const studentClass = [studentData?.group?.name, studentData?.group?.section].filter(Boolean).join(' — ') || '—';
+
+  // Compute previous balance from all other fees (before this payment)
+  const allOtherFees = await prisma.studentFee.findMany({
+    where: { studentId: studentFee.studentId, id: { not: studentFeeId } },
+    include: { extraItems: { select: { amount: true } } },
+  });
+  let previousBalance = 0;
+  let prevMonths = 0;
+  for (const of of allOtherFees) {
+    const ofExtra = (of as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
+    const ofDue = (of.netAmount + ofExtra) - (of.paidAmount || 0);
+    if (ofDue > 0) { previousBalance += ofDue; prevMonths++; }
+  }
+
+  const totalDueBefore = studentFee.netAmount + extraSum + previousBalance;
+  const balanceAfter = Math.max(0, totalDueBefore - amount);
+
+  const monthLabel = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(studentFee.month || 1) - 1] + ' ' + (studentFee.year || '');
+  const heads = (studentFee.feeHeadBreakdown as any[]) || [];
+  const extras = extraItems.map((e: any) => ({ name: e.name, amount: e.amount }));
+
+  await createReceiptSnapshot(
+    payment.id, receiptNumber,
+    {
+      amountPaidPaise: amount,
+      currentMonthLabel: monthLabel,
+      currentMonthHeads: heads,
+      currentMonthExtras: extras,
+      previousBalancePaise: previousBalance,
+      previousMonthsCount: prevMonths,
+      totalDuePaise: totalDueBefore,
+      balanceAfterPaise: balanceAfter,
+      paymentMethod: paymentMethod || 'CASH',
+      reference: reference || null,
+      studentName,
+      studentClass,
+      studentRoll: studentData?.rollNumber || null,
+      fatherName,
+      isFullyPaid: balanceAfter <= 0,
+    },
+    userId,
+  );
 
   res.status(201).json({ success: true, data: { payment, receiptNumber, status } });
 }));
@@ -685,6 +802,66 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
     });
   }
 
+  // Compute receipt snapshot
+  const studentData = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { name: true, rollNumber: true, group: { select: { name: true, section: true } }, parents: { include: { parent: { select: { relation: true, phone: true, user: { select: { name: true } } } } } } },
+  });
+  const father = studentData?.parents?.find((p: any) => p.parent?.relation === 'Father');
+  const fatherName = father?.parent?.user?.name || father?.parent?.phone || null;
+  const studentClass = [studentData?.group?.name, studentData?.group?.section].filter(Boolean).join(' — ') || '—';
+
+  // Find the latest fee that received payment = current month
+  const paidFeeIds = new Set(allocations.map((a: any) => a.studentFeeId));
+  const latestPaidFee = fees.filter((f: any) => paidFeeIds.has(f.id)).pop(); // last = newest (asc order)
+
+  // Compute previous balance from fees NOT paid in this transaction
+  let previousBalance = 0;
+  let prevMonths = 0;
+  for (const f of fees) {
+    if (paidFeeIds.has(f.id)) continue; // will be current month or part of it
+    const fe = (f as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
+    const due = (f.netAmount + fe) - (f.paidAmount || 0);
+    if (due > 0) { previousBalance += due; prevMonths++; }
+  }
+
+  const monthLabel = latestPaidFee
+    ? (['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(latestPaidFee.month || 1) - 1] + ' ' + (latestPaidFee.year || ''))
+    : 'Waterfall Payment';
+
+  const cmHeads = (latestPaidFee?.feeHeadBreakdown as any[]) || [];
+  const cmExtras = latestPaidFee ? ((latestPaidFee as any).extraItems || []).map((e: any) => ({ name: e.name, amount: e.amount })) : [];
+
+  const totalDueBefore = previousBalance + (latestPaidFee ? (latestPaidFee.netAmount + ((latestPaidFee as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0)) : 0);
+  const balanceAfter = Math.max(0, totalDueBefore - amount);
+
+  try {
+    await createReceiptSnapshot(
+      allocations[0]?.id || 'unknown', receiptNumber,
+      {
+        amountPaidPaise: amount,
+        currentMonthLabel: monthLabel,
+        currentMonthHeads: cmHeads,
+        currentMonthExtras: cmExtras,
+        previousBalancePaise: previousBalance,
+        previousMonthsCount: prevMonths,
+        totalDuePaise: totalDueBefore,
+        balanceAfterPaise: balanceAfter,
+        paymentMethod: paymentMethod || 'CASH',
+        reference: reference || null,
+        studentName: studentData?.name || '',
+        studentClass,
+        studentRoll: studentData?.rollNumber || null,
+        fatherName,
+        isFullyPaid: balanceAfter <= 0,
+      },
+      userId,
+    );
+  } catch (snapErr) {
+    // Snapshot failure should not break the payment
+    console.error('Receipt snapshot creation failed (waterfall):', (snapErr as Error).message);
+  }
+
   res.status(201).json({
     success: true,
     data: {
@@ -732,7 +909,76 @@ router.post('/payments/:id/revert', asyncHandler(async (req: Request, res: Respo
     data: { paidAmount, status },
   });
 
+  // Audit log: REVERTED
+  await prisma.paymentAuditLog.create({
+    data: {
+      paymentId: payment.id,
+      action: 'REVERTED',
+      previousValue: { amount: payment.amount, receiptNumber: payment.receiptNumber, reason },
+      performedById: userId,
+    },
+  });
+
   res.json({ success: true, data: { reverted: payment.id, status } });
+}));
+
+// GET /admin/payments/:id/receipt — Fetch receipt snapshot for a payment
+router.get('/payments/:id/receipt', asyncHandler(async (req: Request, res: Response) => {
+  const receipt = await prisma.paymentReceipt.findUnique({
+    where: { paymentId: req.params.id },
+  });
+  if (!receipt) {
+    // No snapshot yet — frontend will fall back to live computation
+    res.status(404).json({ success: false, message: 'No receipt snapshot found' });
+    return;
+  }
+  res.json({ success: true, data: receipt });
+}));
+
+// POST /admin/payments/:id/print-receipt — Track print event
+router.post('/payments/:id/print-receipt', asyncHandler(async (req: Request, res: Response) => {
+  const receipt = await prisma.paymentReceipt.findUnique({
+    where: { paymentId: req.params.id },
+  });
+  if (!receipt) { res.status(404).json({ success: false, message: 'No receipt snapshot' }); return; }
+  const updated = await prisma.paymentReceipt.update({
+    where: { id: receipt.id },
+    data: {
+      printedAt: receipt.printedAt || new Date(),
+      printCount: { increment: 1 },
+    },
+  });
+  res.json({ success: true, data: { printCount: updated.printCount } });
+}));
+
+// POST /admin/payments/:id/audit-log — Record audit event for a payment
+router.post('/payments/:id/audit-log', asyncHandler(async (req: Request, res: Response) => {
+  const { action, ipAddress, userAgent } = req.body;
+  const validActions = ['CREATED', 'REVERTED', 'REPRINTED', 'DOWNLOADED', 'MODIFIED'];
+  if (!action || !validActions.includes(action)) {
+    res.status(400).json({ success: false, message: `Action must be one of: ${validActions.join(', ')}` });
+    return;
+  }
+  const userId = (req as any).user?.id;
+  const log = await prisma.paymentAuditLog.create({
+    data: {
+      paymentId: req.params.id,
+      action,
+      performedById: userId,
+      ipAddress,
+      userAgent,
+    },
+  });
+  res.status(201).json({ success: true, data: log });
+}));
+
+// GET /admin/payments/:id/audit-log — Get audit trail for a payment
+router.get('/payments/:id/audit-log', asyncHandler(async (req: Request, res: Response) => {
+  const logs = await prisma.paymentAuditLog.findMany({
+    where: { paymentId: req.params.id },
+    orderBy: { createdAt: 'desc' },
+  });
+  res.json({ success: true, data: logs });
 }));
 
 // GET /admin/payments — List payments
@@ -835,6 +1081,58 @@ router.post('/family-payments', asyncHandler(async (req: Request, res: Response)
     },
     include: { payments: true, family: { select: { fatherName: true, phone: true } } },
   });
+
+  // Create receipt snapshots for each child payment
+  for (const cp of createdPayments) {
+    try {
+      const sf = await prisma.studentFee.findUnique({
+        where: { id: cp.studentFeeId },
+        select: { month: true, year: true, netAmount: true, paidAmount: true, feeHeadBreakdown: true, extraItems: { select: { name: true, amount: true } }, student: { select: { name: true, rollNumber: true, group: { select: { name: true, section: true } }, parents: { include: { parent: { select: { relation: true, phone: true, user: { select: { name: true } } } } } } } } },
+      });
+      if (!sf) continue;
+      const father = (sf.student as any)?.parents?.find((p: any) => p.parent?.relation === 'Father');
+      const fName = father?.parent?.user?.name || father?.parent?.phone || null;
+      const sClass = [(sf.student as any)?.group?.name, (sf.student as any)?.group?.section].filter(Boolean).join(' — ') || '—';
+      const mLabel = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(sf.month || 1) - 1] + ' ' + (sf.year || '');
+      const cHeads = (sf.feeHeadBreakdown as any[]) || [];
+      const cExtras = (sf.extraItems || []).map((e: any) => ({ name: e.name, amount: e.amount }));
+      // Previous balance for this student: other unpaid fees
+      const otherFees = await prisma.studentFee.findMany({
+        where: { studentId: cp.studentId, id: { not: cp.studentFeeId } },
+        include: { extraItems: { select: { amount: true } } },
+      });
+      let prevBal = 0;
+      let prevCnt = 0;
+      for (const o of otherFees) {
+        const oe = (o as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
+        const od = (o.netAmount + oe) - (o.paidAmount || 0);
+        if (od > 0) { prevBal += od; prevCnt++; }
+      }
+      await createReceiptSnapshot(
+        cp.id, cp.receiptNumber,
+        {
+          amountPaidPaise: cp.amount,
+          currentMonthLabel: mLabel,
+          currentMonthHeads: cHeads,
+          currentMonthExtras: cExtras,
+          previousBalancePaise: prevBal,
+          previousMonthsCount: prevCnt,
+          totalDuePaise: sf.netAmount + (sf.extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0) + prevBal,
+          balanceAfterPaise: Math.max(0, (sf.netAmount + (sf.extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0)) - cp.amount + prevBal),
+          paymentMethod: cp.paymentMethod || 'CASH',
+          reference: cp.reference || null,
+          studentName: (sf.student as any)?.name || '',
+          studentClass: sClass,
+          studentRoll: (sf.student as any)?.rollNumber || null,
+          fatherName: fName,
+          isFullyPaid: cp.amount >= sf.netAmount + (sf.extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0),
+        },
+        userId,
+      );
+    } catch (snapErr) {
+      console.error('Family payment snapshot failed:', (snapErr as Error).message);
+    }
+  }
 
   res.status(201).json({ success: true, data: { familyPayment, receiptNumber, totalAmount, paymentCount: createdPayments.length } });
 }));
