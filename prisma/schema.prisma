@@ -1458,6 +1458,9 @@ model Payment {
   studentFee    StudentFee     @relation(fields: [studentFeeId], references: [id])
   student       Student        @relation("PaymentStudent", fields: [studentId], references: [id], onDelete: Cascade)
   familyPayment FamilyPayment? @relation(fields: [familyPaymentId], references: [id])
+  receipt      PaymentReceipt?  // One immutable receipt per payment
+  auditLogs    PaymentAuditLog[]
+
   recordedBy    User           @relation("PaymentRecordedBy", fields: [recordedById], references: [id])
   revertedBy    User?          @relation("PaymentRevertedBy", fields: [revertedById], references: [id])
 
@@ -1466,4 +1469,71 @@ model Payment {
   @@index([receiptNumber])
   @@index([studentId])
   @@map("payments")
+}
+
+// ─── Receipt Snapshot ───────────────────────────────────────────────
+// Stores exactly what was shown on the receipt at payment time.
+// One snapshot per Payment. Immutable after creation.
+model PaymentReceipt {
+  id            String   @id @default(uuid())
+  paymentId     String   @unique
+  receiptNumber String   // Denormalized for fast lookup
+
+  // Current month (the one being paid) — full breakdown
+  currentMonthLabel  String  // "Jun 2026"
+  currentMonthTotal  Int     // in paise
+  currentMonthHeads  Json    // [{name:"Tuition", amount:300000}, ...]
+  currentMonthExtras Json?   // [{name:"Lab", amount:50000}, ...]
+
+  // Previous months — one combined line
+  previousBalancePaise Int // sum of what was due from earlier months
+  previousMonthsCount  Int // how many months in the previous balance
+
+  // Summary
+  totalDuePaise     Int    // currentMonthTotal + previousBalancePaise
+  amountPaidPaise   Int    // what this payment covered
+  balanceAfterPaise Int    // remaining after this payment
+
+  // Context at time of payment
+  paymentMethod String
+  reference    String?
+  studentName  String
+  studentClass String
+  studentRoll  String?
+  fatherName   String?
+  isFullyPaid  Boolean
+
+  // Audit
+  paymentDate DateTime
+  printedAt   DateTime?  // first print timestamp
+  printCount  Int        @default(0)
+  createdAt   DateTime   @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+
+  @@index([receiptNumber])
+  @@map("payment_receipts")
+}
+
+// ─── Payment Audit Trail ──────────────────────────────────────────
+// Every action on a payment: create, revert, modify, print.
+model PaymentAuditLog {
+  id              String   @id @default(uuid())
+  paymentId       String
+  action          String   // CREATED | REVERTED | REPRINTED | DOWNLOADED | MODIFIED
+  previousValue   Json?    // Payment state before change
+  newValue        Json?    // Payment state after change
+  performedById   String
+  performedByName String?  // Denormalized for audit readability
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId, createdAt])
+  @@index([performedById, createdAt])
+  @@map("payment_audit_logs")
 }
