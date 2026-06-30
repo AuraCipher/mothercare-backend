@@ -766,41 +766,44 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
   const count = await prisma.payment.count({ where: { receiptNumber: { startsWith: `RCP-${yymm}` } } });
   const receiptNumber = `RCP-${yymm}-${String(count + 1).padStart(4, '0')}`;
 
+  // ─── Atomic transaction: all payments + fee updates succeed or none do ───
   const allocations: any[] = [];
-  let remainingForReceipt = remaining;
-  const updates: any[] = [];
+  let remainingForTx = remaining;
 
-  for (const fee of fees) {
-    if (remaining <= 0) break;
-    const due = getTotalDue(fee);
-    if (due <= 0) continue;
+  await prisma.$transaction(async (tx) => {
+    for (const fee of fees) {
+      if (remainingForTx <= 0) break;
+      const due = getTotalDue(fee);
+      if (due <= 0) continue;
 
-    const payAmount = Math.min(remaining, due);
-    remaining -= payAmount;
+      const payAmount = Math.min(remainingForTx, due);
+      remainingForTx -= payAmount;
 
-    // Create payment record
-    const payment = await prisma.payment.create({
-      data: {
-        studentFeeId: fee.id,
-        studentId,
-        amount: payAmount,
-        paymentMethod: paymentMethod || 'CASH',
-        receiptNumber: `${receiptNumber}-${allocations.length + 1}`,
-        reference, note, recordedById: userId,
-      },
-    });
-    allocations.push(payment);
+      // Create payment record
+      const payment = await tx.payment.create({
+        data: {
+          studentFeeId: fee.id,
+          studentId,
+          amount: payAmount,
+          paymentMethod: paymentMethod || 'CASH',
+          receiptNumber: `${receiptNumber}-${allocations.length + 1}`,
+          reference, note, recordedById: userId,
+        },
+      });
+      allocations.push(payment);
 
-    // Update StudentFee (include extras in total due)
-    const feeExtraSum = (fee as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
-    const feeTotalDue = fee.netAmount + feeExtraSum;
-    const newPaid = fee.paidAmount + payAmount;
-    const newStatus = newPaid >= feeTotalDue ? 'PAID' : 'PARTIAL';
-    await prisma.studentFee.update({
-      where: { id: fee.id },
-      data: { paidAmount: newPaid, status: newStatus, paidAt: newStatus === 'PAID' ? new Date() : undefined },
-    });
-  }
+      // Update StudentFee (include extras in total due)
+      const feeExtraSum = (fee as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
+      const feeTotalDue = fee.netAmount + feeExtraSum;
+      const newPaid = fee.paidAmount + payAmount;
+      const newStatus = newPaid >= feeTotalDue ? 'PAID' : 'PARTIAL';
+      await tx.studentFee.update({
+        where: { id: fee.id },
+        data: { paidAmount: newPaid, status: newStatus, paidAt: newStatus === 'PAID' ? new Date() : undefined },
+      });
+    }
+  });
+  // ─── End atomic transaction ───
 
   // Compute receipt snapshot
   const studentData = await prisma.student.findUnique({

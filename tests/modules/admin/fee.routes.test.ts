@@ -174,19 +174,28 @@ describe('POST /admin/payments', () => {
 });
 
 describe('POST /admin/payments/waterfall', () => {
+  beforeEach(() => jest.clearAllMocks());
+
   test('allocates payment across oldest months first', async () => {
-    prismaMock.studentFee.findMany.mockResolvedValue([
-      { id: 'sf1', studentId: 's1', netAmount: 300000, paidAmount: 0, extraItems: [], month: 4, year: 2026 },
-      { id: 'sf2', studentId: 's1', netAmount: 300000, paidAmount: 0, extraItems: [], month: 5, year: 2026 },
-    ] as any);
+    const txMock = { payment: { create: jest.fn() }, studentFee: { update: jest.fn() } };
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
+    // First findMany call: main fees fetch (line 742). Second: previous balance query (line 836)
+    prismaMock.studentFee.findMany
+      .mockResolvedValueOnce([
+        { id: 'sf1', studentId: 's1', netAmount: 300000, paidAmount: 0, extraItems: [], month: 4, year: 2026 },
+        { id: 'sf2', studentId: 's1', netAmount: 300000, paidAmount: 0, extraItems: [], month: 5, year: 2026 },
+      ] as any)
+      .mockResolvedValue([] as any); // previous balance (empty)
     prismaMock.payment.count.mockResolvedValue(0);
-    prismaMock.payment.create.mockResolvedValue({
+    txMock.payment.create.mockResolvedValue({
       id: 'p1', studentFeeId: 'sf1', studentId: 's1', amount: 400000, paymentMethod: 'CASH',
       receiptNumber: 'RCP-202606-0002', reference: null, note: null, recordedById: 'admin-1',
       revertedAt: null, revertedById: null, revertReason: null,
       createdAt: new Date(),
-    } as any);
-    prismaMock.studentFee.update.mockResolvedValue({} as any);
+    });
+    txMock.studentFee.update.mockResolvedValue({} as any);
+    // Mock student lookup for snapshot
+    prismaMock.student.findUnique.mockResolvedValue({ name: 'Test', rollNumber: '1', group: { name: 'Class 1', section: null }, parents: [] } as any);
 
     const res = await request(app).post('/admin/payments/waterfall').set('Authorization', adminToken).send({ studentId: 's1', amount: 400000, paymentMethod: 'CASH' });
     expect(res.status).toBe(201);
@@ -400,45 +409,59 @@ describe('DELETE /admin/student-fees/:id/extra-items/:itemId — status recalcul
 // ═══════════════════════════════════════════════════════════════════
 
 describe('POST /admin/payments/waterfall — status accounts for extras', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  function setupTxMock() {
+    const txMock = { payment: { create: jest.fn() }, studentFee: { update: jest.fn() } };
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
+    return txMock;
+  }
 
   test('sets PAID only after extras are covered', async () => {
+    const txMock = setupTxMock();
     // Two fees, one with extra items
-    prismaMock.studentFee.findMany.mockResolvedValue([
+    prismaMock.studentFee.findMany.mockResolvedValueOnce([
       { id: 'sf1', studentId: 's1', netAmount: 400000, paidAmount: 0, extraItems: [{ amount: 50000 }], month: 4, year: 2026 },
       { id: 'sf2', studentId: 's1', netAmount: 300000, paidAmount: 0, extraItems: [], month: 5, year: 2026 },
     ] as any);
     prismaMock.payment.count.mockResolvedValue(0);
-    prismaMock.payment.create.mockResolvedValue({
+    txMock.payment.create.mockResolvedValue({
       id: 'p1', studentFeeId: 'sf1', studentId: 's1', amount: 450000, paymentMethod: 'CASH',
-      receiptNumber: 'RCP-202607-0003', reference: null, note: null, recordedById: 'admin-1',
+      receiptNumber: 'RCP-202607-0001', reference: null, note: null, recordedById: 'admin-1',
       revertedAt: null, revertedById: null, revertReason: null, createdAt: new Date(),
-    } as any);
-    prismaMock.studentFee.update.mockResolvedValue({} as any);
+    });
+    txMock.studentFee.update.mockResolvedValue({} as any);
+    // Mock snapshot reads
+    prismaMock.student.findUnique.mockResolvedValue({ name: 'Test', rollNumber: '1', group: { name: 'Class 1', section: null }, parents: [] } as any);
+    prismaMock.studentFee.findMany.mockResolvedValue([] as any);
 
-    // Pay 450k — enough to cover sf1's 400k net + 50k extra
     const res = await request(app).post('/admin/payments/waterfall').set('Authorization', adminToken).send({
       studentId: 's1', amount: 450000, paymentMethod: 'CASH',
     });
     expect(res.status).toBe(201);
 
     // sf1: 450k paid = 450k total due → PAID (was 400k net + 50k extra)
-    expect(prismaMock.studentFee.update).toHaveBeenCalledWith(
+    expect(txMock.studentFee.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'sf1' }, data: expect.objectContaining({ status: 'PAID' }) })
     );
   });
 
   test('sets PARTIAL when payment falls short of netAmount + extras with waterfall', async () => {
-    prismaMock.studentFee.findMany.mockResolvedValue([
+    const txMock = setupTxMock();
+    prismaMock.studentFee.findMany.mockResolvedValueOnce([
       { id: 'sf1', studentId: 's1', netAmount: 400000, paidAmount: 0, extraItems: [{ amount: 100000 }], month: 4, year: 2026 },
     ] as any);
     prismaMock.payment.count.mockResolvedValue(0);
-    prismaMock.payment.create.mockResolvedValue({
+    txMock.payment.create.mockResolvedValue({
       id: 'p2', studentFeeId: 'sf1', studentId: 's1', amount: 420000, paymentMethod: 'CASH',
-      receiptNumber: 'RCP-202607-0004', reference: null, note: null, recordedById: 'admin-1',
+      receiptNumber: 'RCP-202607-0002', reference: null, note: null, recordedById: 'admin-1',
       revertedAt: null, revertedById: null, revertReason: null, createdAt: new Date(),
-    } as any);
-    prismaMock.studentFee.update.mockResolvedValue({} as any);
+    });
+    txMock.studentFee.update.mockResolvedValue({} as any);
+    prismaMock.student.findUnique.mockResolvedValue({ name: 'Test', rollNumber: '1', group: { name: 'Class 1', section: null }, parents: [] } as any);
+    prismaMock.studentFee.findMany.mockResolvedValue([] as any);
 
     const res = await request(app).post('/admin/payments/waterfall').set('Authorization', adminToken).send({
       studentId: 's1', amount: 420000, paymentMethod: 'CASH',
@@ -446,7 +469,7 @@ describe('POST /admin/payments/waterfall — status accounts for extras', () => 
     expect(res.status).toBe(201);
 
     // sf1: 420k paid < 500k total due (400k net + 100k extra) → PARTIAL
-    expect(prismaMock.studentFee.update).toHaveBeenCalledWith(
+    expect(txMock.studentFee.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'sf1' }, data: expect.objectContaining({ status: 'PARTIAL' }) })
     );
   });
