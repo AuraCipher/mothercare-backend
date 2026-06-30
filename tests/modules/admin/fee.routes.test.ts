@@ -177,16 +177,19 @@ describe('POST /admin/payments/waterfall', () => {
   beforeEach(() => jest.clearAllMocks());
 
   test('allocates payment across oldest months first', async () => {
-    const txMock = { payment: { create: jest.fn() }, studentFee: { update: jest.fn() } };
+    // Tx mock: the interactive transaction gets a tx client with fee+payment methods
+    const txMock = {
+      payment: { create: jest.fn(), aggregate: jest.fn() },
+      studentFee: { findMany: jest.fn(), update: jest.fn() },
+    };
     prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
-    // First findMany call: main fees fetch (line 742). Second: previous balance query (line 836)
-    prismaMock.studentFee.findMany
-      .mockResolvedValueOnce([
-        { id: 'sf1', studentId: 's1', netAmount: 300000, paidAmount: 0, extraItems: [], month: 4, year: 2026 },
-        { id: 'sf2', studentId: 's1', netAmount: 300000, paidAmount: 0, extraItems: [], month: 5, year: 2026 },
-      ] as any)
-      .mockResolvedValue([] as any); // previous balance (empty)
-    prismaMock.payment.count.mockResolvedValue(0);
+    // generateReceiptNumber calls payment.findFirst to get last receipt
+    prismaMock.payment.findFirst.mockResolvedValue(null); // no prior receipts
+    // Inside the tx, fees are read fresh
+    txMock.studentFee.findMany.mockResolvedValue([
+      { id: 'sf1', studentId: 's1', netAmount: 300000, paidAmount: 0, extraItems: [], month: 4, year: 2026 },
+      { id: 'sf2', studentId: 's1', netAmount: 300000, paidAmount: 0, extraItems: [], month: 5, year: 2026 },
+    ] as any);
     txMock.payment.create.mockResolvedValue({
       id: 'p1', studentFeeId: 'sf1', studentId: 's1', amount: 400000, paymentMethod: 'CASH',
       receiptNumber: 'RCP-202606-0002', reference: null, note: null, recordedById: 'admin-1',
@@ -194,8 +197,9 @@ describe('POST /admin/payments/waterfall', () => {
       createdAt: new Date(),
     });
     txMock.studentFee.update.mockResolvedValue({} as any);
-    // Mock student lookup for snapshot
+    // After tx: snapshot reads
     prismaMock.student.findUnique.mockResolvedValue({ name: 'Test', rollNumber: '1', group: { name: 'Class 1', section: null }, parents: [] } as any);
+    prismaMock.studentFee.findMany.mockResolvedValue([] as any); // previous balance query
 
     const res = await request(app).post('/admin/payments/waterfall').set('Authorization', adminToken).send({ studentId: 's1', amount: 400000, paymentMethod: 'CASH' });
     expect(res.status).toBe(201);
@@ -420,20 +424,22 @@ describe('POST /admin/payments/waterfall — status accounts for extras', () => 
   }
 
   test('sets PAID only after extras are covered', async () => {
-    const txMock = setupTxMock();
-    // Two fees, one with extra items
-    prismaMock.studentFee.findMany.mockResolvedValueOnce([
+    const txMock = {
+      payment: { create: jest.fn(), aggregate: jest.fn() },
+      studentFee: { findMany: jest.fn(), update: jest.fn() },
+    };
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
+    prismaMock.payment.findFirst.mockResolvedValue(null);
+    txMock.studentFee.findMany.mockResolvedValue([
       { id: 'sf1', studentId: 's1', netAmount: 400000, paidAmount: 0, extraItems: [{ amount: 50000 }], month: 4, year: 2026 },
       { id: 'sf2', studentId: 's1', netAmount: 300000, paidAmount: 0, extraItems: [], month: 5, year: 2026 },
     ] as any);
-    prismaMock.payment.count.mockResolvedValue(0);
     txMock.payment.create.mockResolvedValue({
       id: 'p1', studentFeeId: 'sf1', studentId: 's1', amount: 450000, paymentMethod: 'CASH',
       receiptNumber: 'RCP-202607-0001', reference: null, note: null, recordedById: 'admin-1',
       revertedAt: null, revertedById: null, revertReason: null, createdAt: new Date(),
     });
     txMock.studentFee.update.mockResolvedValue({} as any);
-    // Mock snapshot reads
     prismaMock.student.findUnique.mockResolvedValue({ name: 'Test', rollNumber: '1', group: { name: 'Class 1', section: null }, parents: [] } as any);
     prismaMock.studentFee.findMany.mockResolvedValue([] as any);
 
@@ -449,11 +455,15 @@ describe('POST /admin/payments/waterfall — status accounts for extras', () => 
   });
 
   test('sets PARTIAL when payment falls short of netAmount + extras with waterfall', async () => {
-    const txMock = setupTxMock();
-    prismaMock.studentFee.findMany.mockResolvedValueOnce([
+    const txMock = {
+      payment: { create: jest.fn(), aggregate: jest.fn() },
+      studentFee: { findMany: jest.fn(), update: jest.fn() },
+    };
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
+    prismaMock.payment.findFirst.mockResolvedValue(null);
+    txMock.studentFee.findMany.mockResolvedValue([
       { id: 'sf1', studentId: 's1', netAmount: 400000, paidAmount: 0, extraItems: [{ amount: 100000 }], month: 4, year: 2026 },
     ] as any);
-    prismaMock.payment.count.mockResolvedValue(0);
     txMock.payment.create.mockResolvedValue({
       id: 'p2', studentFeeId: 'sf1', studentId: 's1', amount: 420000, paymentMethod: 'CASH',
       receiptNumber: 'RCP-202607-0002', reference: null, note: null, recordedById: 'admin-1',

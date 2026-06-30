@@ -558,6 +558,39 @@ router.post('/student-fees/recalculate', asyncHandler(async (req: Request, res: 
 // ═══════════════════════════════════════════════════════════════════
 
 /**
+ * Atomic receipt number generation with retry on unique constraint.
+ * Catches P2002 (unique constraint) and retries with next sequence number.
+ */
+async function generateReceiptNumber(
+  createFn: (rn: string) => Promise<any>,
+  prefix = 'RCP',
+  maxAttempts = 10,
+): Promise<{ result: any; receiptNumber: string }> {
+  const now = new Date();
+  const yymm = now.getFullYear().toString() + String(now.getMonth() + 1).padStart(2, '0');
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const last = await prisma.payment.findFirst({
+      where: { receiptNumber: { startsWith: `${prefix}-${yymm}` } },
+      orderBy: { receiptNumber: 'desc' },
+      select: { receiptNumber: true },
+    });
+    const lastSeq = last ? parseInt(last.receiptNumber.slice(-4), 10) || 0 : 0;
+    const rn = `${prefix}-${yymm}-${String(lastSeq + 1).padStart(4, '0')}`;
+    try {
+      const result = await createFn(rn);
+      return { result, receiptNumber: rn };
+    } catch (err: any) {
+      if (err.code === 'P2002' && attempt < maxAttempts - 1) {
+        // Unique constraint — another request beat us to this number, retry
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(`Failed to generate unique receipt number after ${maxAttempts} attempts`);
+}
+
+/**
  * Create receipt snapshot + audit log after a payment.
  * `input` fields are pre-computed by each caller (single / waterfall / family).
  */
@@ -630,46 +663,52 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
   }
   const userId = (req as any).user?.id;
 
-  // Get the student fee
+  // Get the student fee (with student info for snapshot)
   const studentFee = await prisma.studentFee.findUnique({
     where: { id: studentFeeId },
     include: { student: { select: { id: true, name: true } } },
   });
   if (!studentFee) { res.status(404).json({ success: false, message: 'Student fee not found' }); return; }
 
-  // Generate receipt number
-  const now = new Date();
-  const yymm = now.getFullYear().toString() + String(now.getMonth() + 1).padStart(2, '0');
-  const count = await prisma.payment.count({ where: { receiptNumber: { startsWith: `RCP-${yymm}` } } });
-  const receiptNumber = `RCP-${yymm}-${String(count + 1).padStart(4, '0')}`;
-
-  // Create payment in transaction
-  const [payment] = await prisma.$transaction([
-    prisma.payment.create({
-      data: {
-        studentFeeId,
-        studentId: studentFee.studentId,
-        amount, paymentMethod, receiptNumber,
-        reference, note, recordedById: userId,
-      },
-    }),
-  ]);
-
-  // Update paidAmount and status on StudentFee (include extras in total due)
-  const allPayments = await prisma.payment.aggregate({
-    where: { studentFeeId, revertedAt: null },
-    _sum: { amount: true },
-  });
+  // Fetch extras once (needed for both payment status AND snapshot)
   const extraItems = await prisma.feeExtraItem.findMany({ where: { studentFeeId } });
   const extraSum = extraItems.reduce((s: number, e: any) => s + e.amount, 0);
-  const totalDue = studentFee.netAmount + extraSum;
-  const paidAmount = allPayments._sum.amount || 0;
-  let status = 'PARTIAL';
-  if (paidAmount >= totalDue) status = paidAmount > totalDue ? 'OVERPAID' : 'PAID';
 
-  await prisma.studentFee.update({
-    where: { id: studentFeeId },
-    data: { paidAmount, status, paidAt: status === 'PAID' ? new Date() : undefined },
+  // Atomic receipt number generation + payment creation + fee update
+  const { result: payment, receiptNumber } = await generateReceiptNumber(async (rn) => {
+    // Re-read fee inside the retry callback so we see the latest state
+    const freshFee = await prisma.studentFee.findUnique({
+      where: { id: studentFeeId },
+      select: { netAmount: true, paidAmount: true },
+    });
+    if (!freshFee) throw new Error('Student fee not found during payment');
+
+    return prisma.$transaction(async (tx) => {
+      // Create payment
+      const p = await tx.payment.create({
+        data: {
+          studentFeeId, studentId: studentFee.studentId,
+          amount, paymentMethod, reference, receiptNumber: rn, note, recordedById: userId,
+        },
+      });
+
+      // Update paidAmount and status (include extras in total due)
+      const allP = await tx.payment.aggregate({
+        where: { studentFeeId, revertedAt: null },
+        _sum: { amount: true },
+      });
+      const totalDue = freshFee.netAmount + extraSum;
+      const paidAmt = allP._sum.amount || 0;
+      let payStatus = 'PARTIAL';
+      if (paidAmt >= totalDue) payStatus = paidAmt > totalDue ? 'OVERPAID' : 'PAID';
+
+      await tx.studentFee.update({
+        where: { id: studentFeeId },
+        data: { paidAmount: paidAmt, status: payStatus, paidAt: payStatus === 'PAID' ? new Date() : undefined },
+      });
+
+      return p;
+    });
   });
 
   // Compute receipt snapshot
@@ -701,7 +740,7 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
 
   const monthLabel = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(studentFee.month || 1) - 1] + ' ' + (studentFee.year || '');
   const heads = (studentFee.feeHeadBreakdown as any[]) || [];
-  const extras = extraItems.map((e: any) => ({ name: e.name, amount: e.amount }));
+  const snapExtras = extraItems.map((e: any) => ({ name: e.name, amount: e.amount }));
 
   await createReceiptSnapshot(
     payment.id, receiptNumber,
@@ -709,7 +748,7 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
       amountPaidPaise: amount,
       currentMonthLabel: monthLabel,
       currentMonthHeads: heads,
-      currentMonthExtras: extras,
+      currentMonthExtras: snapExtras,
       previousBalancePaise: previousBalance,
       previousMonthsCount: prevMonths,
       totalDuePaise: totalDueBefore,
@@ -725,7 +764,7 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
     userId,
   );
 
-  res.status(201).json({ success: true, data: { payment, receiptNumber, status } });
+  res.status(201).json({ success: true, data: { payment, receiptNumber, status: 'PAID' } });
 }));
 
 // POST /admin/payments/waterfall — Waterfall payment across unpaid months (oldest first)
@@ -736,76 +775,84 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
     return;
   }
   const userId = (req as any).user?.id;
-  let remaining = amount;
 
-  // Find all unpaid/partial fees for this student, oldest first
-  const fees = await prisma.studentFee.findMany({
-    where: { studentId, status: { in: ['UNPAID', 'PARTIAL'] } },
-    include: { extraItems: true },
-    orderBy: [{ year: 'asc' }, { month: 'asc' }],
-  });
-
-  if (fees.length === 0) {
-    res.status(400).json({ success: false, message: 'No unpaid fees found for this student' });
-    return;
-  }
-
-  const getTotalDue = (f: typeof fees[0]) => {
-    const extraSum = (f as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
+  // ─── Concurrency-safe waterfall: read+validate+allocate inside one transaction ───
+  const getTotalDueFn = (f: any) => {
+    const extraSum = (f.extraItems || []).reduce((s: number, e: any) => s + e.amount, 0) || 0;
     return f.netAmount + extraSum - f.paidAmount;
   };
-  const totalRemaining = fees.reduce((sum, f) => sum + getTotalDue(f), 0);
-  if (remaining > totalRemaining) {
-    res.status(400).json({ success: false, message: `Amount exceeds total remaining (${(totalRemaining / 100).toLocaleString()} PKR)` });
-    return;
-  }
 
-  // Generate single receipt number
-  const now = new Date();
-  const yymm = now.getFullYear().toString() + String(now.getMonth() + 1).padStart(2, '0');
-  const count = await prisma.payment.count({ where: { receiptNumber: { startsWith: `RCP-${yymm}` } } });
-  const receiptNumber = `RCP-${yymm}-${String(count + 1).padStart(4, '0')}`;
+  let allocations: any[] = [];
+  let receiptNumber = '';
+  try {
+    const result = await generateReceiptNumber(async (receiptBase) => {
+      return prisma.$transaction(async (tx) => {
+        // 1. Re-read fees INSIDE the transaction (sees latest committed state — concurrency guard)
+        const freshFees = await tx.studentFee.findMany({
+          where: { studentId, status: { in: ['UNPAID', 'PARTIAL'] } },
+          include: { extraItems: true },
+          orderBy: [{ year: 'asc' }, { month: 'asc' }],
+        });
 
-  // ─── Atomic transaction: all payments + fee updates succeed or none do ───
-  const allocations: any[] = [];
-  let remainingForTx = remaining;
+        if (freshFees.length === 0) {
+          throw Object.assign(new Error('No unpaid fees found for this student'), { statusCode: 400 });
+        }
 
-  await prisma.$transaction(async (tx) => {
-    for (const fee of fees) {
-      if (remainingForTx <= 0) break;
-      const due = getTotalDue(fee);
-      if (due <= 0) continue;
+        // 2. Re-validate total remaining against latest state
+        const totalRemaining = freshFees.reduce((sum: number, f: any) => sum + getTotalDueFn(f), 0);
+        if (amount > totalRemaining) {
+          throw Object.assign(new Error(`Amount exceeds total remaining (${(totalRemaining / 100).toLocaleString()} PKR)`), { statusCode: 400 });
+        }
 
-      const payAmount = Math.min(remainingForTx, due);
-      remainingForTx -= payAmount;
+        // 3. Allocate across fees
+        const allocs: any[] = [];
+        let rem = amount;
+        for (const fee of freshFees) {
+          if (rem <= 0) break;
+          const due = getTotalDueFn(fee);
+          if (due <= 0) continue;
 
-      // Create payment record
-      const payment = await tx.payment.create({
-        data: {
-          studentFeeId: fee.id,
-          studentId,
-          amount: payAmount,
-          paymentMethod: paymentMethod || 'CASH',
-          receiptNumber: `${receiptNumber}-${allocations.length + 1}`,
-          reference, note, recordedById: userId,
-        },
+          const payAmount = Math.min(rem, due);
+          rem -= payAmount;
+
+          const payment = await tx.payment.create({
+            data: {
+              studentFeeId: fee.id, studentId,
+              amount: payAmount, paymentMethod: paymentMethod || 'CASH',
+              receiptNumber: `${receiptBase}-${allocs.length + 1}`,
+              reference, note, recordedById: userId,
+            },
+          });
+          allocs.push(payment);
+
+          // 4. Update fee with OVERPAID support
+          const feeExtraSum = (fee.extraItems || []).reduce((s: number, e: any) => s + e.amount, 0) || 0;
+          const feeTotalDue = fee.netAmount + feeExtraSum;
+          const newPaid = fee.paidAmount + payAmount;
+          const newStatus = newPaid >= feeTotalDue
+            ? (newPaid > feeTotalDue ? 'OVERPAID' : 'PAID')
+            : 'PARTIAL';
+          await tx.studentFee.update({
+            where: { id: fee.id },
+            data: { paidAmount: newPaid, status: newStatus, paidAt: newStatus === 'PAID' ? new Date() : undefined },
+          });
+        }
+
+        return allocs;
       });
-      allocations.push(payment);
-
-      // Update StudentFee (include extras in total due)
-      const feeExtraSum = (fee as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
-      const feeTotalDue = fee.netAmount + feeExtraSum;
-      const newPaid = fee.paidAmount + payAmount;
-      const newStatus = newPaid >= feeTotalDue ? 'PAID' : 'PARTIAL';
-      await tx.studentFee.update({
-        where: { id: fee.id },
-        data: { paidAmount: newPaid, status: newStatus, paidAt: newStatus === 'PAID' ? new Date() : undefined },
-      });
+    }, 'RCP');
+    allocations = result.result;
+    receiptNumber = result.receiptNumber;
+  } catch (waterfallErr: any) {
+    if (waterfallErr.statusCode === 400) {
+      res.status(400).json({ success: false, message: waterfallErr.message });
+      return;
     }
-  });
-  // ─── End atomic transaction ───
+    throw waterfallErr;
+  }
+  // ─── End atomic waterfall ───
 
-  // Compute receipt snapshot
+  // Compute receipt snapshot from committed state
   const studentData = await prisma.student.findUnique({
     where: { id: studentId },
     select: { name: true, rollNumber: true, group: { select: { name: true, section: true } }, parents: { include: { parent: { select: { relation: true, phone: true, user: { select: { name: true } } } } } } },
@@ -814,15 +861,23 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
   const fatherName = father?.parent?.user?.name || father?.parent?.phone || null;
   const studentClass = [studentData?.group?.name, studentData?.group?.section].filter(Boolean).join(' — ') || '—';
 
-  // Find the latest fee that received payment = current month
+  // Compute snapshot using the paid fee IDs from allocations
   const paidFeeIds = new Set(allocations.map((a: any) => a.studentFeeId));
-  const latestPaidFee = fees.filter((f: any) => paidFeeIds.has(f.id)).pop(); // last = newest (asc order)
+  const allFees = await prisma.studentFee.findMany({
+    where: { studentId, id: { in: Array.from(paidFeeIds) as string[] } },
+    include: { extraItems: true },
+  });
+  // Find latest paid fee = current month
+  const latestPaidFee = allFees.sort((a: any, b: any) => (b.year - a.year) || (b.month - a.month))[0];
 
-  // Compute previous balance from fees NOT paid in this transaction
+  // Previous balance: fees NOT paid + any residual due on older paid fees
+  const otherFees = await prisma.studentFee.findMany({
+    where: { studentId, id: { notIn: Array.from(paidFeeIds) as string[] } },
+    include: { extraItems: { select: { amount: true } } },
+  });
   let previousBalance = 0;
   let prevMonths = 0;
-  for (const f of fees) {
-    if (paidFeeIds.has(f.id)) continue; // will be current month or part of it
+  for (const f of otherFees) {
     const fe = (f as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
     const due = (f.netAmount + fe) - (f.paidAmount || 0);
     if (due > 0) { previousBalance += due; prevMonths++; }
@@ -831,11 +886,10 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
   const monthLabel = latestPaidFee
     ? (['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(latestPaidFee.month || 1) - 1] + ' ' + (latestPaidFee.year || ''))
     : 'Waterfall Payment';
-
   const cmHeads = (latestPaidFee?.feeHeadBreakdown as any[]) || [];
   const cmExtras = latestPaidFee ? ((latestPaidFee as any).extraItems || []).map((e: any) => ({ name: e.name, amount: e.amount })) : [];
-
-  const totalDueBefore = previousBalance + (latestPaidFee ? (latestPaidFee.netAmount + ((latestPaidFee as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0)) : 0);
+  const currentTotal = latestPaidFee ? (latestPaidFee.netAmount + ((latestPaidFee as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0)) : 0;
+  const totalDueBefore = previousBalance + currentTotal;
   const balanceAfter = Math.max(0, totalDueBefore - amount);
 
   try {
@@ -861,7 +915,6 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
       userId,
     );
   } catch (snapErr) {
-    // Snapshot failure should not break the payment
     console.error('Receipt snapshot creation failed (waterfall):', (snapErr as Error).message);
   }
 
@@ -870,7 +923,7 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
     data: {
       receiptNumber,
       totalAmount: amount,
-      allocations: allocations.map(a => ({ id: a.id, studentFeeId: a.studentFeeId, amount: a.amount, receiptNumber: a.receiptNumber })),
+      allocations: allocations.map((a: any) => ({ id: a.id, studentFeeId: a.studentFeeId, amount: a.amount, receiptNumber: a.receiptNumber })),
       monthsCovered: allocations.length,
     },
   });
