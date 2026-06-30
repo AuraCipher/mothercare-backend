@@ -174,12 +174,43 @@ router.post('/student-fees/:id/extra-items', asyncHandler(async (req: Request, r
   const item = await prisma.feeExtraItem.create({
     data: { studentFeeId: req.params.id, name, amount },
   });
+  // Recalculate status after adding extra
+  const extraSum = await prisma.feeExtraItem.aggregate({
+    where: { studentFeeId: req.params.id },
+    _sum: { amount: true },
+  });
+  const totalExtra = extraSum._sum.amount || 0;
+  const totalDue = (fee.totalAmount || fee.netAmount) + totalExtra;
+  const newStatus = fee.paidAmount >= totalDue
+    ? (fee.paidAmount > totalDue ? 'OVERPAID' : 'PAID')
+    : fee.paidAmount > 0 ? 'PARTIAL' : 'UNPAID';
+  await prisma.studentFee.update({
+    where: { id: req.params.id },
+    data: { status: newStatus },
+  });
   res.status(201).json({ success: true, data: item });
 }));
 
 // DELETE /admin/student-fees/:id/extra-items/:itemId — Remove an extra item
 router.delete('/student-fees/:id/extra-items/:itemId', asyncHandler(async (req: Request, res: Response) => {
-  await prisma.feeExtraItem.delete({ where: { id: req.params.itemId } });
+  const deleted = await prisma.feeExtraItem.delete({ where: { id: req.params.itemId } });
+  // Recalculate status after removing extra
+  const extraSum = await prisma.feeExtraItem.aggregate({
+    where: { studentFeeId: deleted.studentFeeId },
+    _sum: { amount: true },
+  });
+  const sf = await prisma.studentFee.findUnique({ where: { id: deleted.studentFeeId } });
+  if (sf) {
+    const totalExtra = extraSum._sum.amount || 0;
+    const totalDue = (sf.totalAmount || sf.netAmount) + totalExtra;
+    const newStatus = sf.paidAmount >= totalDue
+      ? (sf.paidAmount > totalDue ? 'OVERPAID' : 'PAID')
+      : sf.paidAmount > 0 ? 'PARTIAL' : 'UNPAID';
+    await prisma.studentFee.update({
+      where: { id: sf.id },
+      data: { status: newStatus },
+    });
+  }
   res.json({ success: true, message: 'Deleted' });
 }));
 
@@ -256,10 +287,10 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
     const sOverrides = (s as any).feeOverrides as Record<string, number> | null;
     let effectiveNet = mf ? (mf.netAmount + mfExtra) : 0;
     if (sOverrides && Object.keys(sOverrides).length > 0) {
-      // Sum up overrides to get effective amount
-      effectiveNet = Object.values(sOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
+      // Sum up overrides to get effective amount, then add extra items
+      effectiveNet = Object.values(sOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0) + mfExtra;
     } else if ((s as any).customFeeAmount != null) {
-      effectiveNet = (s as any).customFeeAmount;
+      effectiveNet = (s as any).customFeeAmount + mfExtra;
     }
     return {
       student: { ...s, studentFees: undefined, feeOverrides: undefined },
@@ -560,14 +591,17 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
     }),
   ]);
 
-  // Update paidAmount and status on StudentFee
+  // Update paidAmount and status on StudentFee (include extras in total due)
   const allPayments = await prisma.payment.aggregate({
     where: { studentFeeId, revertedAt: null },
     _sum: { amount: true },
   });
+  const extraItems = await prisma.feeExtraItem.findMany({ where: { studentFeeId } });
+  const extraSum = extraItems.reduce((s: number, e: any) => s + e.amount, 0);
+  const totalDue = studentFee.netAmount + extraSum;
   const paidAmount = allPayments._sum.amount || 0;
   let status = 'PARTIAL';
-  if (paidAmount >= studentFee.netAmount) status = paidAmount > studentFee.netAmount ? 'OVERPAID' : 'PAID';
+  if (paidAmount >= totalDue) status = paidAmount > totalDue ? 'OVERPAID' : 'PAID';
 
   await prisma.studentFee.update({
     where: { id: studentFeeId },
@@ -640,9 +674,11 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
     });
     allocations.push(payment);
 
-    // Update StudentFee
+    // Update StudentFee (include extras in total due)
+    const feeExtraSum = (fee as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
+    const feeTotalDue = fee.netAmount + feeExtraSum;
     const newPaid = fee.paidAmount + payAmount;
-    const newStatus = newPaid >= fee.netAmount ? 'PAID' : 'PARTIAL';
+    const newStatus = newPaid >= feeTotalDue ? 'PAID' : 'PARTIAL';
     await prisma.studentFee.update({
       where: { id: fee.id },
       data: { paidAmount: newPaid, status: newStatus, paidAt: newStatus === 'PAID' ? new Date() : undefined },
@@ -682,9 +718,14 @@ router.post('/payments/:id/revert', asyncHandler(async (req: Request, res: Respo
     _sum: { amount: true },
   });
   const paidAmount = allPayments._sum.amount || 0;
-  const studentFee = await prisma.studentFee.findUnique({ where: { id: payment.studentFeeId } });
+  const studentFee = await prisma.studentFee.findUnique({
+    where: { id: payment.studentFeeId },
+    include: { extraItems: { select: { amount: true } } },
+  });
+  const revertExtraSum = (studentFee as any)?.extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
+  const revertTotalDue = (studentFee?.netAmount || 0) + revertExtraSum;
   let status = 'UNPAID';
-  if (paidAmount > 0) status = paidAmount >= (studentFee?.netAmount || 0) ? 'PAID' : 'PARTIAL';
+  if (paidAmount > 0) status = paidAmount >= revertTotalDue ? 'PAID' : 'PARTIAL';
 
   await prisma.studentFee.update({
     where: { id: payment.studentFeeId },
