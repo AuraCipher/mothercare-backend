@@ -368,10 +368,10 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     include: { feeHead: { select: { name: true, category: true } } },
   });
 
-  // For ONE_TIME fee: check if this specific head was already charged
-  // by comparing structure creation date vs student's first fee record
+  // For ONE_TIME fee: check if this head was already charged by
+  // examining the feeHeadBreakdown of the student's existing fees.
   const oneTimeStructures = structures.filter(s => s.feeHead.category === 'ONE_TIME');
-  const studentFirstFeeCache = new Map<string, { createdAt: Date; totalAmount: number } | null>();
+  const oneTimeCache = new Map<string, Set<string>>();
 
   let generated = 0, skipped = 0, updated = 0;
   for (const student of students) {
@@ -379,16 +379,22 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     const skippedOneTimeIds = new Set<string>();
     for (const ots of oneTimeStructures) {
       if (ots.groupId === student.groupId) {
-        if (!studentFirstFeeCache.has(student.id)) {
-          const firstFee = await prisma.studentFee.findFirst({
+        if (!oneTimeCache.has(student.id)) {
+          // Fetch all existing fee records to check their breakdowns
+          const existingFees = await prisma.studentFee.findMany({
             where: { studentId: student.id, academicYearId: ayId },
-            orderBy: [{ year: 'asc' }, { month: 'asc' }],
-            select: { createdAt: true, totalAmount: true },
+            select: { feeHeadBreakdown: true },
           });
-          studentFirstFeeCache.set(student.id, firstFee);
+          const chargedHeads = new Set<string>();
+          for (const ef of existingFees) {
+            const bd = ef.feeHeadBreakdown as any[] || [];
+            for (const b of bd) chargedHeads.add(b.name);
+          }
+          oneTimeCache.set(student.id, chargedHeads);
         }
-        const firstFee = studentFirstFeeCache.get(student.id);
-        if (firstFee && ots.createdAt <= firstFee.createdAt) {
+        const chargedNames = oneTimeCache.get(student.id)!;
+        // Skip if this head's name already appears in an existing breakdown
+        if (chargedNames.has(ots.feeHead.name)) {
           skippedOneTimeIds.add(ots.id);
         }
       }
@@ -657,8 +663,8 @@ async function createReceiptSnapshot(
 // POST /admin/payments — Record single payment
 router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
   const { studentFeeId, amount, paymentMethod, reference, note } = req.body;
-  if (!studentFeeId || !amount || !paymentMethod) {
-    res.status(400).json({ success: false, message: 'studentFeeId, amount, paymentMethod required' });
+  if (!studentFeeId || !amount || amount <= 0 || !paymentMethod) {
+    res.status(400).json({ success: false, message: 'studentFeeId, amount (>0), and paymentMethod required' });
     return;
   }
   const userId = (req as any).user?.id;
@@ -799,9 +805,10 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
         }
 
         // 2. Re-validate total remaining against latest state
+        // Allow overpayments (excess creates OVERPAID status on last fee)
         const totalRemaining = freshFees.reduce((sum: number, f: any) => sum + getTotalDueFn(f), 0);
-        if (amount > totalRemaining) {
-          throw Object.assign(new Error(`Amount exceeds total remaining (${(totalRemaining / 100).toLocaleString()} PKR)`), { statusCode: 400 });
+        if (totalRemaining <= 0) {
+          throw Object.assign(new Error('All fees for this student are already paid'), { statusCode: 400 });
         }
 
         // 3. Allocate across fees

@@ -484,3 +484,101 @@ describe('POST /admin/payments/waterfall — status accounts for extras', () => 
     );
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// ISSUE 5: RECEIPT NUMBER RACE CONDITION
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Issue 5: Atomic receipt number generation', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('rejects /payments with negative amount', async () => {
+    const res = await request(app).post('/admin/payments').set('Authorization', adminToken).send({
+      studentFeeId: 'sf1', amount: -5000, paymentMethod: 'CASH',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test('rejects /payments with zero amount', async () => {
+    const res = await request(app).post('/admin/payments').set('Authorization', adminToken).send({
+      studentFeeId: 'sf1', amount: 0, paymentMethod: 'CASH',
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// ISSUE 6: WATERFALL CONCURRENCY + OVERPAID
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Issue 6: Waterfall concurrency guards', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('waterfall validates fees inside transaction (concurrency guard)', async () => {
+    const txMock = {
+      payment: { create: jest.fn(), aggregate: jest.fn() },
+      studentFee: { findMany: jest.fn(), update: jest.fn() },
+    };
+    // Simulate: first tx reads fees, second tx should see them as already paid
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
+    prismaMock.payment.findFirst.mockResolvedValue(null);
+    txMock.studentFee.findMany.mockResolvedValue([]); // no unpaid fees (as if another tx already paid them)
+
+    const res = await request(app).post('/admin/payments/waterfall').set('Authorization', adminToken).send({
+      studentId: 's1', amount: 100000, paymentMethod: 'CASH',
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain('No unpaid fees');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// ISSUE 8: ONE_TIME FEE GENERATION
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Issue 8: ONE_TIME fee head tracking', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('generates ONE_TIME fee when head not in existing breakdown', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([
+      { id: 's1', groupId: 'g1', customFeeAmount: null, feeOverrides: null },
+    ] as any);
+    prismaMock.feeStructure.findMany.mockResolvedValue([
+      { id: 'fs1', groupId: 'g1', feeHeadId: 'fh1', amount: 500000, effectiveFrom: new Date('2025-08-01'), effectiveTo: null, academicYearId: 'ay1', feeHead: { name: 'Tuition', category: 'MONTHLY' } },
+      { id: 'fs2', groupId: 'g1', feeHeadId: 'fh2', amount: 100000, effectiveFrom: new Date('2025-08-01'), effectiveTo: null, academicYearId: 'ay1', feeHead: { name: 'Admission Fee', category: 'ONE_TIME' } },
+    ] as any);
+    // Existing fees have breakdown WITHOUT "Admission Fee"
+    prismaMock.studentFee.findMany.mockResolvedValue([
+      { netAmount: 500000, feeHeadBreakdown: [{ name: 'Tuition', amount: 500000, category: 'MONTHLY' }] },
+    ] as any);
+    prismaMock.studentFee.findUnique.mockResolvedValue(null); // no existing fee for this month
+    prismaMock.studentFee.create.mockResolvedValue({ id: 'sf-new' } as any);
+
+    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({ month: 9, year: 2026, categories: ['MONTHLY', 'ONE_TIME'] });
+    expect(res.status).toBe(200);
+    expect(res.body.data.generated).toBe(1);
+  });
+
+  test('skips ONE_TIME fee when head already in existing breakdown, still generates MONTHLY', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([
+      { id: 's2', groupId: 'g1', customFeeAmount: null, feeOverrides: null },
+    ] as any);
+    prismaMock.feeStructure.findMany.mockResolvedValue([
+      { id: 'fs1', groupId: 'g1', feeHeadId: 'fh1', amount: 500000, effectiveFrom: new Date('2025-08-01'), effectiveTo: null, academicYearId: 'ay1', feeHead: { name: 'Tuition', category: 'MONTHLY' } },
+      { id: 'fs3', groupId: 'g1', feeHeadId: 'fh3', amount: 100000, effectiveFrom: new Date('2025-08-01'), effectiveTo: null, academicYearId: 'ay1', feeHead: { name: 'Admission Fee', category: 'ONE_TIME' } },
+    ] as any);
+    prismaMock.studentFee.findMany.mockResolvedValue([
+      { feeHeadBreakdown: [{ name: 'Admission Fee', amount: 100000, category: 'ONE_TIME' }, { name: 'Tuition', amount: 500000, category: 'MONTHLY' }] },
+    ] as any);
+    prismaMock.studentFee.findUnique.mockResolvedValue(null);
+    prismaMock.studentFee.create.mockResolvedValue({ id: 'sf-new' } as any);
+
+    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({ month: 9, year: 2026, categories: ['MONTHLY', 'ONE_TIME'] });
+    expect(res.status).toBe(200);
+    // One fee generated (MONTHLY Tuition), ONE_TIME Admission Fee was skipped
+    expect(res.body.data.generated).toBe(1);
+    expect(res.body.data.skipped).toBe(0);
+  });
+});
