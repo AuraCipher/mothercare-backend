@@ -292,24 +292,34 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
       const paidAmount = totalFees.reduce((sum, f) => sum + f.paidAmount, 0);
       const allPayments = totalFees.flatMap(f => f.payments);
 
-      // Effective month count: whichever is larger — this student's own
-      // generated records, or the school-wide period count (so missing
-      // months for THIS student still get counted at the override rate).
+      // Real generated records are always the source of truth — each one's
+      // netAmount already reflects whatever override applied at the time it
+      // was generated. Overrides/customFeeAmount are ONLY used to estimate
+      // months that haven't been generated yet at all. Previously this
+      // branch multiplied override-value × total-month-count regardless of
+      // whether real records existed, which silently discarded real,
+      // already-billed amounts in favor of a fabricated total — e.g. a
+      // student with a partial-head override (one fee head reduced/waived,
+      // not the whole month) would have real months priced at ~5,000 each
+      // collapse to a synthetic "0 or near-0 × month count" total, making
+      // fully real payments look like an overpayment against nothing owed.
+      const realNetAmount = totalFees.reduce((sum, f) => sum + f.netAmount, 0);
       const periodCount = Math.max(totalFees.length, expectedPeriodCount);
+      const missingMonths = Math.max(0, periodCount - totalFees.length);
 
-      // Compute effective net amount applying overrides for each month
-      let netAmount: number;
+      let perMonthEstimate = 0;
       const sOverrides = (s as any).feeOverrides as Record<string, number> | null;
       if (sOverrides && Object.keys(sOverrides).length > 0) {
-        // Override per-month value × effective month count
-        const perMonthAmt = Object.values(sOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
-        netAmount = perMonthAmt * periodCount;
+        perMonthEstimate = Object.values(sOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
       } else if ((s as any).customFeeAmount != null) {
-        // Custom fee per month × effective month count
-        netAmount = (s as any).customFeeAmount * periodCount;
-      } else {
-        netAmount = totalFees.reduce((sum, f) => sum + f.netAmount, 0);
+        perMonthEstimate = (s as any).customFeeAmount;
+      } else if (totalFees.length > 0) {
+        // No explicit override for the missing months — best estimate is
+        // the average of what this student's real generated months cost.
+        perMonthEstimate = realNetAmount / totalFees.length;
       }
+
+      const netAmount = realNetAmount + perMonthEstimate * missingMonths;
 
       const totalDue = netAmount + extraAmount;
       return {
@@ -328,14 +338,23 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
     }
     const mf = s.studentFees[0];
     const mfExtra = mf ? getExtra(mf) : 0;
-    // Check for per-student overrides (feeOverrides or customFeeAmount)
-    const sOverrides = (s as any).feeOverrides as Record<string, number> | null;
-    let effectiveNet = mf ? (mf.netAmount + mfExtra) : 0;
-    if (sOverrides && Object.keys(sOverrides).length > 0) {
-      // Sum up overrides to get effective amount, then add extra items
-      effectiveNet = Object.values(sOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0) + mfExtra;
-    } else if ((s as any).customFeeAmount != null) {
-      effectiveNet = (s as any).customFeeAmount + mfExtra;
+    // If a StudentFee record already exists for this month, it already
+    // reflects whatever override applied at generation time — trust it
+    // fully and never re-derive from feeOverrides/customFeeAmount here.
+    // Overrides are only an estimate for a month that hasn't been
+    // generated yet (mf is null), never a correction to a real record.
+    let effectiveNet: number;
+    if (mf) {
+      effectiveNet = mf.netAmount + mfExtra;
+    } else {
+      const sOverrides = (s as any).feeOverrides as Record<string, number> | null;
+      if (sOverrides && Object.keys(sOverrides).length > 0) {
+        effectiveNet = Object.values(sOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
+      } else if ((s as any).customFeeAmount != null) {
+        effectiveNet = (s as any).customFeeAmount;
+      } else {
+        effectiveNet = 0;
+      }
     }
     return {
       student: { ...s, studentFees: undefined, feeOverrides: undefined },
@@ -820,8 +839,13 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
   const balanceAfter = Math.max(0, totalDueBefore - amount);
 
   const monthLabel = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(studentFee.month || 1) - 1] + ' ' + (studentFee.year || '');
-  const heads = (studentFee.feeHeadBreakdown as any[]) || [];
-  const snapExtras = extraItems.map((e: any) => ({ name: e.name, amount: e.amount }));
+  // feeHeadBreakdown / extraItems store the field as "amount" (paise) —
+  // the receipt renderer (receipt.ts) reads "amountPaise". Normalize here
+  // at write time so every snapshot going forward is self-consistent,
+  // instead of relying on the frontend to know which raw DB shape it's
+  // looking at.
+  const heads = ((studentFee.feeHeadBreakdown as any[]) || []).map((h: any) => ({ name: h.name, amountPaise: h.amount || 0 }));
+  const snapExtras = extraItems.map((e: any) => ({ name: e.name, amountPaise: e.amount || 0 }));
 
   await createReceiptSnapshot(
     payment.id, receiptNumber,
@@ -986,8 +1010,8 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
   const monthLabel = latestPaidFee
     ? (['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(latestPaidFee.month || 1) - 1] + ' ' + (latestPaidFee.year || ''))
     : 'Waterfall Payment';
-  const cmHeads = (latestPaidFee?.feeHeadBreakdown as any[]) || [];
-  const cmExtras = latestPaidFee ? ((latestPaidFee as any).extraItems || []).map((e: any) => ({ name: e.name, amount: e.amount })) : [];
+  const cmHeads = ((latestPaidFee?.feeHeadBreakdown as any[]) || []).map((h: any) => ({ name: h.name, amountPaise: h.amount || 0 }));
+  const cmExtras = latestPaidFee ? ((latestPaidFee as any).extraItems || []).map((e: any) => ({ name: e.name, amountPaise: e.amount || 0 })) : [];
   const currentTotal = latestPaidFee ? (latestPaidFee.netAmount + ((latestPaidFee as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0)) : 0;
   const totalDueBefore = previousBalance + currentTotal;
   const balanceAfter = Math.max(0, totalDueBefore - amount);
@@ -1264,8 +1288,8 @@ router.post('/family-payments', asyncHandler(async (req: Request, res: Response)
       const fName = father?.parent?.user?.name || father?.parent?.phone || null;
       const sClass = [(sf.student as any)?.group?.name, (sf.student as any)?.group?.section].filter(Boolean).join(' — ') || '—';
       const mLabel = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(sf.month || 1) - 1] + ' ' + (sf.year || '');
-      const cHeads = (sf.feeHeadBreakdown as any[]) || [];
-      const cExtras = (sf.extraItems || []).map((e: any) => ({ name: e.name, amount: e.amount }));
+      const cHeads = ((sf.feeHeadBreakdown as any[]) || []).map((h: any) => ({ name: h.name, amountPaise: h.amount || 0 }));
+      const cExtras = (sf.extraItems || []).map((e: any) => ({ name: e.name, amountPaise: e.amount || 0 }));
       // Previous balance for this student: other unpaid fees
       const otherFees = await prisma.studentFee.findMany({
         where: { studentId: cp.studentId, id: { not: cp.studentFeeId } },
