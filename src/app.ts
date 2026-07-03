@@ -13,6 +13,7 @@ import branchAdminRoutes from './modules/admin/routes/branch-admin.routes';
 import uploadRoutes from './modules/upload/upload.routes';
 import errorHandler from './middleware/error/errorHandler';
 import requestLogger from './middleware/logging/requestLogger';
+import { auditContextMiddleware } from './middleware/auth/auditContext.middleware';
 import env from './config/env';
 
 const app = express();
@@ -65,6 +66,12 @@ app.use(cookieParser());
 
 // ─── Request / Response Logger (development only) ──────────────
 app.use(requestLogger);
+
+// ─── Global Audit Context ───────────────────────────────────────
+// Captures req reference for every request. logAudit() reads userId
+// from req.user lazily at call time, so this works regardless of
+// where auth middleware is mounted in sub-routers.
+app.use(auditContextMiddleware);
 
 // ─── Admin HTML Pages (served from src/admin/) ──────────────
 // Resolve relative to this file so it works in both dev (src/) and

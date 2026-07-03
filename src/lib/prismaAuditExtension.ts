@@ -46,11 +46,12 @@ export function createAuditExtension(prisma: PrismaClient) {
         async create({ model, args, query }) {
           if (AUDITED_MODELS.has(model)) {
             const ctx = auditContextStorage.getStore();
-            if (ctx?.userId) {
+            const userId = ctx?.req ? (ctx.req as any).user?.id : undefined;
+            if (userId) {
               // TypeScript doesn't know the shape of args.data for an arbitrary model,
               // but Prisma accepts unknown key-value pairs gracefully here.
-              (args.data as Record<string, unknown>).createdById = ctx.userId;
-              (args.data as Record<string, unknown>).updatedById = ctx.userId;
+              (args.data as Record<string, unknown>).createdById = userId;
+              (args.data as Record<string, unknown>).updatedById = userId;
             }
           }
           return query(args);
@@ -59,8 +60,9 @@ export function createAuditExtension(prisma: PrismaClient) {
         async update({ model, args, query }) {
           if (AUDITED_MODELS.has(model)) {
             const ctx = auditContextStorage.getStore();
-            if (ctx?.userId) {
-              (args.data as Record<string, unknown>).updatedById = ctx.userId;
+            const userId = ctx?.req ? (ctx.req as any).user?.id : undefined;
+            if (userId) {
+              (args.data as Record<string, unknown>).updatedById = userId;
             }
           }
           return query(args);

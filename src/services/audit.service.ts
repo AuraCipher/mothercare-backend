@@ -31,11 +31,21 @@ export type LogAuditParams = {
  */
 export async function logAudit(params: LogAuditParams): Promise<void> {
   const ctx = auditContextStorage.getStore();
+  const req = ctx?.req;
+
+  // Read userId/IP/userAgent lazily from the stored Request object.
+  // This is safe even when auditContextMiddleware ran BEFORE auth middleware —
+  // by the time logAudit() is called, auth has already populated req.user.
+  // When no auth context is available (background job, script), userId stays null
+  // and the DB stores NULL — the FK is nullable with ON DELETE SET NULL.
+  const userId: string | null = req ? ((req as any).user?.id ?? null) : null;
+  const ipAddress: string = req?.ip ?? req?.socket?.remoteAddress ?? '';
+  const userAgent: string = (req?.headers?.['user-agent'] as string) ?? '';
 
   try {
     await prisma.auditLog.create({
       data: {
-        userId: ctx?.userId ?? 'SYSTEM',
+        userId,
         action: params.action,
         module: params.module,
         entity: params.entityType,
@@ -43,8 +53,8 @@ export async function logAudit(params: LogAuditParams): Promise<void> {
         oldValue: (params.oldValue ?? undefined) as any,
         newValue: (params.newValue ?? undefined) as any,
         metadata: (params.metadata ?? undefined) as any,
-        ipAddress: ctx?.ipAddress,
-        userAgent: ctx?.userAgent,
+        ipAddress,
+        userAgent,
       },
     });
   } catch (error) {
