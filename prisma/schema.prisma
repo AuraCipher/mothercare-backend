@@ -1092,7 +1092,7 @@ model PasswordResetToken {
 
 model AuditLog {
   id        String   @id @default(uuid())
-  userId    String
+  userId    String?  // nullable — system events and deleted-user scenarios must never break the audit trail
   action    String
   entity    String
   entityId  String?
@@ -1104,7 +1104,7 @@ model AuditLog {
   module    String   @default("system")
   createdAt DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id])
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   updatedAt DateTime @updatedAt
 
