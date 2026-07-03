@@ -1489,6 +1489,11 @@ model PaymentReceipt {
   previousBalancePaise Int // sum of what was due from earlier months
   previousMonthsCount  Int // how many months in the previous balance
 
+  // Per-month allocation breakdown for waterfall/family payments that span
+  // multiple months in one transaction — [{label:"Jun 2026", amountPaise:50000}, ...]
+  // Null/empty for single-fee payments (currentMonth section covers it alone).
+  allocations Json?
+
   // Summary
   totalDuePaise     Int    // currentMonthTotal + previousBalancePaise
   amountPaidPaise   Int    // what this payment covered

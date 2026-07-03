@@ -260,6 +260,30 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
   });
 
   const getExtra = (f: any) => (f.extraItems || []).reduce((s: number, e: any) => s + e.amount, 0);
+
+  // For Full AY: how many fee periods (months) should exist this year, so
+  // overridden/custom-fee students aren't undercounted for months that
+  // were never generated for them specifically. Use the count of distinct
+  // (month, year) periods that have been opened for ANY student this
+  // academic year as the proxy for "periods that should apply" — this
+  // covers a student whose own records lag behind a school-wide generate
+  // run (the actual bug: previously this just used `totalFees.length`,
+  // which only counts records that already exist for THAT student, so a
+  // concession student missing 4 of 10 months still showed only 6 months
+  // of dues).
+  let expectedPeriodCount = 0;
+  if (isFull) {
+    const activeAy = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } });
+    if (activeAy) {
+      const periods = await prisma.studentFee.findMany({
+        where: { academicYearId: activeAy.id },
+        select: { month: true, year: true },
+        distinct: ['month', 'year'],
+      });
+      expectedPeriodCount = periods.length;
+    }
+  }
+
   const data = students.map(s => {
     if (isFull) {
       // Aggregate all months for full AY view
@@ -268,16 +292,21 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
       const paidAmount = totalFees.reduce((sum, f) => sum + f.paidAmount, 0);
       const allPayments = totalFees.flatMap(f => f.payments);
 
+      // Effective month count: whichever is larger — this student's own
+      // generated records, or the school-wide period count (so missing
+      // months for THIS student still get counted at the override rate).
+      const periodCount = Math.max(totalFees.length, expectedPeriodCount);
+
       // Compute effective net amount applying overrides for each month
       let netAmount: number;
       const sOverrides = (s as any).feeOverrides as Record<string, number> | null;
       if (sOverrides && Object.keys(sOverrides).length > 0) {
-        // Override per-month value × months with generated fees
+        // Override per-month value × effective month count
         const perMonthAmt = Object.values(sOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
-        netAmount = perMonthAmt * totalFees.length;
+        netAmount = perMonthAmt * periodCount;
       } else if ((s as any).customFeeAmount != null) {
-        // Custom fee per month × months with generated fees
-        netAmount = (s as any).customFeeAmount * totalFees.length;
+        // Custom fee per month × effective month count
+        netAmount = (s as any).customFeeAmount * periodCount;
       } else {
         netAmount = totalFees.reduce((sum, f) => sum + f.netAmount, 0);
       }
@@ -289,7 +318,9 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
         id: 'full-ay-' + s.id,
         netAmount: totalDue,
         paidAmount,
-        status: paidAmount >= totalDue ? 'PAID' : paidAmount > 0 ? 'PARTIAL' : totalDue > 0 ? 'UNPAID' : 'NO_FEE',
+        status: paidAmount >= totalDue
+          ? (paidAmount > totalDue ? 'OVERPAID' : 'PAID')
+          : paidAmount > 0 ? 'PARTIAL' : totalDue > 0 ? 'UNPAID' : 'NO_FEE',
         payments: allPayments,
         _monthCount: totalFees.length,
         _extraAmount: extraAmount,
@@ -312,7 +343,9 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
       id: mf?.id || s.id,
       netAmount: effectiveNet,
       paidAmount: mf?.paidAmount || 0,
-      status: mf?.paidAmount >= effectiveNet ? 'PAID' : mf?.paidAmount > 0 ? 'PARTIAL' : effectiveNet > 0 ? 'UNPAID' : 'NO_FEE',
+      status: (mf?.paidAmount ?? 0) >= effectiveNet
+        ? ((mf?.paidAmount ?? 0) > effectiveNet ? 'OVERPAID' : 'PAID')
+        : (mf?.paidAmount ?? 0) > 0 ? 'PARTIAL' : effectiveNet > 0 ? 'UNPAID' : 'NO_FEE',
       payments: mf?.payments || [],
       _extraAmount: mfExtra,
     };
@@ -588,13 +621,31 @@ async function generateReceiptNumber(
 ): Promise<{ result: any; receiptNumber: string }> {
   const now = new Date();
   const yymm = now.getFullYear().toString() + String(now.getMonth() + 1).padStart(2, '0');
+  // Matches the base sequence number regardless of a trailing "-N" allocation
+  // suffix (waterfall/family payments store "RCP-202607-0100-2" etc — the
+  // last 4 *characters* of that string are NOT the sequence number, so a
+  // naive slice(-4) silently resets the counter after every multi-month
+  // payment. Anchor on the fixed-width 4-digit group right after yymm.
+  const seqPattern = new RegExp(`^${prefix}-${yymm}-(\\d{4})(?:-\\d+)?$`);
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const last = await prisma.payment.findFirst({
+    // Pull the highest existing sequence by scanning candidates for this
+    // month (capped — receipt volume per month is in the hundreds, not
+    // thousands) since the base number can be "buried" under suffixed rows
+    // when sorted as plain strings.
+    const candidates = await prisma.payment.findMany({
       where: { receiptNumber: { startsWith: `${prefix}-${yymm}` } },
-      orderBy: { receiptNumber: 'desc' },
       select: { receiptNumber: true },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
     });
-    const lastSeq = last ? parseInt(last.receiptNumber.slice(-4), 10) || 0 : 0;
+    let lastSeq = 0;
+    for (const c of candidates) {
+      const m = c.receiptNumber.match(seqPattern);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > lastSeq) lastSeq = n;
+      }
+    }
     const rn = `${prefix}-${yymm}-${String(lastSeq + 1).padStart(4, '0')}`;
     try {
       const result = await createFn(rn);
@@ -633,6 +684,10 @@ async function createReceiptSnapshot(
     studentRoll: string | null;
     fatherName: string | null;
     isFullyPaid: boolean;
+    /** Per-month breakdown for waterfall/family payments spanning multiple
+     * months in one transaction. Omitted (or single-entry) for a plain
+     * single-fee payment. */
+    allocations?: { label: string; amountPaise: number }[];
   },
   userId: string,
 ) {
@@ -646,6 +701,7 @@ async function createReceiptSnapshot(
       currentMonthExtras: input.currentMonthExtras,
       previousBalancePaise: input.previousBalancePaise,
       previousMonthsCount: input.previousMonthsCount,
+      allocations: input.allocations && input.allocations.length > 0 ? input.allocations : undefined,
       totalDuePaise: input.totalDuePaise,
       amountPaidPaise: input.amountPaidPaise,
       balanceAfterPaise: input.balanceAfterPaise,
@@ -696,14 +752,19 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
 
   // Atomic receipt number generation + payment creation + fee update
   const { result: payment, receiptNumber } = await generateReceiptNumber(async (rn) => {
-    // Re-read fee inside the retry callback so we see the latest state
-    const freshFee = await prisma.studentFee.findUnique({
-      where: { id: studentFeeId },
-      select: { netAmount: true, paidAmount: true },
-    });
-    if (!freshFee) throw new Error('Student fee not found during payment');
-
     return prisma.$transaction(async (tx) => {
+      // Lock the row for the duration of the transaction (SELECT ... FOR UPDATE).
+      // Without this, two concurrent payments against the same fee can both
+      // read paidAmount=0 before either commits, and the second UPDATE
+      // silently clobbers the first (lost update) even though both ran
+      // inside their own transaction — read-committed isolation alone does
+      // not protect against this for a read-then-compute-then-write pattern.
+      const locked = await tx.$queryRaw<{ netAmount: number; paidAmount: number }[]>`
+        SELECT "netAmount", "paidAmount" FROM "student_fees" WHERE "id" = ${studentFeeId} FOR UPDATE
+      `;
+      const freshFee = locked[0];
+      if (!freshFee) throw new Error('Student fee not found during payment');
+
       // Create payment
       const p = await tx.payment.create({
         data: {
@@ -807,9 +868,27 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
   try {
     const result = await generateReceiptNumber(async (receiptBase) => {
       return prisma.$transaction(async (tx) => {
-        // 1. Re-read fees INSIDE the transaction (sees latest committed state — concurrency guard)
+        // Lock every UNPAID/PARTIAL fee row for this student up front (SELECT
+        // ... FOR UPDATE) before reading amounts. Without this, two
+        // concurrent waterfall payments against the same student can both
+        // read the same paidAmount/status snapshot before either commits,
+        // and the later transaction's UPDATE overwrites the earlier one's
+        // committed write (lost update) even though both run inside their
+        // own transaction — Postgres's default READ COMMITTED isolation
+        // does not protect a read-then-compute-then-write pattern by itself.
+        const lockedIds = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id FROM "student_fees"
+          WHERE "studentId" = ${studentId} AND status IN ('UNPAID', 'PARTIAL')
+          FOR UPDATE
+        `;
+        if (lockedIds.length === 0) {
+          throw Object.assign(new Error('No unpaid fees found for this student'), { statusCode: 400 });
+        }
+
+        // 1. Re-read fees INSIDE the transaction (now guaranteed to reflect
+        // the latest committed state, since the rows above are locked)
         const freshFees = await tx.studentFee.findMany({
-          where: { studentId, status: { in: ['UNPAID', 'PARTIAL'] } },
+          where: { id: { in: lockedIds.map(r => r.id) } },
           include: { extraItems: true },
           orderBy: [{ year: 'asc' }, { month: 'asc' }],
         });
@@ -913,6 +992,19 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
   const totalDueBefore = previousBalance + currentTotal;
   const balanceAfter = Math.max(0, totalDueBefore - amount);
 
+  // Per-month allocation breakdown for the snapshot — this is what was lost
+  // when the snapshot only stored the latest month's total. Build it from
+  // the actual Payment rows created in this transaction, keyed back to
+  // their fee's month/year label.
+  const feeById = new Map(allFees.map((f: any) => [f.id, f]));
+  const allocationLabels = allocations.map((a: any) => {
+    const f = feeById.get(a.studentFeeId);
+    const label = f
+      ? (['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(f.month || 1) - 1] + ' ' + (f.year || ''))
+      : 'Allocation';
+    return { label, amountPaise: a.amount };
+  });
+
   try {
     await createReceiptSnapshot(
       allocations[0]?.id || 'unknown', receiptNumber,
@@ -923,6 +1015,7 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
         currentMonthExtras: cmExtras,
         previousBalancePaise: previousBalance,
         previousMonthsCount: prevMonths,
+        allocations: allocationLabels,
         totalDuePaise: totalDueBefore,
         balanceAfterPaise: balanceAfter,
         paymentMethod: paymentMethod || 'CASH',
