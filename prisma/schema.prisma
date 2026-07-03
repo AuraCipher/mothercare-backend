@@ -1098,6 +1098,7 @@ model AuditLog {
   entityId  String?
   oldValue  Json?
   newValue  Json?
+  metadata  Json?
   ipAddress String?
   userAgent String?
   module    String   @default("system")
