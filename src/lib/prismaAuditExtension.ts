@@ -9,18 +9,23 @@ import { auditContextStorage } from '../middleware/auth/auditContext.middleware'
  * This is LOW-STAKES supplementary metadata — it does NOT replace explicit
  * logAudit() calls for the proper audit trail. See Decisions.md for rationale.
  */
+/**
+ * Models confirmed to have both `createdById` and `updatedById` scalar fields.
+ *
+ * To add a model: verify the Prisma schema has both fields, then add it here.
+ * ⚠️ Adding a model WITHOUT these fields will cause a Prisma runtime error
+ *    ("Unknown argument `createdById`") on every create/update.
+ *
+ * Skipped / pending:
+ *   FeeHead, FeeStructure, StudentFee, Payment, Announcement, Message
+ *   — these models don't yet have createdById/updatedById fields.
+ */
 const AUDITED_MODELS = new Set([
   'Student',
   'TeacherProfile',
   'Group',
   'Subject',
-  'FeeHead',
-  'FeeStructure',
-  'StudentFee',
-  'Payment',
   'Enrollment',
-  'Announcement',
-  'Message',
   'Timetable',
   'TimetableSlot',
   'TimetableEntry',

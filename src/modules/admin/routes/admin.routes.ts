@@ -274,6 +274,7 @@ export default router;
 
 // Mount /me with its own auth (no admin role requirement)
 meRouter.use(auth);
+meRouter.use(auditContextMiddleware);
 meRouter.use(meRoutes);
 
 export { meRouter };

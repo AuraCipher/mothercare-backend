@@ -42,14 +42,9 @@ export async function logAudit(params: LogAuditParams): Promise<void> {
         entityId: params.entityId,
         oldValue: (params.oldValue ?? undefined) as any,
         newValue: (params.newValue ?? undefined) as any,
+        metadata: (params.metadata ?? undefined) as any,
         ipAddress: ctx?.ipAddress,
         userAgent: ctx?.userAgent,
-        // Store business context metadata alongside the structured diff
-        ...(params.metadata && {
-          oldValue: params.oldValue
-            ? { ...params.oldValue, _meta: params.metadata }
-            : { _meta: params.metadata },
-        }),
       },
     });
   } catch (error) {
