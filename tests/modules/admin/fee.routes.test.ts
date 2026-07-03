@@ -181,10 +181,13 @@ describe('POST /admin/payments/waterfall', () => {
     const txMock = {
       payment: { create: jest.fn(), aggregate: jest.fn() },
       studentFee: { findMany: jest.fn(), update: jest.fn() },
+      $queryRaw: jest.fn(),
     };
     prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
-    // generateReceiptNumber calls payment.findFirst to get last receipt
-    prismaMock.payment.findFirst.mockResolvedValue(null); // no prior receipts
+    // generateReceiptNumber scans recent receipts for this month (findMany, not findFirst)
+    prismaMock.payment.findMany.mockResolvedValue([]); // no prior receipts
+    // Row-lock query runs first inside the tx, returning the ids to fetch
+    txMock.$queryRaw.mockResolvedValue([{ id: 'sf1' }, { id: 'sf2' }] as any);
     // Inside the tx, fees are read fresh
     txMock.studentFee.findMany.mockResolvedValue([
       { id: 'sf1', studentId: 's1', netAmount: 300000, paidAmount: 0, extraItems: [], month: 4, year: 2026 },
@@ -427,9 +430,11 @@ describe('POST /admin/payments/waterfall — status accounts for extras', () => 
     const txMock = {
       payment: { create: jest.fn(), aggregate: jest.fn() },
       studentFee: { findMany: jest.fn(), update: jest.fn() },
+      $queryRaw: jest.fn(),
     };
     prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
-    prismaMock.payment.findFirst.mockResolvedValue(null);
+    prismaMock.payment.findMany.mockResolvedValue([]);
+    txMock.$queryRaw.mockResolvedValue([{ id: 'sf1' }, { id: 'sf2' }] as any);
     txMock.studentFee.findMany.mockResolvedValue([
       { id: 'sf1', studentId: 's1', netAmount: 400000, paidAmount: 0, extraItems: [{ amount: 50000 }], month: 4, year: 2026 },
       { id: 'sf2', studentId: 's1', netAmount: 300000, paidAmount: 0, extraItems: [], month: 5, year: 2026 },
@@ -458,9 +463,11 @@ describe('POST /admin/payments/waterfall — status accounts for extras', () => 
     const txMock = {
       payment: { create: jest.fn(), aggregate: jest.fn() },
       studentFee: { findMany: jest.fn(), update: jest.fn() },
+      $queryRaw: jest.fn(),
     };
     prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
-    prismaMock.payment.findFirst.mockResolvedValue(null);
+    prismaMock.payment.findMany.mockResolvedValue([]);
+    txMock.$queryRaw.mockResolvedValue([{ id: 'sf1' }] as any);
     txMock.studentFee.findMany.mockResolvedValue([
       { id: 'sf1', studentId: 's1', netAmount: 400000, paidAmount: 0, extraItems: [{ amount: 100000 }], month: 4, year: 2026 },
     ] as any);
@@ -518,11 +525,13 @@ describe('Issue 6: Waterfall concurrency guards', () => {
     const txMock = {
       payment: { create: jest.fn(), aggregate: jest.fn() },
       studentFee: { findMany: jest.fn(), update: jest.fn() },
+      $queryRaw: jest.fn(),
     };
     // Simulate: first tx reads fees, second tx should see them as already paid
     prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
-    prismaMock.payment.findFirst.mockResolvedValue(null);
-    txMock.studentFee.findMany.mockResolvedValue([]); // no unpaid fees (as if another tx already paid them)
+    prismaMock.payment.findMany.mockResolvedValue([]);
+    txMock.$queryRaw.mockResolvedValue([]); // lock query finds no unpaid rows (already paid by another tx)
+    txMock.studentFee.findMany.mockResolvedValue([]); // no unpaid fees
 
     const res = await request(app).post('/admin/payments/waterfall').set('Authorization', adminToken).send({
       studentId: 's1', amount: 100000, paymentMethod: 'CASH',
