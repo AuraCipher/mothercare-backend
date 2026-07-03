@@ -1099,16 +1099,18 @@ model AuditLog {
   oldValue  Json?
   newValue  Json?
   ipAddress String?
+  userAgent String?
+  module    String   @default("system")
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
   @@index([userId, createdAt])
   @@index([entity, entityId])
+  @@index([module, entity, entityId])
   @@map("audit_logs")
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
