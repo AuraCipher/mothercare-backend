@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import auth from '../../../middleware/auth/auth.middleware';
 import { roleMiddleware } from '../../../middleware/auth/role.middleware';
 import { branchScopeMiddleware } from '../../../middleware/auth/branch-scope.middleware';
+import { auditContextMiddleware } from '../../../middleware/auth/auditContext.middleware';
 import branchRoutes from './branch.routes';
 import branchMemberRoutes from './branch-member.routes';
 import calendarRoutes from './academic-calendar.routes';
@@ -24,6 +25,9 @@ router.use(roleMiddleware(['super_admin', 'management']));
 
 // Branch scope enforcement on all admin routes
 router.use(branchScopeMiddleware);
+
+// Audit context captures userId / IP / userAgent for every admin request
+router.use(auditContextMiddleware);
 
 // ═══════════════════════════════════════════════════════════════════
 // Phase 02: Branch + Academic Year System Routes

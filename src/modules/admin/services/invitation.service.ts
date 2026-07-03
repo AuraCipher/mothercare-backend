@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import type { Prisma } from '@prisma/client';
-import { prisma } from '../../../lib/prisma';
+import { basePrisma as prisma } from '../../../lib/prisma';
 import env from '../../../config/env';
 
 const INVITATION_EXPIRY_DAYS = 7;
