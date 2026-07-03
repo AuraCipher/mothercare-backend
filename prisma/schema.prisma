@@ -1568,6 +1568,7 @@ model FeeHead {
   updatedAt   DateTime @updatedAt
 
   structures FeeStructure[]
+  headAllocations PaymentHeadAllocation[]
 
   @@map("fee_heads")
 }
@@ -1635,6 +1636,7 @@ model StudentFee {
   group        Group?       @relation(fields: [groupId], references: [id])
   payments     Payment[]
   extraItems   FeeExtraItem[]
+  headAllocations PaymentHeadAllocation[]
 
   @@unique([studentId, month, year])
   @@index([month, year, status])
@@ -1694,6 +1696,7 @@ model Payment {
   familyPayment FamilyPayment? @relation(fields: [familyPaymentId], references: [id])
   receipt      PaymentReceipt?  // One immutable receipt per payment
   auditLogs    PaymentAuditLog[]
+  headAllocations PaymentHeadAllocation[]
 
   recordedBy    User           @relation("PaymentRecordedBy", fields: [recordedById], references: [id])
   revertedBy    User?          @relation("PaymentRevertedBy", fields: [revertedById], references: [id])
@@ -1704,6 +1707,37 @@ model Payment {
   @@index([studentId])
   @@map("payments")
 }
+
+// ─── Payment Head Allocation ────────────────────────────────────────
+// Head/extra-level split of a single Payment, for the manual allocation
+// flow (Step 1 UI: accountant selects specific fee heads and extras
+// within the current month, plus whole previous months). Only current-
+// month payments get rows here — previous months stay whole, never split
+// by head, matching the UI (previous months have no sub-cat checkboxes).
+// Exactly one of feeHeadId / feeExtraItemId is set per row, never both,
+// never neither.
+model PaymentHeadAllocation {
+  id             String    @id @default(uuid())
+  paymentId      String
+  studentFeeId   String
+  feeHeadId      String?
+  feeExtraItemId String?
+  amount         Int       // in paise
+  revertedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  payment      Payment      @relation(fields: [paymentId], references: [id])
+  studentFee   StudentFee   @relation(fields: [studentFeeId], references: [id])
+  feeHead      FeeHead?     @relation(fields: [feeHeadId], references: [id])
+  feeExtraItem FeeExtraItem? @relation(fields: [feeExtraItemId], references: [id])
+
+  @@index([paymentId])
+  @@index([studentFeeId])
+  @@index([feeHeadId])
+  @@index([feeExtraItemId])
+  @@map("payment_head_allocations")
+}
+
 
 // ─── Receipt Snapshot ───────────────────────────────────────────────
 // Stores exactly what was shown on the receipt at payment time.
