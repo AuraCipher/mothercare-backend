@@ -14,6 +14,7 @@ import timetableRoutes from './timetable.routes';
 import attendanceRoutes from './attendance.routes';
 import studentRoutes from './student.routes';
 import feeRoutes from './fee.routes';
+import examTypeRoutes from './exam-type.routes';
 
 const router = Router();
 const meRouter = Router();
@@ -45,6 +46,7 @@ router.use(timetableRoutes); // Contains /branches/:branchId/academic-years/:ayI
 router.use(attendanceRoutes); // Contains /attendance, /attendance/batch
 router.use(feeRoutes); // Contains /fee-heads, /fee-structures, /student-fees, /payments, /families, /fees/*
 router.use(studentRoutes); // Contains /students, /students/:id, /students/:id/emergency-contact, etc.
+router.use(examTypeRoutes); // Contains /exam-types — dynamic ExamType tag manager
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
