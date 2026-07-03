@@ -176,19 +176,16 @@ CREATE INDEX "exams_examSessionId_idx" ON "exams"("examSessionId");
 CREATE INDEX "exams_examTypeId_idx" ON "exams"("examTypeId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "exam_classes_examId_classId_key" ON "exam_classes"("examId", "classId");
-
--- CreateIndex
 CREATE INDEX "exam_classes_classId_idx" ON "exam_classes"("classId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "exam_class_subjects_examClassId_subjectId_key" ON "exam_class_subjects"("examClassId", "subjectId");
+CREATE UNIQUE INDEX "exam_classes_examId_classId_key" ON "exam_classes"("examId", "classId");
 
 -- CreateIndex
 CREATE INDEX "exam_class_subjects_subjectId_idx" ON "exam_class_subjects"("subjectId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "marks_entries_examClassSubjectId_studentId_key" ON "marks_entries"("examClassSubjectId", "studentId");
+CREATE UNIQUE INDEX "exam_class_subjects_examClassId_subjectId_key" ON "exam_class_subjects"("examClassId", "subjectId");
 
 -- CreateIndex
 CREATE INDEX "marks_entries_studentId_idx" ON "marks_entries"("studentId");
@@ -197,10 +194,10 @@ CREATE INDEX "marks_entries_studentId_idx" ON "marks_entries"("studentId");
 CREATE INDEX "marks_entries_enteredBy_idx" ON "marks_entries"("enteredBy");
 
 -- CreateIndex
-CREATE INDEX "grade_bands_gradeScaleId_idx" ON "grade_bands"("gradeScaleId");
+CREATE UNIQUE INDEX "marks_entries_examClassSubjectId_studentId_key" ON "marks_entries"("examClassSubjectId", "studentId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "subject_results_studentId_examSessionId_subjectId_key" ON "subject_results"("studentId", "examSessionId", "subjectId");
+CREATE INDEX "grade_bands_gradeScaleId_idx" ON "grade_bands"("gradeScaleId");
 
 -- CreateIndex
 CREATE INDEX "subject_results_examSessionId_idx" ON "subject_results"("examSessionId");
@@ -209,10 +206,13 @@ CREATE INDEX "subject_results_examSessionId_idx" ON "subject_results"("examSessi
 CREATE INDEX "subject_results_subjectId_idx" ON "subject_results"("subjectId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "report_cards_studentId_examSessionId_key" ON "report_cards"("studentId", "examSessionId");
+CREATE UNIQUE INDEX "subject_results_studentId_examSessionId_subjectId_key" ON "subject_results"("studentId", "examSessionId", "subjectId");
 
 -- CreateIndex
 CREATE INDEX "report_cards_examSessionId_idx" ON "report_cards"("examSessionId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "report_cards_studentId_examSessionId_key" ON "report_cards"("studentId", "examSessionId");
 
 -- AddForeignKey
 ALTER TABLE "exam_sessions" ADD CONSTRAINT "exam_sessions_academicYearId_fkey" FOREIGN KEY ("academicYearId") REFERENCES "academic_years"("id") ON DELETE CASCADE ON UPDATE CASCADE;
