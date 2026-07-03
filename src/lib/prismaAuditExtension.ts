@@ -29,6 +29,17 @@ const AUDITED_MODELS = new Set([
   'Timetable',
   'TimetableSlot',
   'TimetableEntry',
+  // Exam & Grades module
+  'ExamSession',
+  'ExamType',
+  'Exam',
+  'ExamClass',
+  'ExamClassSubject',
+  'MarksEntry',
+  'GradeScale',
+  'GradeBand',
+  'SubjectResult',
+  'ReportCard',
 ]);
 
 /**

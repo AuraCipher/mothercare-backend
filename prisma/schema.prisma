@@ -77,6 +77,16 @@ enum ApiKeyType {
   secret // Admin: bypass login, full CRUD
 }
 
+enum ExamStatus {
+  DRAFT
+  ACTIVE
+}
+
+enum ReportCardStatus {
+  DRAFT
+  PUBLISHED
+}
+
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║                           USERS                                 ║
 // ║  All credentials created by admin. No signup / forgot password. ║
@@ -143,6 +153,7 @@ model User {
   recordedPayments          Payment[]         @relation("PaymentRecordedBy")
   revertedPayments          Payment[]         @relation("PaymentRevertedBy")
   recordedFamilyPayments    FamilyPayment[]
+  enteredMarks              MarksEntry[]      @relation("MarksEnteredBy")
 
   @@index([username])
   @@index([email])
@@ -297,6 +308,7 @@ model AcademicYear {
   timetables         Timetable[]
   attendances        Attendance[]
   teacherAttendances TeacherAttendance[]
+  examSessions       ExamSession[]
 
   createdById     String?
   updatedById     String?
@@ -393,6 +405,7 @@ model Group {
   teacherAssignments TeacherAssignment[]
   enrollments        Enrollment[]
   timetableEntries   TimetableEntry[]
+  examClasses        ExamClass[]
 
   createdById     String?
   updatedById     String?
@@ -451,6 +464,8 @@ model Subject {
   groupSubjects      GroupSubject[]
   teacherAssignments TeacherAssignment[]
   timetableEntries   TimetableEntry[]
+  examClassSubjects  ExamClassSubject[]
+  subjectResults     SubjectResult[]
   hod                User?               @relation("SubjectHOD", fields: [hodId], references: [id])
 
   updatedAt       DateTime      @updatedAt
@@ -691,6 +706,9 @@ model Student {
   attendances       Attendance[]
   studentFees       StudentFee[]
   feePayments       Payment[]     @relation("PaymentStudent")
+  examMarks         MarksEntry[]
+  subjectResults    SubjectResult[]
+  reportCards       ReportCard[]
 
   @@index([groupId])
   @@index([familyId])
@@ -1084,6 +1102,219 @@ model PasswordResetToken {
   @@index([token])
   @@map("password_reset_tokens")
 
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    EXAM & GRADES MODULE                         ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model ExamType {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  defaultWeight Float?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  createdById String?
+  updatedById String?
+
+  exams Exam[]
+
+  @@map("exam_types")
+}
+
+model ExamSession {
+  id              String   @id @default(uuid())
+  name            String
+  academicYearId  String
+  startDate       DateTime
+  endDate         DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  createdById String?
+  updatedById String?
+
+  academicYear AcademicYear  @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  exams        Exam[]
+  subjectResults SubjectResult[]
+  reportCards    ReportCard[]
+
+  @@index([academicYearId])
+  @@map("exam_sessions")
+}
+
+model Exam {
+  id              String     @id @default(uuid())
+  examSessionId   String
+  examTypeId      String
+  name            String
+  weightOverride  Float?
+  startDate       DateTime
+  endDate         DateTime?
+  status          ExamStatus @default(DRAFT)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  createdById String?
+  updatedById String?
+
+  examSession ExamSession @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
+  examType    ExamType    @relation(fields: [examTypeId], references: [id])
+  examClasses ExamClass[]
+
+  @@index([examSessionId])
+  @@index([examTypeId])
+  @@map("exams")
+}
+
+model ExamClass {
+  id        String  @id @default(uuid())
+  examId    String
+  classId   String
+  isActive  Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdById String?
+  updatedById String?
+
+  exam      Exam                @relation(fields: [examId], references: [id], onDelete: Cascade)
+  class     Group               @relation(fields: [classId], references: [id])
+  subjects  ExamClassSubject[]
+
+  @@unique([examId, classId])
+  @@index([classId])
+  @@map("exam_classes")
+}
+
+model ExamClassSubject {
+  id            String  @id @default(uuid())
+  examClassId   String
+  subjectId     String
+  isActive      Boolean @default(true)
+  totalMarks    Int?
+  passingMarks  Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  createdById String?
+  updatedById String?
+
+  examClass    ExamClass    @relation(fields: [examClassId], references: [id], onDelete: Cascade)
+  subject      Subject      @relation(fields: [subjectId], references: [id])
+  marksEntries MarksEntry[]
+
+  @@unique([examClassId, subjectId])
+  @@index([subjectId])
+  @@map("exam_class_subjects")
+}
+
+model MarksEntry {
+  id                  String   @id @default(uuid())
+  examClassSubjectId  String
+  studentId           String
+  marksObtained       Float?
+  isAbsent            Boolean  @default(false)
+  enteredBy           String
+  enteredAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  createdById String?
+  updatedById String?
+
+  examClassSubject ExamClassSubject @relation(fields: [examClassSubjectId], references: [id], onDelete: Cascade)
+  student          Student          @relation(fields: [studentId], references: [id])
+  enteredByUser    User             @relation("MarksEnteredBy", fields: [enteredBy], references: [id], onDelete: SetNull)
+
+  @@unique([examClassSubjectId, studentId])
+  @@index([studentId])
+  @@index([enteredBy])
+  @@map("marks_entries")
+}
+
+model GradeScale {
+  id        String  @id @default(uuid())
+  name      String
+  isDefault Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdById String?
+  updatedById String?
+
+  bands GradeBand[]
+
+  @@map("grade_scales")
+}
+
+model GradeBand {
+  id           String  @id @default(uuid())
+  gradeScaleId String
+  minPercent   Float
+  maxPercent   Float
+  label        String
+  gpa          Float?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  createdById String?
+  updatedById String?
+
+  gradeScale GradeScale @relation(fields: [gradeScaleId], references: [id], onDelete: Cascade)
+
+  @@index([gradeScaleId])
+  @@map("grade_bands")
+}
+
+model SubjectResult {
+  id            String   @id @default(uuid())
+  studentId     String
+  examSessionId String
+  subjectId     String
+  percentage    Float
+  grade         String
+  subjectRank   Int?
+  computedAt    DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  createdById String?
+  updatedById String?
+
+  student     Student     @relation(fields: [studentId], references: [id])
+  examSession ExamSession @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
+  subject     Subject     @relation(fields: [subjectId], references: [id])
+
+  @@unique([studentId, examSessionId, subjectId])
+  @@index([examSessionId])
+  @@index([subjectId])
+  @@map("subject_results")
+}
+
+model ReportCard {
+  id                String           @id @default(uuid())
+  studentId         String
+  examSessionId     String
+  overallPercentage Float
+  overallGrade      String
+  classRank         Int?
+  pdfUrl            String?
+  status            ReportCardStatus @default(DRAFT)
+  generatedAt       DateTime         @default(now())
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  createdById String?
+  updatedById String?
+
+  student     Student     @relation(fields: [studentId], references: [id])
+  examSession ExamSession @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, examSessionId])
+  @@index([examSessionId])
+  @@map("report_cards")
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
