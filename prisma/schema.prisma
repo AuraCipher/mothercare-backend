@@ -153,6 +153,9 @@ model User {
   recordedPayments          Payment[]              @relation("PaymentRecordedBy")
   revertedPayments          Payment[]              @relation("PaymentRevertedBy")
   recordedFamilyPayments    FamilyPayment[]
+  createdFamilies           Family[]           @relation("FamilyCreatedBy")
+  updatedFamilies           Family[]           @relation("FamilyUpdatedBy")
+  familyChangeLogs          FamilyChangeLog[]
   enteredMarks              MarksEntry[]           @relation("MarksEnteredBy")
 
   @@index([username])
@@ -1497,17 +1500,44 @@ model StudentStatusLog {
 
 model Family {
   id         String   @id @default(uuid())
-  name       String?
+  name       String
   fatherName String?
   motherName String?
   phone      String?
   address    String?
+  isActive   Boolean  @default(true)
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  createdById String?
+  updatedById String?
 
-  students Student[]       @relation("StudentFamily")
-  payments FamilyPayment[]
+  students   Student[]         @relation("StudentFamily")
+  payments   FamilyPayment[]
+  changeLogs FamilyChangeLog[]
+  createdBy  User?             @relation("FamilyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy  User?             @relation("FamilyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
+  @@index([name])
+  @@index([isActive])
+  @@index([createdById])
   @@map("families")
+}
+
+// Tracks family membership and profile changes (student add/remove, deactivation, etc.)
+model FamilyChangeLog {
+  id          String   @id @default(uuid())
+  familyId    String
+  action      String   // CREATED | UPDATED | STUDENT_ADDED | STUDENT_REMOVED | DEACTIVATED | REACTIVATED
+  details     Json?
+  changedById String?
+  createdAt   DateTime @default(now())
+
+  family    Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  changedBy User?  @relation(fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@index([familyId])
+  @@index([changedById])
+  @@map("family_change_logs")
 }
 
 model FeeHead {
@@ -1614,17 +1644,23 @@ model FeeExtraItem {
 model FamilyPayment {
   id            String   @id @default(uuid())
   familyId      String
+  academicYearId String?
   receiptNumber String   @unique // FMP-YYYYMM-XXXX
   totalAmount   Int
+  paymentMethod String?
+  reference     String?
+  note          String?
   paymentDate   DateTime @default(now())
   recordedById  String
   createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   family     Family    @relation(fields: [familyId], references: [id])
   payments   Payment[]
   recordedBy User      @relation(fields: [recordedById], references: [id])
 
   @@index([familyId])
+  @@index([academicYearId])
   @@map("family_payments")
 }
 

@@ -40,6 +40,7 @@ const AUDITED_MODELS = new Set([
   'GradeBand',
   'SubjectResult',
   'ReportCard',
+  'Family',
 ]);
 
 /**
