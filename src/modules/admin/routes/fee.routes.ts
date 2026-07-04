@@ -282,11 +282,18 @@ router.get('/students/:id/fee', asyncHandler(async (req: Request, res: Response)
     where: { id: req.params.id },
     include: {
       group: { select: { name: true, section: true, displayOrder: true } },
+      family: { select: { id: true, name: true } },
       parents: { include: { parent: { select: { relation: true, phone: true, occupation: true, user: { select: { name: true } } } } } },
       studentFees: {
         where: { academicYearId: ayId },
         include: {
-          payments: { where: { revertedAt: null }, orderBy: { createdAt: 'desc' } },
+          payments: {
+            where: { revertedAt: null },
+            orderBy: { createdAt: 'desc' },
+            include: {
+              familyPayment: { select: { id: true, receiptNumber: true, familyId: true } },
+            },
+          },
           extraItems: true,
           headAllocations: { where: { revertedAt: null }, select: { feeHeadId: true, feeExtraItemId: true, amount: true } },
         },
@@ -362,8 +369,9 @@ router.get('/student-fees/:id/extra-items', asyncHandler(async (req: Request, re
 
 const studentListSelect = {
   id: true, name: true, rollNumber: true, admissionNumber: true,
-  groupId: true, customFeeAmount: true, concessionReason: true, feeOverrides: true,
+  groupId: true, familyId: true, customFeeAmount: true, concessionReason: true, feeOverrides: true,
   group: { select: { name: true, section: true, displayOrder: true } },
+  family: { select: { id: true, name: true } },
   parents: {
     include: {
       parent: { select: { relation: true, phone: true, user: { select: { name: true } } } },
