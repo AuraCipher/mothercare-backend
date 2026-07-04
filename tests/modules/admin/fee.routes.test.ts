@@ -85,12 +85,38 @@ describe('GET /admin/fee-structures', () => {
 });
 
 describe('POST /admin/fee-structures', () => {
-  test('creates a structure', async () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('creates a structure when none exists', async () => {
+    prismaMock.feeStructure.findMany.mockResolvedValue([]);
     prismaMock.feeStructure.create.mockResolvedValue({
       id: 'fs-new', groupId: 'g1', feeHeadId: 'fh1', amount: 450000, academicYearId: 'ay1', effectiveFrom: new Date(), effectiveTo: null, createdAt: new Date(), updatedAt: new Date(),
-    });
+    } as any);
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(prismaMock));
+
     const res = await request(app).post('/admin/fee-structures').set('Authorization', adminToken).send({ academicYearId: 'ay1', groupId: 'g1', feeHeadId: 'fh1', amount: 450000 });
     expect(res.status).toBe(201);
+    expect(prismaMock.feeStructure.updateMany).not.toHaveBeenCalled();
+  });
+
+  test('updates a structure and expires all active duplicates', async () => {
+    const existing = {
+      id: 'fs-old', groupId: 'g1', feeHeadId: 'fh1', amount: 400000, academicYearId: 'ay1',
+      effectiveFrom: new Date(), effectiveTo: null, createdAt: new Date(), updatedAt: new Date(),
+    };
+    prismaMock.feeStructure.findMany.mockResolvedValue([existing] as any);
+    prismaMock.feeStructure.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.feeStructure.create.mockResolvedValue({
+      id: 'fs-new', groupId: 'g1', feeHeadId: 'fh1', amount: 450000, academicYearId: 'ay1',
+      effectiveFrom: new Date(), effectiveTo: null, createdAt: new Date(), updatedAt: new Date(),
+    } as any);
+    prismaMock.feeChangeLog.create.mockResolvedValue({} as any);
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(prismaMock));
+
+    const res = await request(app).post('/admin/fee-structures').set('Authorization', adminToken).send({ academicYearId: 'ay1', groupId: 'g1', feeHeadId: 'fh1', amount: 450000 });
+    expect(res.status).toBe(200);
+    expect(prismaMock.feeStructure.updateMany).toHaveBeenCalled();
+    expect(prismaMock.feeChangeLog.create).toHaveBeenCalled();
   });
 
   test('rejects without required fields', async () => {
