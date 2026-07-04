@@ -1216,6 +1216,38 @@ describe('GET /admin/fees/summary', () => {
   });
 });
 
+describe('GET /admin/fees/analytics', () => {
+  test('returns analytics dashboard data scoped to branch + AY', async () => {
+    (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({ id: 'ay1', branchId: 'b1' });
+    const feeRow = {
+      id: 'sf1', month: 6, year: 2026, netAmount: 500000, paidAmount: 500000, status: 'PAID',
+      groupId: 'g1', studentId: 's1', extraItems: [],
+      group: { name: 'Class 1', section: 'A', displayOrder: 1 },
+      student: { name: 'Ali', rollNumber: '1' },
+    };
+    prismaMock.studentFee.findMany
+      .mockResolvedValueOnce([feeRow] as any)
+      .mockResolvedValueOnce([
+        { month: 6, year: 2026, netAmount: 500000, paidAmount: 500000, extraItems: [], groupId: 'g1', group: { name: 'Class 1', section: 'A', displayOrder: 1 } },
+      ] as any);
+    prismaMock.payment.findMany.mockResolvedValue([
+      { amount: 500000, paymentMethod: 'CASH', paymentDate: new Date('2026-06-15'), studentFeeId: 'sf1' },
+    ] as any);
+
+    const res = await request(app)
+      .get('/admin/fees/analytics?period=monthly&month=6&year=2026&academicYearId=ay1&branchId=b1')
+      .set('Authorization', adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.summary.totalDue).toBe(500000);
+    expect(res.body.data.summary.collectionRate).toBe(100);
+    expect(res.body.data.classBreakdown[0].groupName).toBe('Class 1');
+    expect(res.body.data.paymentMethods[0].method).toBe('CASH');
+    expect(res.body.data.lineTrend).toBeDefined();
+    expect(res.body.data.trendGranularity).toBe('monthly');
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════════
 // RECEIPT SNAPSHOT & AUDIT LOG
 // ═══════════════════════════════════════════════════════════════════
