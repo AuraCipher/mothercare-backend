@@ -303,7 +303,7 @@ router.get('/student-fees/:id/extra-items', asyncHandler(async (req: Request, re
 
 // GET /admin/fees/students-list — All active students with their fee for given period
 router.get('/fees/students-list', asyncHandler(async (req: Request, res: Response) => {
-  const { month, year, groupId, search, period, academicYearId } = req.query;
+  const { month, year, groupId, search, roll, period, academicYearId } = req.query;
   const isFull = period === 'full';
   const m = parseInt(month as string, 10) || (new Date().getMonth() + 1);
   const y = parseInt(year as string, 10) || new Date().getFullYear();
@@ -313,10 +313,14 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
 
   const where: any = { isActive: true, status: 'ACTIVE', academicYearId: ayId };
   if (groupId) where.groupId = groupId as string;
+  if (roll) where.rollNumber = roll as string;
   if (search) {
+    const q = search as string;
     where.OR = [
-      { name: { contains: search as string, mode: 'insensitive' } },
-      { rollNumber: { contains: search as string } },
+      { name: { contains: q, mode: 'insensitive' } },
+      { rollNumber: { contains: q } },
+      { parents: { some: { parent: { user: { name: { contains: q, mode: 'insensitive' } } } } } },
+      { parents: { some: { parent: { phone: { contains: q } } } } },
     ];
   }
 
@@ -416,6 +420,8 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
             : paidAmount > 0 ? 'PARTIAL' : 'UNPAID',
         payments: allPayments,
         _monthCount: totalFees.length,
+        _missingMonths: missingMonths,
+        _isEstimated: missingMonths > 0 && perMonthEstimate > 0,
         _extraAmount: extraAmount,
       };
     }
