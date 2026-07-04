@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../../lib/prisma';
+import { logAudit, diffFields } from '../../../services/audit.service';
 
 const router = Router();
 
@@ -21,6 +22,60 @@ function computeFeeStatus(paidAmount: number, totalDue: number): string {
   if (paidAmount >= totalDue) return paidAmount > totalDue ? 'OVERPAID' : 'PAID';
   return paidAmount > 0 ? 'PARTIAL' : 'UNPAID';
 }
+
+function feeRemainingPaise(fee: { netAmount: number; paidAmount: number; extraItems?: { amount: number }[] | null }): number {
+  return Math.max(0, getFeeTotalDue(fee) - fee.paidAmount);
+}
+
+function summarizeStudentFees(studentFees: { netAmount: number; paidAmount: number; extraItems?: { amount: number }[] | null }[]): { totalDuePaise: number; unpaidCount: number } {
+  let totalDuePaise = 0;
+  let unpaidCount = 0;
+  for (const f of studentFees) {
+    const rem = feeRemainingPaise(f);
+    if (rem > 0) {
+      totalDuePaise += rem;
+      unpaidCount++;
+    }
+  }
+  return { totalDuePaise, unpaidCount };
+}
+
+async function appendFamilyChangeLog(
+  familyId: string,
+  action: string,
+  details: Record<string, unknown> | null,
+  changedById: string | null,
+  tx: { familyChangeLog: { create: (args: any) => Promise<unknown> } } = prisma as any,
+) {
+  await tx.familyChangeLog.create({
+    data: { familyId, action, details: details ?? undefined, changedById: changedById ?? undefined },
+  });
+}
+
+const familyStudentInclude = (ayId: string | null, unpaidOnly = false) => {
+  const block: any = {
+    where: ayId
+      ? { academicYearId: ayId, isActive: true, status: 'ACTIVE' as const }
+      : { isActive: true, status: 'ACTIVE' as const },
+    select: {
+      id: true,
+      name: true,
+      rollNumber: true,
+      admissionNumber: true,
+      group: { select: { name: true, section: true, displayOrder: true } },
+    },
+  };
+  if (ayId) {
+    block.select.studentFees = {
+      where: unpaidOnly
+        ? { academicYearId: ayId, status: { in: ['UNPAID', 'PARTIAL'] } }
+        : { academicYearId: ayId },
+      include: { extraItems: { select: { amount: true } } },
+      orderBy: [{ year: 'asc' as const }, { month: 'asc' as const }],
+    };
+  }
+  return block;
+};
 
 // ═══════════════════════════════════════════════════════════════════
 // FEE HEADS CRUD
@@ -1807,48 +1862,386 @@ router.get('/payments', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // ═══════════════════════════════════════════════════════════════════
-// FAMILY — Search + Combined Payment
+// FAMILY — CRUD + Search + Combined Payment
 // ═══════════════════════════════════════════════════════════════════
 
-// GET /admin/families — Search families by father name or phone (unpaid fees scoped to AY)
-router.get('/families', asyncHandler(async (req: Request, res: Response) => {
-  const { search, academicYearId } = req.query;
-  if (!search) { res.json({ success: true, data: [] }); return; }
-
+// GET /admin/families/students-picker — Students available for family assignment
+router.get('/families/students-picker', asyncHandler(async (req: Request, res: Response) => {
+  const { search, academicYearId, excludeFamilyId } = req.query;
   const ayId = await resolveAcademicYearId(academicYearId as string | undefined);
   if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
 
-  const families = await prisma.family.findMany({
-    where: {
+  const where: any = {
+    academicYearId: ayId,
+    isActive: true,
+    status: 'ACTIVE',
+  };
+  if (excludeFamilyId) {
+    where.OR = [{ familyId: null }, { familyId: excludeFamilyId as string }];
+  } else {
+    where.familyId = null;
+  }
+  if (search) {
+    where.AND = [{
       OR: [
-        { fatherName: { contains: search as string, mode: 'insensitive' } },
-        { phone: { contains: search as string } },
+        { name: { contains: search as string, mode: 'insensitive' } },
+        { rollNumber: { contains: search as string, mode: 'insensitive' } },
+        { admissionNumber: { contains: search as string, mode: 'insensitive' } },
       ],
+    }];
+  }
+
+  const students = await prisma.student.findMany({
+    where,
+    select: {
+      id: true,
+      name: true,
+      rollNumber: true,
+      admissionNumber: true,
+      familyId: true,
+      group: { select: { name: true, section: true } },
+      family: { select: { id: true, name: true } },
     },
+    orderBy: [{ group: { displayOrder: 'asc' } }, { rollNumber: 'asc' }],
+    take: 100,
+  });
+
+  res.json({ success: true, data: students });
+}));
+
+// GET /admin/families — List or search families (family-pay search mode when `search` is set)
+router.get('/families', asyncHandler(async (req: Request, res: Response) => {
+  const { search, academicYearId, includeInactive } = req.query;
+  const ayId = await resolveAcademicYearId(academicYearId as string | undefined);
+
+  const searchTerm = typeof search === 'string' ? search.trim() : '';
+  const isSearchMode = searchTerm.length > 0;
+
+  const resolvedAyId = ayId ?? (isSearchMode ? null : await resolveAcademicYearId(undefined));
+  if (isSearchMode && !resolvedAyId) {
+    res.status(400).json({ success: false, message: 'No academic year specified' });
+    return;
+  }
+
+  const where: any = {};
+  if (includeInactive !== 'true') where.isActive = true;
+
+  if (isSearchMode) {
+    where.OR = [
+      { name: { contains: searchTerm, mode: 'insensitive' } },
+      { fatherName: { contains: searchTerm, mode: 'insensitive' } },
+      { phone: { contains: searchTerm } },
+      { students: { some: { name: { contains: searchTerm, mode: 'insensitive' }, academicYearId: resolvedAyId!, isActive: true, status: 'ACTIVE' } } },
+    ];
+  }
+
+  const families = await prisma.family.findMany({
+    where,
+    include: {
+      students: familyStudentInclude(resolvedAyId, isSearchMode),
+      _count: { select: { students: true, payments: true } },
+      createdBy: { select: { id: true, name: true } },
+      updatedBy: { select: { id: true, name: true } },
+    },
+    orderBy: [{ name: 'asc' }],
+    take: isSearchMode ? 50 : 200,
+  });
+
+  let data = families.map(f => {
+    const students = (f.students || []) as any[];
+    const { totalDuePaise, unpaidCount } = summarizeStudentFees(
+      students.flatMap(s => s.studentFees || []),
+    );
+    const { students: _s, ...rest } = f;
+    return {
+      ...rest,
+      studentCount: f._count.students,
+      paymentCount: f._count.payments,
+      totalDuePaise,
+      unpaidFeeCount: unpaidCount,
+      students: isSearchMode ? students : undefined,
+    };
+  });
+
+  // Family-pay search: only families with at least one student having unpaid fees
+  if (isSearchMode) {
+    data = data
+      .map(f => ({
+        ...f,
+        students: (f.students || []).filter((s: any) => (s.studentFees?.length ?? 0) > 0),
+      }))
+      .filter(f => (f.students?.length ?? 0) > 0);
+  }
+
+  res.json({ success: true, data });
+}));
+
+// POST /admin/families — Create family and assign students
+router.post('/families', asyncHandler(async (req: Request, res: Response) => {
+  const { name, fatherName, motherName, phone, address, studentIds } = req.body;
+  const userId = (req as any).user?.id as string | undefined;
+
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    res.status(400).json({ success: false, message: 'Family name is required' });
+    return;
+  }
+
+  const ids: string[] = Array.isArray(studentIds) ? studentIds.filter(Boolean) : [];
+  if (ids.length > 0) {
+    const taken = await prisma.student.findMany({
+      where: { id: { in: ids }, familyId: { not: null } },
+      select: { id: true, name: true, family: { select: { name: true } } },
+    });
+    if (taken.length > 0) {
+      res.status(400).json({
+        success: false,
+        message: `Student(s) already in a family: ${taken.map(t => t.name).join(', ')}`,
+      });
+      return;
+    }
+  }
+
+  const family = await prisma.$transaction(async (tx) => {
+    const created = await tx.family.create({
+      data: {
+        name: name.trim(),
+        fatherName: fatherName || null,
+        motherName: motherName || null,
+        phone: phone || null,
+        address: address || null,
+        createdById: userId,
+        updatedById: userId,
+      },
+    });
+
+    if (ids.length > 0) {
+      await tx.student.updateMany({ where: { id: { in: ids } }, data: { familyId: created.id } });
+    }
+
+    await appendFamilyChangeLog(created.id, 'CREATED', { name: created.name, studentIds: ids }, userId ?? null, tx);
+    if (ids.length > 0) {
+      await appendFamilyChangeLog(created.id, 'STUDENT_ADDED', { studentIds: ids }, userId ?? null, tx);
+    }
+
+    return tx.family.findUnique({
+      where: { id: created.id },
+      include: {
+        students: {
+          select: {
+            id: true, name: true, rollNumber: true,
+            group: { select: { name: true, section: true } },
+          },
+        },
+        createdBy: { select: { id: true, name: true } },
+      },
+    });
+  });
+
+  await logAudit({
+    action: 'CREATE',
+    module: 'fees',
+    entityType: 'Family',
+    entityId: family!.id,
+    newValue: { name: family!.name, studentIds: ids },
+  });
+
+  res.status(201).json({ success: true, data: family });
+}));
+
+// GET /admin/families/:id — Family detail with dues and payment history
+router.get('/families/:id', asyncHandler(async (req: Request, res: Response) => {
+  const { academicYearId } = req.query;
+  const ayId = await resolveAcademicYearId(academicYearId as string | undefined);
+  if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
+
+  const family = await prisma.family.findUnique({
+    where: { id: req.params.id },
     include: {
       students: {
         where: { academicYearId: ayId, isActive: true, status: 'ACTIVE' },
-        include: {
+        select: {
+          id: true,
+          name: true,
+          rollNumber: true,
+          admissionNumber: true,
+          group: { select: { name: true, section: true, displayOrder: true } },
           studentFees: {
-            where: { academicYearId: ayId, status: { in: ['UNPAID', 'PARTIAL'] } },
-            include: { extraItems: true },
+            where: { academicYearId: ayId },
+            include: { extraItems: { select: { amount: true } } },
             orderBy: [{ year: 'asc' }, { month: 'asc' }],
           },
-          group: { select: { name: true, section: true, displayOrder: true } },
+        },
+        orderBy: [{ group: { displayOrder: 'asc' } }, { rollNumber: 'asc' }],
+      },
+      payments: {
+        orderBy: { paymentDate: 'desc' },
+        take: 50,
+        include: {
+          recordedBy: { select: { name: true } },
+          payments: {
+            select: {
+              id: true, amount: true, paymentMethod: true, receiptNumber: true,
+              student: { select: { id: true, name: true, rollNumber: true } },
+              studentFee: { select: { month: true, year: true } },
+            },
+          },
         },
       },
+      changeLogs: {
+        orderBy: { createdAt: 'desc' },
+        take: 30,
+        include: { changedBy: { select: { name: true } } },
+      },
+      createdBy: { select: { id: true, name: true } },
+      updatedBy: { select: { id: true, name: true } },
     },
   });
 
-  // Only return families with at least one student that has unpaid fees in this AY
-  const data = families
-    .map(f => ({
-      ...f,
-      students: (f.students || []).filter(s => (s.studentFees?.length ?? 0) > 0),
-    }))
-    .filter(f => f.students.length > 0);
+  if (!family) { res.status(404).json({ success: false, message: 'Family not found' }); return; }
 
-  res.json({ success: true, data });
+  const studentSummaries = family.students.map(s => {
+    const { totalDuePaise, unpaidCount } = summarizeStudentFees(s.studentFees);
+    return {
+      id: s.id,
+      name: s.name,
+      rollNumber: s.rollNumber,
+      admissionNumber: s.admissionNumber,
+      group: s.group,
+      totalDuePaise,
+      unpaidFeeCount: unpaidCount,
+      studentFees: s.studentFees.map(f => ({
+        ...f,
+        totalDuePaise: getFeeTotalDue(f),
+        remainingPaise: feeRemainingPaise(f),
+      })),
+    };
+  });
+
+  const totalDuePaise = studentSummaries.reduce((sum, s) => sum + s.totalDuePaise, 0);
+
+  res.json({
+    success: true,
+    data: {
+      ...family,
+      students: studentSummaries,
+      totalDuePaise,
+      studentCount: studentSummaries.length,
+    },
+  });
+}));
+
+// PATCH /admin/families/:id — Update profile and membership
+router.patch('/families/:id', asyncHandler(async (req: Request, res: Response) => {
+  const { name, fatherName, motherName, phone, address, isActive, addStudentIds, removeStudentIds } = req.body;
+  const userId = (req as any).user?.id as string | undefined;
+
+  const existing = await prisma.family.findUnique({
+    where: { id: req.params.id },
+    include: { students: { select: { id: true } } },
+  });
+  if (!existing) { res.status(404).json({ success: false, message: 'Family not found' }); return; }
+
+  const toAdd: string[] = Array.isArray(addStudentIds) ? addStudentIds.filter(Boolean) : [];
+  const toRemove: string[] = Array.isArray(removeStudentIds) ? removeStudentIds.filter(Boolean) : [];
+
+  if (toAdd.length > 0) {
+    const taken = await prisma.student.findMany({
+      where: {
+        id: { in: toAdd },
+        familyId: { not: null },
+        NOT: { familyId: existing.id },
+      },
+      select: { id: true, name: true },
+    });
+    if (taken.length > 0) {
+      res.status(400).json({
+        success: false,
+        message: `Student(s) already in another family: ${taken.map(t => t.name).join(', ')}`,
+      });
+      return;
+    }
+  }
+
+  const profilePatch: Record<string, unknown> = {};
+  if (name !== undefined) profilePatch.name = typeof name === 'string' ? name.trim() : name;
+  if (fatherName !== undefined) profilePatch.fatherName = fatherName || null;
+  if (motherName !== undefined) profilePatch.motherName = motherName || null;
+  if (phone !== undefined) profilePatch.phone = phone || null;
+  if (address !== undefined) profilePatch.address = address || null;
+  if (isActive !== undefined) profilePatch.isActive = Boolean(isActive);
+  profilePatch.updatedById = userId;
+
+  const family = await prisma.$transaction(async (tx) => {
+    const updated = await tx.family.update({
+      where: { id: existing.id },
+      data: profilePatch as any,
+    });
+
+    if (toAdd.length > 0) {
+      await tx.student.updateMany({ where: { id: { in: toAdd } }, data: { familyId: existing.id } });
+      await appendFamilyChangeLog(existing.id, 'STUDENT_ADDED', { studentIds: toAdd }, userId ?? null, tx);
+    }
+    if (toRemove.length > 0) {
+      await tx.student.updateMany({
+        where: { id: { in: toRemove }, familyId: existing.id },
+        data: { familyId: null },
+      });
+      await appendFamilyChangeLog(existing.id, 'STUDENT_REMOVED', { studentIds: toRemove }, userId ?? null, tx);
+    }
+
+    if (isActive === true && !existing.isActive) {
+      await appendFamilyChangeLog(existing.id, 'REACTIVATED', null, userId ?? null, tx);
+    } else if (isActive === false && existing.isActive) {
+      await appendFamilyChangeLog(existing.id, 'DEACTIVATED', null, userId ?? null, tx);
+    } else if (Object.keys(profilePatch).length > 1) {
+      await appendFamilyChangeLog(existing.id, 'UPDATED', profilePatch, userId ?? null, tx);
+    }
+
+    return tx.family.findUnique({
+      where: { id: existing.id },
+      include: {
+        students: {
+          select: {
+            id: true, name: true, rollNumber: true,
+            group: { select: { name: true, section: true } },
+          },
+        },
+        updatedBy: { select: { id: true, name: true } },
+      },
+    });
+  });
+
+  const oldSnap = {
+    name: existing.name,
+    fatherName: existing.fatherName,
+    motherName: existing.motherName,
+    phone: existing.phone,
+    address: existing.address,
+    isActive: existing.isActive,
+    studentIds: existing.students.map(s => s.id),
+  };
+  const newSnap = {
+    name: family!.name,
+    fatherName: family!.fatherName,
+    motherName: family!.motherName,
+    phone: family!.phone,
+    address: family!.address,
+    isActive: family!.isActive,
+    studentIds: family!.students.map(s => s.id),
+  };
+  const { oldChanged, newChanged } = diffFields(oldSnap, newSnap);
+  if (Object.keys(oldChanged).length > 0) {
+    await logAudit({
+      action: 'UPDATE',
+      module: 'fees',
+      entityType: 'Family',
+      entityId: existing.id,
+      oldValue: oldChanged,
+      newValue: newChanged,
+    });
+  }
+
+  res.json({ success: true, data: family });
 }));
 
 // POST /admin/family-payments — Record combined sibling payment
@@ -1929,6 +2322,7 @@ router.post('/family-payments', asyncHandler(async (req: Request, res: Response)
         const fp = await tx.familyPayment.create({
           data: {
             familyId,
+            academicYearId: ayId,
             receiptNumber: rn,
             totalAmount: batchTotal,
             recordedById: userId,
@@ -2026,7 +2420,7 @@ router.get('/family-payments/:id', asyncHandler(async (req: Request, res: Respon
           student: { select: { name: true, rollNumber: true, group: { select: { name: true, section: true } } } },
         },
       },
-      family: { select: { fatherName: true, phone: true, address: true } },
+      family: { select: { id: true, name: true, fatherName: true, phone: true, address: true } },
       recordedBy: { select: { name: true } },
     },
   });
