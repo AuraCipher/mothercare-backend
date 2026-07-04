@@ -16,8 +16,9 @@ export interface UpdateExamTypeInput {
 // ─── Service ──────────────────────────────────────────────────────────
 
 class ExamTypeService {
-  async findAll() {
+  async findAll(examSessionId: string) {
     return prisma.examType.findMany({
+      where: { examSessionId },
       orderBy: { name: 'asc' },
     });
   }
@@ -28,11 +29,12 @@ class ExamTypeService {
     return examType;
   }
 
-  async create(data: CreateExamTypeInput, createdById?: string) {
+  async create(examSessionId: string, data: CreateExamTypeInput, createdById?: string) {
     const { name, defaultWeight } = data;
 
     const examType = await prisma.examType.create({
       data: {
+        examSessionId,
         name: name.trim(),
         defaultWeight: defaultWeight ?? undefined,
         createdById,
@@ -46,7 +48,7 @@ class ExamTypeService {
       module: 'exams',
       entityType: 'ExamType',
       entityId: examType.id,
-      newValue: { name: examType.name, defaultWeight: examType.defaultWeight },
+      newValue: { name: examType.name, defaultWeight: examType.defaultWeight, examSessionId },
     });
 
     return examType;
@@ -74,16 +76,14 @@ class ExamTypeService {
       module: 'exams',
       entityType: 'ExamType',
       entityId: id,
-      oldValue: oldChanged,
-      newValue: newChanged,
+      oldValue: { ...oldChanged, examSessionId: existing.examSessionId },
+      newValue: { ...newChanged, examSessionId: updated.examSessionId },
     });
 
     return updated;
   }
 
   async delete(id: string) {
-    // Pre-query with _count to check if any exams reference this type (matching
-    // existing subject.service.ts + section.service.ts pattern).
     const existing = await prisma.examType.findUnique({
       where: { id },
       include: { _count: { select: { exams: true } } },
@@ -104,7 +104,7 @@ class ExamTypeService {
       module: 'exams',
       entityType: 'ExamType',
       entityId: id,
-      oldValue: { name: existing.name, defaultWeight: existing.defaultWeight },
+      oldValue: { name: existing.name, defaultWeight: existing.defaultWeight, examSessionId: existing.examSessionId },
     });
 
     return { message: `Exam type "${existing.name}" deleted` };

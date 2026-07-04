@@ -9,25 +9,19 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
   };
 
 // ═══════════════════════════════════════════════════════════════════
-// GET /admin/exam-types — List all exam types
+// GET /admin/exam-sessions/:sessionId/exam-types
+// List exam types in a session
 // ═══════════════════════════════════════════════════════════════════
-router.get('/exam-types', asyncHandler(async (_req: Request, res: Response) => {
-  const types = await examTypeService.findAll();
+router.get('/exam-sessions/:sessionId/exam-types', asyncHandler(async (req: Request, res: Response) => {
+  const types = await examTypeService.findAll(req.params.sessionId);
   res.json({ success: true, data: types });
 }));
 
 // ═══════════════════════════════════════════════════════════════════
-// GET /admin/exam-types/:id — Get one exam type
+// POST /admin/exam-sessions/:sessionId/exam-types
+// Create an exam type within a session
 // ═══════════════════════════════════════════════════════════════════
-router.get('/exam-types/:id', asyncHandler(async (req: Request, res: Response) => {
-  const type = await examTypeService.findById(req.params.id);
-  res.json({ success: true, data: type });
-}));
-
-// ═══════════════════════════════════════════════════════════════════
-// POST /admin/exam-types — Create a new exam type
-// ═══════════════════════════════════════════════════════════════════
-router.post('/exam-types', asyncHandler(async (req: Request, res: Response) => {
+router.post('/exam-sessions/:sessionId/exam-types', asyncHandler(async (req: Request, res: Response) => {
   const { name, defaultWeight } = req.body;
 
   // Validation
@@ -45,6 +39,7 @@ router.post('/exam-types', asyncHandler(async (req: Request, res: Response) => {
   }
 
   const type = await examTypeService.create(
+    req.params.sessionId,
     { name, defaultWeight: defaultWeight ?? undefined },
     (req as any).user?.id,
   );
@@ -53,12 +48,12 @@ router.post('/exam-types', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // ═══════════════════════════════════════════════════════════════════
-// PATCH /admin/exam-types/:id — Update an exam type
+// PATCH /admin/exam-sessions/:sessionId/exam-types/:id
+// Update an exam type
 // ═══════════════════════════════════════════════════════════════════
-router.patch('/exam-types/:id', asyncHandler(async (req: Request, res: Response) => {
+router.patch('/exam-sessions/:sessionId/exam-types/:id', asyncHandler(async (req: Request, res: Response) => {
   const { name, defaultWeight } = req.body;
 
-  // Validation
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     res.status(400).json({ success: false, message: 'Exam type name cannot be empty' });
     return;
@@ -77,9 +72,10 @@ router.patch('/exam-types/:id', asyncHandler(async (req: Request, res: Response)
 }));
 
 // ═══════════════════════════════════════════════════════════════════
-// DELETE /admin/exam-types/:id — Delete an exam type (blocked if in use)
+// DELETE /admin/exam-sessions/:sessionId/exam-types/:id
+// Delete an exam type (blocked if referenced by exams)
 // ═══════════════════════════════════════════════════════════════════
-router.delete('/exam-types/:id', asyncHandler(async (req: Request, res: Response) => {
+router.delete('/exam-sessions/:sessionId/exam-types/:id', asyncHandler(async (req: Request, res: Response) => {
   const result = await examTypeService.delete(req.params.id);
   res.json({ success: true, message: result.message });
 }));
