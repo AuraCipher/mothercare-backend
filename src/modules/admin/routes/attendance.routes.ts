@@ -1,17 +1,18 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../../lib/prisma';
+import { requireScope } from '../utils/scope-context';
 
 const router = Router();
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
   (req: Request, res: Response, next: NextFunction) => { fn(req, res, next).catch(next); };
 
-// GET /attendance?date=...&groupId=... — Get attendance (single day or range)
-//   Single day: /attendance?date=2026-06-20&groupId=xxx
-//   Range:      /attendance?from=2026-06-01&to=2026-06-30&groupId=xxx
+// GET /attendance?date=...&groupId=...&academicYearId=...&branchId=...
 router.get('/attendance', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { academicYearId, branchId } = scope;
   const { date, from, to, groupId } = req.query;
 
-  // Build date filter
   let dateFilter: any = {};
   if (from && to) {
     dateFilter = { gte: new Date(from as string), lte: new Date(to as string) };
@@ -19,7 +20,26 @@ router.get('/attendance', asyncHandler(async (req: Request, res: Response) => {
     dateFilter = { equals: new Date(date as string) };
   }
 
-  const studentWhere: any = { isActive: true };
+  if (groupId) {
+    const group = await prisma.group.findFirst({
+      where: { id: groupId as string, academicYearId },
+      select: { id: true },
+    });
+    if (!group) {
+      res.status(400).json({ success: false, message: 'Group not found in the selected academic year' });
+      return;
+    }
+  }
+
+  const attendanceWhere: any = { academicYearId };
+  if (Object.keys(dateFilter).length) attendanceWhere.date = dateFilter;
+
+  const studentWhere: any = {
+    isActive: true,
+    status: 'ACTIVE',
+    academicYearId,
+    academicYear: { branchId },
+  };
   if (groupId) studentWhere.groupId = groupId as string;
 
   const students = await prisma.student.findMany({
@@ -28,7 +48,7 @@ router.get('/attendance', asyncHandler(async (req: Request, res: Response) => {
       id: true, name: true, rollNumber: true, admissionNumber: true,
       groupId: true,
       attendances: {
-        where: Object.keys(dateFilter).length ? { date: dateFilter } : undefined,
+        where: attendanceWhere,
         select: { date: true, status: true, note: true },
         orderBy: { date: 'asc' },
       },
@@ -99,10 +119,22 @@ router.post('/attendance/batch', asyncHandler(async (req: Request, res: Response
 
 // GET /students/:id/attendance — Student attendance report
 router.get('/students/:id/attendance', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { academicYearId, branchId } = scope;
   const { id } = req.params;
   const { from, to } = req.query;
 
-  const where: any = { studentId: id };
+  const student = await prisma.student.findFirst({
+    where: { id, academicYearId, academicYear: { branchId } },
+    select: { id: true },
+  });
+  if (!student) {
+    res.status(404).json({ success: false, message: 'Student not found in the selected academic year' });
+    return;
+  }
+
+  const where: any = { studentId: id, academicYearId };
   if (from) where.date = { ...where.date, gte: new Date(from as string) };
   if (to) where.date = { ...where.date, lte: new Date(to as string) };
 
@@ -130,8 +162,11 @@ router.get('/students/:id/attendance', asyncHandler(async (req: Request, res: Re
 // TEACHER ATTENDANCE
 // ═══════════════════════════════════════════════════════════════════
 
-// GET /attendance/teachers?date=... or ?from=...&to=... — Teacher attendance
+// GET /attendance/teachers?date=...&academicYearId=...&branchId=...
 router.get('/attendance/teachers', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { academicYearId, branchId } = scope;
   const { date, from, to } = req.query;
 
   let dateFilter: any = {};
@@ -141,12 +176,19 @@ router.get('/attendance/teachers', asyncHandler(async (req: Request, res: Respon
     dateFilter = { equals: new Date(date as string) };
   }
 
+  const attendanceWhere: any = { academicYearId };
+  if (Object.keys(dateFilter).length) attendanceWhere.date = dateFilter;
+
   const teachers = await prisma.user.findMany({
-    where: { role: 'teacher', status: 'active' },
+    where: {
+      role: 'teacher',
+      status: 'active',
+      branchMembers: { some: { branchId, isActive: true } },
+    },
     select: {
       id: true, name: true,
       teacherAttendances: {
-        where: Object.keys(dateFilter).length ? { date: dateFilter } : undefined,
+        where: attendanceWhere,
         select: { date: true, status: true, note: true },
         orderBy: { date: 'asc' },
       },
@@ -154,7 +196,6 @@ router.get('/attendance/teachers', asyncHandler(async (req: Request, res: Respon
     orderBy: { name: 'asc' },
   });
 
-  // Map to the same format as student attendance (rename teacherAttendances → attendances)
   const data = teachers.map(t => ({
     id: t.id, name: t.name,
     attendances: t.teacherAttendances.map(a => ({ date: a.date, status: a.status, note: a.note })),

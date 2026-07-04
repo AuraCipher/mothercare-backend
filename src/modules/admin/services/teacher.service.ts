@@ -579,10 +579,10 @@ class TeacherAssignmentService {
     });
   }
 
-  // TC-007: Get all assignments for a teacher
-  async findByTeacher(teacherId: string) {
+  // TC-007: Get all assignments for a teacher in an academic year
+  async findByTeacher(teacherId: string, academicYearId: string) {
     const assignments = await prisma.teacherAssignment.findMany({
-      where: { teacherId },
+      where: { teacherId, academicYearId },
       include: {
         group: { select: { id: true, name: true, section: true, displayOrder: true } },
         subject: { select: { id: true, name: true, code: true } },
@@ -593,10 +593,10 @@ class TeacherAssignmentService {
     return assignments;
   }
 
-  // TC-008: Get all assignments for a group
-  async findByGroup(groupId: string) {
+  // TC-008: Get all assignments for a group in an academic year
+  async findByGroup(groupId: string, academicYearId: string) {
     const assignments = await prisma.teacherAssignment.findMany({
-      where: { groupId },
+      where: { groupId, academicYearId },
       include: {
         teacher: { select: { id: true, name: true } },
         subject: { select: { id: true, name: true, code: true } },

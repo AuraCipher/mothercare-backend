@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { branchService } from '../services/branch.service';
 import { prisma } from '../../../lib/prisma';
+import { requireScope } from '../utils/scope-context';
 
 const router = Router();
 
@@ -70,40 +71,40 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   res.json({ success: true, message: result.message, data: { action: result.action } });
 }));
 
-// GET /admin/branches/:id/stats — Per-branch stats for CEO dashboard
+// GET /admin/branches/:id/stats — Per-branch stats scoped to academic year
 router.get('/:id/stats', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
+  req.query.branchId = id;
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { academicYearId, branchId } = scope;
 
   const [branch, allMembers, studentCount, groupCount, teacherCount] = await Promise.all([
     prisma.branch.findUnique({
-      where: { id },
+      where: { id: branchId },
       select: {
         id: true, name: true, code: true, address: true, phone: true, email: true, isActive: true,
         _count: { select: { academicYears: true, branchMembers: true } },
       },
     }),
     prisma.branchMember.findMany({
-      where: { branchId: id, isActive: true },
+      where: { branchId, isActive: true },
       select: {
         role: true,
         user: { select: { role: true } },
       },
     }),
     prisma.student.count({
-      where: {
-        academicYear: { branchId: id },
-      },
+      where: { academicYearId, isActive: true, status: 'ACTIVE' },
     }),
     prisma.group.count({
-      where: {
-        academicYear: { branchId: id, status: 'ACTIVE' },
-      },
+      where: { academicYearId, isActive: true },
     }),
     prisma.user.count({
       where: {
         role: 'teacher',
         status: 'active',
-        branchMembers: { some: { branchId: id, isActive: true } },
+        branchMembers: { some: { branchId, isActive: true } },
       },
     }),
   ]);
@@ -119,7 +120,7 @@ router.get('/:id/stats', asyncHandler(async (req: Request, res: Response) => {
 
   // Get admin info (exclude super_admin — CEO oversight, not branch staff)
   const admins = await prisma.branchMember.findMany({
-    where: { branchId: id, role: 'branch_admin', isActive: true },
+    where: { branchId, role: 'branch_admin', isActive: true },
     select: {
       user: { select: { id: true, name: true, email: true, phone: true, status: true, role: true } },
       createdAt: true,

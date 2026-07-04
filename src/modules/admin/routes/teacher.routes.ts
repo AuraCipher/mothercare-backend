@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { teacherProfileService, teacherAssignmentService } from '../services/teacher.service';
 import { passwordSetLimiter } from '../../../middleware/security/rateLimiter';
+import { requireScope } from '../utils/scope-context';
 
 const router = Router();
 
@@ -102,9 +103,11 @@ router.post('/teachers/:id/send-credentials', asyncHandler(async (req: Request, 
   res.json({ success: true, data: result });
 }));
 
-// TC-016: GET /admin/teachers/:id/assignments — Get teacher's assignments
+// TC-016: GET /admin/teachers/:id/assignments — Get teacher's assignments (AY scoped)
 router.get('/teachers/:id/assignments', asyncHandler(async (req: Request, res: Response) => {
-  const assignments = await teacherAssignmentService.findByTeacher(req.params.id);
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const assignments = await teacherAssignmentService.findByTeacher(req.params.id, scope.academicYearId);
   res.json({ success: true, data: assignments });
 }));
 
@@ -128,9 +131,11 @@ router.post('/assignments', asyncHandler(async (req: Request, res: Response) => 
   res.status(201).json({ success: true, data: assignment });
 }));
 
-// TC-018: GET /admin/groups/:groupId/assignments — Get assignments for a group
+// TC-018: GET /admin/groups/:groupId/assignments — Get assignments for a group (AY scoped)
 router.get('/groups/:groupId/assignments', asyncHandler(async (req: Request, res: Response) => {
-  const assignments = await teacherAssignmentService.findByGroup(req.params.groupId);
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const assignments = await teacherAssignmentService.findByGroup(req.params.groupId, scope.academicYearId);
   res.json({ success: true, data: assignments });
 }));
 

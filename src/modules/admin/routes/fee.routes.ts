@@ -1,17 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../../lib/prisma';
 import { logAudit, diffFields } from '../../../services/audit.service';
+import { resolveAcademicYearId, requireScope } from '../utils/scope-context';
 
 const router = Router();
 
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
   (req: Request, res: Response, next: NextFunction) => { fn(req, res, next).catch(next); };
-
-async function resolveAcademicYearId(explicitId?: string | null): Promise<string | null> {
-  if (explicitId) return explicitId;
-  const active = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } });
-  return active?.id ?? null;
-}
 
 function getFeeTotalDue(fee: { netAmount: number; extraItems?: { amount: number }[] | null }): number {
   const extra = (fee.extraItems || []).reduce((s, e) => s + e.amount, 0);
@@ -39,6 +34,99 @@ function matchesFeeStatusFilter(status: string, filter: string): boolean {
   if (f === 'partial') return status === 'PARTIAL';
   if (f === 'unpaid') return status === 'UNPAID';
   return true;
+}
+
+/** Compute monthly fee total + breakdown from structures, honoring per-head overrides. */
+function computeFeeAmountAndBreakdown(
+  student: { customFeeAmount?: number | null; feeOverrides?: unknown },
+  groupStructures: { feeHeadId: string; feeHead: { name: string; category: string }; amount: number }[],
+): { totalAmount: number; breakdown: { feeHeadId?: string; name: string; amount: number; category: string }[] } {
+  const sOverrides = student.feeOverrides as Record<string, number> | null;
+
+  if (sOverrides && Object.keys(sOverrides).length > 0) {
+    // Per-head overrides merge with structure defaults — only overridden heads
+    // replace their amount; waiving one head (0) must not zero the whole month.
+    const breakdown = groupStructures.map(s => {
+      const amount = sOverrides[s.feeHeadId] !== undefined ? sOverrides[s.feeHeadId] : s.amount;
+      return { feeHeadId: s.feeHeadId, name: s.feeHead.name, amount, category: s.feeHead.category };
+    });
+    const totalAmount = breakdown.reduce((sum, b) => sum + (b.amount || 0), 0);
+    return { totalAmount, breakdown };
+  }
+
+  if (student.customFeeAmount != null) {
+    return {
+      totalAmount: student.customFeeAmount,
+      breakdown: [{ name: 'Custom Fee', amount: student.customFeeAmount, category: 'CUSTOM' }],
+    };
+  }
+
+  const breakdown = groupStructures.map(s => ({
+    feeHeadId: s.feeHeadId,
+    name: s.feeHead.name,
+    amount: s.amount,
+    category: s.feeHead.category,
+  }));
+  const totalAmount = groupStructures.reduce((sum, s) => sum + s.amount, 0);
+  return { totalAmount, breakdown };
+}
+
+/** Copy fee structures from the nearest lower class that already has them. */
+async function provisionMissingFeeStructures(
+  ayId: string,
+  targetGroupIds: string[],
+  existingStructures: { id: string; groupId: string; feeHeadId: string; amount: number; effectiveFrom: Date; feeHead: { name: string; category: string } }[],
+): Promise<{ structures: typeof existingStructures; groupsProvisioned: string[]; structuresCopied: number }> {
+  const groupsWithStructures = new Set(existingStructures.map(s => s.groupId));
+  const needsProvision = targetGroupIds.filter(id => !groupsWithStructures.has(id));
+  if (needsProvision.length === 0) {
+    return { structures: existingStructures, groupsProvisioned: [], structuresCopied: 0 };
+  }
+
+  const allGroups = await prisma.group.findMany({
+    where: { academicYearId: ayId, isActive: true },
+    orderBy: { displayOrder: 'asc' },
+    select: { id: true, displayOrder: true, name: true, section: true },
+  });
+  const groupById = new Map(allGroups.map(g => [g.id, g]));
+  const structures = [...existingStructures];
+  const groupsProvisioned: string[] = [];
+  let structuresCopied = 0;
+
+  for (const targetId of needsProvision) {
+    const target = groupById.get(targetId);
+    if (!target) continue;
+
+    const source = [...allGroups]
+      .filter(g => g.displayOrder < target.displayOrder && groupsWithStructures.has(g.id))
+      .sort((a, b) => b.displayOrder - a.displayOrder)[0];
+    if (!source) continue;
+
+    const sourceStructs = await prisma.feeStructure.findMany({
+      where: { groupId: source.id, academicYearId: ayId, effectiveTo: null },
+      include: { feeHead: { select: { name: true, category: true } } },
+    });
+    if (sourceStructs.length === 0) continue;
+
+    for (const ss of sourceStructs) {
+      const created = await prisma.feeStructure.create({
+        data: {
+          academicYearId: ayId,
+          groupId: targetId,
+          feeHeadId: ss.feeHeadId,
+          amount: ss.amount,
+          effectiveFrom: ss.effectiveFrom,
+        },
+        include: { feeHead: { select: { name: true, category: true } } },
+      });
+      structures.push(created);
+      structuresCopied++;
+    }
+    groupsWithStructures.add(targetId);
+    groupsProvisioned.push(target.section ? `${target.name} — ${target.section}` : target.name);
+  }
+
+  return { structures, groupsProvisioned, structuresCopied };
 }
 
 function feeRemainingPaise(fee: { netAmount: number; paidAmount: number; extraItems?: { amount: number }[] | null }): number {
@@ -140,12 +228,13 @@ router.delete('/fee-heads/:id', asyncHandler(async (req: Request, res: Response)
 // FEE STRUCTURES — Per-class amounts with effective dating
 // ═══════════════════════════════════════════════════════════════════
 
-// GET /admin/fee-structures — List, optionally filtered by groupId / academicYearId
+// GET /admin/fee-structures — List, filtered by academic year (required)
 router.get('/fee-structures', asyncHandler(async (req: Request, res: Response) => {
-  const { groupId, academicYearId } = req.query;
-  const where: any = { effectiveTo: null };
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { groupId } = req.query;
+  const where: any = { effectiveTo: null, academicYearId: scope.academicYearId };
   if (groupId) where.groupId = groupId as string;
-  if (academicYearId) where.academicYearId = academicYearId as string;
   const structures = await prisma.feeStructure.findMany({
     where,
     include: { feeHead: true, group: { select: { name: true, section: true } } },
@@ -607,14 +696,15 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
 // STUDENT FEE GENERATION
 // ═══════════════════════════════════════════════════════════════════
 
-// GET /admin/student-fees — List with filters
+// GET /admin/student-fees — List with filters (AY required)
 router.get('/student-fees', asyncHandler(async (req: Request, res: Response) => {
-  const { month, year, status, groupId, search, academicYearId } = req.query;
-  const where: any = {};
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { month, year, status, groupId, search } = req.query;
+  const where: any = { academicYearId: scope.academicYearId };
   if (month) where.month = parseInt(month as string, 10);
   if (year) where.year = parseInt(year as string, 10);
   if (status) where.status = { in: (status as string).split(',') };
-  if (academicYearId) where.academicYearId = academicYearId as string;
   if (groupId) where.groupId = groupId as string;
   if (search) {
     where.student = { name: { contains: search as string, mode: 'insensitive' } };
@@ -688,12 +778,18 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     include: { feeHead: { select: { name: true, category: true } } },
   });
 
+  const targetGroupIds = hasGroupFilter
+    ? (groupIds as string[])
+    : [...new Set(students.map(s => s.groupId).filter(Boolean))] as string[];
+  const provisioned = await provisionMissingFeeStructures(ayId, targetGroupIds, structures);
+  const activeStructures = provisioned.structures;
+
   // For ONE_TIME fee: check if this head was already charged by
   // examining the feeHeadBreakdown of the student's existing fees.
-  const oneTimeStructures = structures.filter(s => s.feeHead.category === 'ONE_TIME');
+  const oneTimeStructures = activeStructures.filter(s => s.feeHead.category === 'ONE_TIME');
   const oneTimeCache = new Map<string, Set<string>>();
 
-  let generated = 0, skipped = 0, updated = 0;
+  let generated = 0, skipped = 0, updated = 0, skippedNoStructure = 0;
   for (const student of students) {
     // Pre-compute which ONE_TIME structures to skip for this student
     const skippedOneTimeIds = new Set<string>();
@@ -721,7 +817,7 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     }
 
     // Compute what would be generated with the current head/category selection
-    const groupStructures = structures.filter(s => {
+    const groupStructures = activeStructures.filter(s => {
       if (s.groupId !== student.groupId) return false;
       const cat = s.feeHead.category || 'MONTHLY';
       if (selectedHeadIds) {
@@ -732,22 +828,7 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
       if (cat === 'ONE_TIME' && skippedOneTimeIds.has(s.id)) return false;
       return true;
     });
-    const baseAmount = groupStructures.reduce((sum, s) => sum + s.amount, 0);
-    const sOverrides = (student as any).feeOverrides as Record<string, number> | null;
-    let totalAmount = baseAmount;
-    let breakdown: any[] = [];
-
-    if (sOverrides && Object.keys(sOverrides).length > 0) {
-      totalAmount = Object.values(sOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
-      breakdown = groupStructures
-        .filter(s => (sOverrides as any)[(s as any).feeHeadId] !== undefined)
-        .map(s => ({ feeHeadId: (s as any).feeHeadId, name: s.feeHead.name, amount: (sOverrides as any)[(s as any).feeHeadId], category: s.feeHead.category }));
-    } else if ((student as any).customFeeAmount != null) {
-      totalAmount = (student as any).customFeeAmount;
-      breakdown = [{ name: 'Custom Fee', amount: (student as any).customFeeAmount, category: 'CUSTOM' }];
-    } else {
-      breakdown = groupStructures.map(s => ({ feeHeadId: (s as any).feeHeadId, name: s.feeHead.name, amount: s.amount, category: s.feeHead.category }));
-    }
+    let { totalAmount, breakdown } = computeFeeAmountAndBreakdown(student, groupStructures);
     // Fallback: if breakdown is empty but total > 0, show a generic entry
     if (breakdown.length === 0 && totalAmount > 0) {
       breakdown = [{ name: 'Fee', amount: totalAmount, category: 'OTHER' }];
@@ -773,6 +854,8 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
           },
         });
         generated++;
+      } else if (groupStructures.length === 0) {
+        skippedNoStructure++;
       }
       continue;
     }
@@ -825,6 +908,9 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     success: true,
     data: {
       generated, skipped, updated, deleted, protected: protectedCount,
+      skippedNoStructure,
+      structuresCopied: provisioned.structuresCopied,
+      groupsProvisioned: provisioned.groupsProvisioned,
       total: students.length, mode,
     },
   });
@@ -884,22 +970,7 @@ router.post('/student-fees/recalculate', asyncHandler(async (req: Request, res: 
 
     const baseAmount = effectiveStructures.reduce((sum, s) => sum + s.amount, 0);
 
-    // Apply overrides (same priority as generation)
-    let totalAmount: number;
-    let breakdown: any[] = [];
-    const fOverrides = (student as any).feeOverrides as Record<string, number> | null;
-    if (fOverrides && Object.keys(fOverrides).length > 0) {
-      totalAmount = Object.values(fOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
-      breakdown = effectiveStructures
-        .filter(s => (fOverrides as any)[(s as any).feeHeadId] !== undefined)
-        .map(s => ({ feeHeadId: (s as any).feeHeadId, name: s.feeHead.name, amount: (fOverrides as any)[(s as any).feeHeadId], category: s.feeHead.category }));
-    } else if (student.customFeeAmount != null) {
-      totalAmount = student.customFeeAmount;
-      breakdown = [{ name: 'Custom Fee', amount: student.customFeeAmount, category: 'CUSTOM' }];
-    } else {
-      totalAmount = baseAmount;
-      breakdown = effectiveStructures.map(s => ({ feeHeadId: (s as any).feeHeadId, name: s.feeHead.name, amount: s.amount, category: s.feeHead.category }));
-    }
+    let { totalAmount, breakdown } = computeFeeAmountAndBreakdown(student, effectiveStructures);
     // Fallback: if breakdown is empty but total > 0, show a generic entry
     if (breakdown.length === 0 && totalAmount > 0) {
       breakdown = [{ name: 'Fee', amount: totalAmount, category: 'OTHER' }];
@@ -2148,10 +2219,15 @@ router.get('/payments/:id/audit-log', asyncHandler(async (req: Request, res: Res
   res.json({ success: true, data: logs });
 }));
 
-// GET /admin/payments — List payments
+// GET /admin/payments — List payments (AY scoped)
 router.get('/payments', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
   const { studentFeeId, studentId } = req.query;
-  const where: any = {};
+  const where: any = {
+    revertedAt: null,
+    studentFee: { academicYearId: scope.academicYearId },
+  };
   if (studentFeeId) where.studentFeeId = studentFeeId as string;
   if (studentId) where.studentId = studentId as string;
   const payments = await prisma.payment.findMany({

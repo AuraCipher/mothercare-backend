@@ -2,17 +2,21 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../../lib/prisma';
 import { studentService } from '../services/student.service';
 import { passwordSetLimiter } from '../../../middleware/security/rateLimiter';
+import { requireScope } from '../utils/scope-context';
 
 const router = Router();
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
   (req: Request, res: Response, next: NextFunction) => { fn(req, res, next).catch(next); };
 
-// GET /students — List with search, filter, pagination
+// GET /students — List with search, filter, pagination (branch + AY scoped)
 router.get('/students', asyncHandler(async (req: Request, res: Response) => {
-  const { search, groupId, academicYearId, rollNumber, page, limit } = req.query;
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { search, groupId, rollNumber, page, limit } = req.query;
   const result = await studentService.findAll({
     search: search as string, groupId: groupId as string,
-    academicYearId: academicYearId as string, rollNumber: rollNumber as string,
+    academicYearId: scope.academicYearId, branchId: scope.branchId,
+    rollNumber: rollNumber as string,
     page: page ? parseInt(page as string, 10) : 1,
     limit: limit ? parseInt(limit as string, 10) : 20,
   });
@@ -147,11 +151,18 @@ router.post('/students/:id/send-credentials', passwordSetLimiter, asyncHandler(a
   res.json({ success: true, data: result });
 }));
 
-// POST /students/send-to-new — Send only to students who haven't received yet
+// POST /students/send-to-new — Send only to students who haven't received yet (AY scoped)
 router.post('/students/send-to-new', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
   const userId = (req as any).user?.id;
   const students = await prisma.student.findMany({
-    where: { credentialSentAt: null, user: { isNot: null } },
+    where: {
+      academicYearId: scope.academicYearId,
+      academicYear: { branchId: scope.branchId },
+      credentialSentAt: null,
+      user: { isNot: null },
+    },
     select: { id: true },
   });
   if (students.length === 0) {
