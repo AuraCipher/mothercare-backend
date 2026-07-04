@@ -1657,11 +1657,35 @@ model FamilyPayment {
 
   family     Family    @relation(fields: [familyId], references: [id])
   payments   Payment[]
+  receipt    FamilyPaymentReceipt?
   recordedBy User      @relation(fields: [recordedById], references: [id])
 
   @@index([familyId])
   @@index([academicYearId])
   @@map("family_payments")
+}
+
+// Combined family receipt snapshot — one per FamilyPayment (FMP-…)
+model FamilyPaymentReceipt {
+  id                String   @id @default(uuid())
+  familyPaymentId   String   @unique
+  receiptNumber     String
+  templateType      String   // FIRST | ARREARS | CONTINUATION
+  snapshot          Json     // Full receipt payload for print/reprint
+  totalDuePaise     Int
+  amountPaidPaise   Int
+  balanceAfterPaise Int
+  paymentMethod     String?
+  reference         String?
+  paymentDate       DateTime
+  printedAt         DateTime?
+  printCount        Int      @default(0)
+  createdAt         DateTime @default(now())
+
+  familyPayment FamilyPayment @relation(fields: [familyPaymentId], references: [id], onDelete: Cascade)
+
+  @@index([receiptNumber])
+  @@map("family_payment_receipts")
 }
 
 model Payment {
