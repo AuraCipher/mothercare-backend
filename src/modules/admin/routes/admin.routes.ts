@@ -20,6 +20,7 @@ import examRoutes from './exam.routes';
 import examStructureRoutes from './exam-structure.routes';
 import marksEntryRoutes from './marks-entry.routes';
 import subjectResultRoutes from './subject-result.routes';
+import { requireScope } from '../utils/scope-context';
 
 const router = Router();
 const meRouter = Router();
@@ -157,10 +158,12 @@ router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => 
 
 router.get('/groups', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../../lib/prisma'));
-  const { academicYearId, section } = req.query;
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { academicYearId } = scope;
+  const { section } = req.query;
 
-  const where: any = {};
-  if (academicYearId) where.academicYearId = academicYearId;
+  const where: any = { academicYearId };
   if (section) where.section = section;
 
   const groups = await prisma.group.findMany({
@@ -239,37 +242,38 @@ router.delete('/groups/:id', asyncHandler(async (req: Request, res: Response) =>
 
 router.get('/stats', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../../lib/prisma'));
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { academicYearId, branchId } = scope;
 
-  const [users, groups, students, academicYears, branches, apiKeys] = await Promise.all([
-    prisma.user.count({ where: { status: 'active' } }),
-    prisma.group.count(),
-    prisma.student.count({ where: { isActive: true } }),
-    prisma.academicYear.count(),
+  const [groups, students, teachers, staff, academicYears, branches, apiKeys] = await Promise.all([
+    prisma.group.count({ where: { academicYearId, isActive: true } }),
+    prisma.student.count({ where: { academicYearId, isActive: true, status: 'ACTIVE' } }),
+    prisma.user.count({
+      where: {
+        role: 'teacher',
+        status: 'active',
+        branchMembers: { some: { branchId, isActive: true } },
+      },
+    }),
+    prisma.branchMember.count({ where: { branchId, isActive: true } }),
+    prisma.academicYear.count({ where: { branchId } }),
     prisma.branch.count({ where: { isActive: true } }),
     prisma.apiKey.count({ where: { revokedAt: null } }),
   ]);
 
-  const userBreakdown = await prisma.user.groupBy({
-    by: ['role'],
-    where: { status: 'active' },
-    _count: { role: true },
-  });
-
-  const roleCounts = userBreakdown.reduce((acc: any, item: any) => {
-    acc[item.role] = item._count.role;
-    return acc;
-  }, {});
-
   res.json({
     success: true,
     data: {
-      totalUsers: users,
       totalGroups: groups,
       totalStudents: students,
+      totalTeachers: teachers,
+      totalStaff: staff,
       totalAcademicYears: academicYears,
       totalBranches: branches,
       activeApiKeys: apiKeys,
-      byRole: roleCounts,
+      academicYearId,
+      branchId,
     },
   });
 }));
