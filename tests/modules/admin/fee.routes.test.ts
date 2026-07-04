@@ -82,6 +82,14 @@ describe('GET /admin/fee-structures', () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
   });
+
+  test('filters by academicYearId query param', async () => {
+    prismaMock.feeStructure.findMany.mockResolvedValue([] as any);
+    await request(app).get('/admin/fee-structures?academicYearId=ay-old').set('Authorization', adminToken);
+    expect(prismaMock.feeStructure.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ academicYearId: 'ay-old' }),
+    }));
+  });
 });
 
 describe('POST /admin/fee-structures', () => {
@@ -204,6 +212,336 @@ describe('POST /admin/student-fees/generate', () => {
     const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({ month: 6, year: 2026, categories: ['MONTHLY', 'TERM'] });
     expect(res.status).toBe(200);
     expect(res.body.data.generated).toBe(1);
+  });
+});
+
+describe('GET /admin/fees/students-list', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  const studentWithFee = {
+    id: 's1', name: 'Ahmed', rollNumber: '1', admissionNumber: 'A1', groupId: 'g1',
+    customFeeAmount: null, concessionReason: null, feeOverrides: null,
+    group: { name: 'Class 2', section: 'A', displayOrder: 2 },
+    parents: [],
+    studentFees: [{ id: 'sf1', netAmount: 500000, paidAmount: 0, status: 'UNPAID', payments: [], extraItems: [] }],
+  };
+
+  const studentWithoutFee = {
+    id: 's2', name: 'Sara', rollNumber: '2', admissionNumber: 'A2', groupId: 'g2',
+    customFeeAmount: 500000, concessionReason: null, feeOverrides: null,
+    group: { name: 'Class 3', section: null, displayOrder: 3 },
+    parents: [],
+    studentFees: [],
+  };
+
+  test('monthly view only returns students with a generated fee for that month', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([studentWithFee, studentWithoutFee] as any);
+
+    const res = await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
+      .set('Authorization', adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].student.id).toBe('s1');
+    expect(res.body.data[0].fee.id).toBe('sf1');
+  });
+
+  test('monthly view excludes ungenerated students even when customFeeAmount is set', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([studentWithoutFee] as any);
+
+    const res = await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
+      .set('Authorization', adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(0);
+  });
+
+  test('monthly view excludes students with feeOverrides but no generated record', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([{
+      ...studentWithoutFee,
+      feeOverrides: { fh1: 400000 },
+      customFeeAmount: null,
+    }] as any);
+
+    const res = await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
+      .set('Authorization', adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(0);
+  });
+
+  test('full AY view still returns students without generated fees', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.studentFee.findMany.mockResolvedValue([{ month: 6, year: 2026 }] as any);
+    prismaMock.student.findMany.mockResolvedValue([studentWithFee, studentWithoutFee] as any);
+
+    const res = await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=full&academicYearId=ay1')
+      .set('Authorization', adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+  });
+
+  test('scopes students to academicYearId', async () => {
+    prismaMock.student.findMany.mockResolvedValue([] as any);
+
+    await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay-old')
+      .set('Authorization', adminToken);
+
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ academicYearId: 'ay-old' }),
+    }));
+  });
+
+  test('monthly view every returned row has a non-null fee object', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([
+      studentWithFee,
+      { ...studentWithFee, id: 's3', name: 'Bilal', studentFees: [{ id: 'sf3', netAmount: 600000, paidAmount: 100000, status: 'PARTIAL', payments: [], extraItems: [] }] },
+      studentWithoutFee,
+    ] as any);
+
+    const res = await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
+      .set('Authorization', adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+    for (const row of res.body.data) {
+      expect(row.fee).not.toBeNull();
+      expect(row.fee.id).toBeTruthy();
+    }
+  });
+
+  test('monthly view uses generated fee netAmount even when customFeeAmount differs', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([{
+      ...studentWithFee,
+      customFeeAmount: 999999,
+      studentFees: [{ id: 'sf1', netAmount: 500000, paidAmount: 0, status: 'UNPAID', payments: [], extraItems: [] }],
+    }] as any);
+
+    const res = await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
+      .set('Authorization', adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].netAmount).toBe(500000);
+    expect(res.body.data[0].fee.netAmount).toBe(500000);
+  });
+
+  test('monthly view excludes plain student with no fee and no overrides', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([{
+      id: 's-plain', name: 'Plain', rollNumber: '99', admissionNumber: 'A99', groupId: 'g9',
+      customFeeAmount: null, concessionReason: null, feeOverrides: null,
+      group: { name: 'Class 9', section: null, displayOrder: 9 },
+      parents: [], studentFees: [],
+    }] as any);
+
+    const res = await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
+      .set('Authorization', adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(0);
+  });
+
+  test('monthly view scopes studentFees query to month, year, and academicYearId', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([] as any);
+
+    await request(app)
+      .get('/admin/fees/students-list?month=7&year=2026&period=monthly&academicYearId=ay1')
+      .set('Authorization', adminToken);
+
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({
+        studentFees: expect.objectContaining({
+          where: { month: 7, year: 2026, academicYearId: 'ay1' },
+        }),
+      }),
+    }));
+  });
+
+  test('monthly view with groupId filter still excludes ungenerated students in that group', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([studentWithoutFee] as any);
+
+    const res = await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1&groupId=g2')
+      .set('Authorization', adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(0);
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ groupId: 'g2' }),
+    }));
+  });
+
+  test('monthly view includes PAID generated fees', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([{
+      ...studentWithFee,
+      studentFees: [{ id: 'sf1', netAmount: 500000, paidAmount: 500000, status: 'PAID', payments: [{ id: 'p1', amount: 500000 }], extraItems: [] }],
+    }] as any);
+
+    const res = await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
+      .set('Authorization', adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].status).toBe('PAID');
+    expect(res.body.data[0].fee).not.toBeNull();
+  });
+
+  test('returns 400 when no academic year can be resolved', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue(null);
+
+    const res = await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=monthly')
+      .set('Authorization', adminToken);
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/academic year/i);
+  });
+});
+
+describe('POST /admin/student-fees/generate — class selection', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('only processes students in selected groupIds', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([
+      { id: 's1', groupId: 'g2a', customFeeAmount: null, feeOverrides: null },
+    ] as any);
+    prismaMock.feeStructure.findMany.mockResolvedValue([
+      { id: 'fs1', groupId: 'g2a', feeHeadId: 'fh1', amount: 500000, effectiveFrom: new Date(), effectiveTo: null, academicYearId: 'ay1', feeHead: { category: 'MONTHLY', name: 'Tuition' } },
+    ] as any);
+    prismaMock.studentFee.findUnique.mockResolvedValue(null);
+    prismaMock.studentFee.create.mockResolvedValue({} as any);
+
+    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+      month: 6, year: 2026, academicYearId: 'ay1', groupIds: ['g2a'], headIds: ['fh1'],
+    });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith({
+      where: { academicYearId: 'ay1', isActive: true, status: 'ACTIVE', groupId: { in: ['g2a'] } },
+      select: { id: true, groupId: true, customFeeAmount: true, feeOverrides: true },
+    });
+    expect(res.body.data.generated).toBe(1);
+    expect(res.body.data.total).toBe(1);
+  });
+
+  test('single section under a class — other sections not included when omitted from groupIds', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([
+      { id: 's1', groupId: 'g2a', customFeeAmount: null, feeOverrides: null },
+    ] as any);
+    prismaMock.feeStructure.findMany.mockResolvedValue([
+      { id: 'fs1', groupId: 'g2a', feeHeadId: 'fh1', amount: 500000, effectiveFrom: new Date(), effectiveTo: null, academicYearId: 'ay1', feeHead: { category: 'MONTHLY', name: 'Tuition' } },
+      { id: 'fs2', groupId: 'g2b', feeHeadId: 'fh1', amount: 600000, effectiveFrom: new Date(), effectiveTo: null, academicYearId: 'ay1', feeHead: { category: 'MONTHLY', name: 'Tuition' } },
+    ] as any);
+    prismaMock.studentFee.findUnique.mockResolvedValue(null);
+    prismaMock.studentFee.create.mockResolvedValue({} as any);
+
+    await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+      month: 6, year: 2026, academicYearId: 'ay1', groupIds: ['g2a'], headIds: ['fh1'],
+    });
+
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ groupId: { in: ['g2a'] } }),
+    }));
+    expect(prismaMock.studentFee.create).toHaveBeenCalledTimes(1);
+  });
+
+  test('without groupIds processes all active students in academic year', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([
+      { id: 's1', groupId: 'g1', customFeeAmount: null, feeOverrides: null },
+      { id: 's2', groupId: 'g2', customFeeAmount: null, feeOverrides: null },
+    ] as any);
+    prismaMock.feeStructure.findMany.mockResolvedValue([
+      { id: 'fs1', groupId: 'g1', feeHeadId: 'fh1', amount: 500000, effectiveFrom: new Date(), effectiveTo: null, academicYearId: 'ay1', feeHead: { category: 'MONTHLY', name: 'Tuition' } },
+      { id: 'fs2', groupId: 'g2', feeHeadId: 'fh1', amount: 500000, effectiveFrom: new Date(), effectiveTo: null, academicYearId: 'ay1', feeHead: { category: 'MONTHLY', name: 'Tuition' } },
+    ] as any);
+    prismaMock.studentFee.findUnique.mockResolvedValue(null);
+    prismaMock.studentFee.create.mockResolvedValue({} as any);
+
+    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+      month: 6, year: 2026, academicYearId: 'ay1', headIds: ['fh1'],
+    });
+
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { academicYearId: 'ay1', isActive: true, status: 'ACTIVE' },
+    }));
+    expect(res.body.data.generated).toBe(2);
+    expect(res.body.data.total).toBe(2);
+  });
+
+  test('does not create fee when selected class has zero structure total', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([
+      { id: 's1', groupId: 'g-empty', customFeeAmount: null, feeOverrides: null },
+    ] as any);
+    prismaMock.feeStructure.findMany.mockResolvedValue([] as any);
+    prismaMock.studentFee.findUnique.mockResolvedValue(null);
+
+    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+      month: 6, year: 2026, academicYearId: 'ay1', groupIds: ['g-empty'], headIds: ['fh1'],
+    });
+
+    expect(res.body.data.generated).toBe(0);
+    expect(prismaMock.studentFee.create).not.toHaveBeenCalled();
+  });
+
+  test('empty groupIds array processes no students', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([] as any);
+    prismaMock.feeStructure.findMany.mockResolvedValue([] as any);
+
+    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+      month: 6, year: 2026, academicYearId: 'ay1', groupIds: [], headIds: ['fh1'],
+    });
+
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ groupId: { in: [] } }),
+    }));
+    expect(res.body.data.generated).toBe(0);
+    expect(res.body.data.total).toBe(0);
+  });
+
+  test('uses explicit academicYearId over active year', async () => {
+    prismaMock.student.findMany.mockResolvedValue([
+      { id: 's1', groupId: 'g1', customFeeAmount: null, feeOverrides: null },
+    ] as any);
+    prismaMock.feeStructure.findMany.mockResolvedValue([
+      { id: 'fs1', groupId: 'g1', feeHeadId: 'fh1', amount: 500000, effectiveFrom: new Date(), effectiveTo: null, academicYearId: 'ay-old', feeHead: { category: 'MONTHLY', name: 'Tuition' } },
+    ] as any);
+    prismaMock.studentFee.findUnique.mockResolvedValue(null);
+    prismaMock.studentFee.create.mockResolvedValue({} as any);
+
+    await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+      month: 6, year: 2026, academicYearId: 'ay-old', headIds: ['fh1'],
+    });
+
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ academicYearId: 'ay-old' }),
+    }));
+    expect(prismaMock.feeStructure.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ academicYearId: 'ay-old' }),
+    }));
   });
 });
 
