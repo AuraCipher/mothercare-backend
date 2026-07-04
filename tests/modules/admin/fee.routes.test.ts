@@ -952,20 +952,40 @@ describe('POST /admin/student-fees/generate — AY unique key', () => {
 describe('GET /admin/families — AY scope', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  test('returns 400 without academic year', async () => {
+  test('returns 400 without academic year in search mode', async () => {
     prismaMock.academicYear.findFirst.mockResolvedValue(null);
     const res = await request(app).get('/admin/families?search=Ali').set('Authorization', adminToken);
     expect(res.status).toBe(400);
   });
 
-  test('scopes unpaid fees and students to academicYearId', async () => {
+  test('list mode returns all active families', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1' } as any);
     prismaMock.family.findMany.mockResolvedValue([
       {
-        id: 'fam1', fatherName: 'Ali Khan', phone: '0300',
+        id: 'fam1', name: 'Khan Family', fatherName: 'Ali Khan', phone: '0300', isActive: true,
+        students: [],
+        _count: { students: 2, payments: 1 },
+        createdBy: null, updatedBy: null,
+      },
+    ] as any);
+
+    const res = await request(app).get('/admin/families?academicYearId=ay1').set('Authorization', adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].name).toBe('Khan Family');
+    expect(res.body.data[0].studentCount).toBe(2);
+  });
+
+  test('scopes unpaid fees and students to academicYearId in search mode', async () => {
+    prismaMock.family.findMany.mockResolvedValue([
+      {
+        id: 'fam1', name: 'Khan Family', fatherName: 'Ali Khan', phone: '0300', isActive: true,
         students: [
           { id: 's1', name: 'Ahmed', studentFees: [{ id: 'sf1', month: 6, year: 2026, netAmount: 500000, paidAmount: 0, extraItems: [] }], group: { name: 'Class 2' } },
           { id: 's2', name: 'Sara', studentFees: [], group: { name: 'Class 3' } },
         ],
+        _count: { students: 2, payments: 0 },
+        createdBy: null, updatedBy: null,
       },
     ] as any);
 
@@ -975,7 +995,7 @@ describe('GET /admin/families — AY scope', () => {
       include: expect.objectContaining({
         students: expect.objectContaining({
           where: { academicYearId: 'ay1', isActive: true, status: 'ACTIVE' },
-          include: expect.objectContaining({
+          select: expect.objectContaining({
             studentFees: expect.objectContaining({
               where: { academicYearId: 'ay1', status: { in: ['UNPAID', 'PARTIAL'] } },
             }),
@@ -986,6 +1006,40 @@ describe('GET /admin/families — AY scope', () => {
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].students).toHaveLength(1);
     expect(res.body.data[0].students[0].id).toBe('s1');
+  });
+});
+
+describe('POST /admin/families — CRUD', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('rejects without name', async () => {
+    const res = await request(app).post('/admin/families').set('Authorization', adminToken).send({ studentIds: ['s1'] });
+    expect(res.status).toBe(400);
+  });
+
+  test('creates family with students', async () => {
+    prismaMock.student.findMany.mockResolvedValue([]);
+    prismaMock.$transaction.mockImplementation(async (cb: any) => {
+      const tx = {
+        family: {
+          create: jest.fn().mockResolvedValue({ id: 'fam-new', name: 'Ahmed Family' }),
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'fam-new', name: 'Ahmed Family', students: [{ id: 's1', name: 'Ahmed' }],
+            createdBy: { id: 'admin-1', name: 'Admin' },
+          }),
+        },
+        student: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        familyChangeLog: { create: jest.fn().mockResolvedValue({}) },
+      };
+      return cb(tx);
+    });
+    prismaMock.auditLog.create.mockResolvedValue({} as any);
+
+    const res = await request(app).post('/admin/families').set('Authorization', adminToken).send({
+      name: 'Ahmed Family', studentIds: ['s1'],
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.data.name).toBe('Ahmed Family');
   });
 });
 
