@@ -1082,6 +1082,270 @@ async function createReceiptSnapshot(
   });
 }
 
+const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function feeMonthKey(month: number, year: number) {
+  return year * 12 + month;
+}
+
+function monthLabelFromFee(month: number, year: number) {
+  return `${MONTH_LABELS[(month || 1) - 1]} ${year}`;
+}
+
+type FamilyReceiptTemplate = 'FIRST' | 'ARREARS' | 'CONTINUATION';
+
+async function detectFamilyReceiptTemplate(
+  familyId: string,
+  familyPaymentId: string,
+  payments: { studentId: string; studentFeeId: string; amount: number }[],
+  academicYearId: string | null,
+): Promise<FamilyReceiptTemplate> {
+  const priorCount = await prisma.familyPayment.count({
+    where: { familyId, id: { not: familyPaymentId } },
+  });
+  if (priorCount === 0) return 'FIRST';
+
+  let hasArrears = false;
+  let hasContinuation = false;
+
+  const byStudent = new Map<string, typeof payments>();
+  for (const p of payments) {
+    const list = byStudent.get(p.studentId) || [];
+    list.push(p);
+    byStudent.set(p.studentId, list);
+  }
+
+  for (const [studentId, studentPayments] of byStudent) {
+    const ayWhere = academicYearId ? { academicYearId } : {};
+    const allFees = await prisma.studentFee.findMany({
+      where: { studentId, ...ayWhere },
+      select: { id: true, month: true, year: true, paidAmount: true },
+      orderBy: [{ year: 'asc' }, { month: 'asc' }],
+    });
+    if (allFees.length === 0) continue;
+    const latest = allFees[allFees.length - 1];
+    const latestKey = feeMonthKey(latest.month, latest.year);
+
+    for (const p of studentPayments) {
+      const fee = allFees.find(f => f.id === p.studentFeeId);
+      if (!fee) continue;
+      const key = feeMonthKey(fee.month, fee.year);
+      if (key < latestKey) hasArrears = true;
+      if (key === latestKey && fee.paidAmount - p.amount > 0) hasContinuation = true;
+    }
+  }
+
+  if (hasArrears) return 'ARREARS';
+  if (hasContinuation) return 'CONTINUATION';
+  return 'ARREARS';
+}
+
+/** Build + persist combined family receipt snapshot after a family payment. */
+async function createFamilyReceiptSnapshot(familyPaymentId: string, userId: string) {
+  const fp = await prisma.familyPayment.findUnique({
+    where: { id: familyPaymentId },
+    include: {
+      family: { select: { id: true, name: true, fatherName: true, phone: true } },
+      payments: {
+        where: { revertedAt: null },
+        include: {
+          student: { select: { id: true, name: true, rollNumber: true, group: { select: { name: true, section: true } } } },
+          studentFee: { include: { extraItems: true } },
+          headAllocations: { where: { revertedAt: null } },
+        },
+      },
+    },
+  });
+  if (!fp || fp.payments.length === 0) return;
+
+  const templateType = await detectFamilyReceiptTemplate(
+    fp.familyId,
+    fp.id,
+    fp.payments.map(p => ({ studentId: p.studentId, studentFeeId: p.studentFeeId, amount: p.amount })),
+    fp.academicYearId,
+  );
+
+  const byStudent = new Map<string, typeof fp.payments>();
+  for (const p of fp.payments) {
+    const list = byStudent.get(p.studentId) || [];
+    list.push(p);
+    byStudent.set(p.studentId, list);
+  }
+
+  const studentSections: any[] = [];
+  let familyTotalDueBefore = 0;
+  let familyBalanceAfter = 0;
+
+  for (const [studentId, studentPayments] of byStudent) {
+    const student = studentPayments[0].student;
+    const sClass = [student.group?.name, student.group?.section].filter(Boolean).join(' — ') || '—';
+    const touchedFeeIds = new Set(studentPayments.map(p => p.studentFeeId));
+
+    const allFees = await prisma.studentFee.findMany({
+      where: { studentId, ...(fp.academicYearId ? { academicYearId: fp.academicYearId } : {}) },
+      include: { extraItems: true },
+    });
+
+    let studentDueBefore = 0;
+    let studentBalanceAfter = 0;
+    for (const f of allFees) {
+      const total = getFeeTotalDue(f);
+      const rem = Math.max(0, total - f.paidAmount);
+      studentBalanceAfter += rem;
+      if (touchedFeeIds.has(f.id)) {
+        const paidThis = studentPayments.filter(p => p.studentFeeId === f.id).reduce((s, p) => s + p.amount, 0);
+        studentDueBefore += rem + paidThis;
+      } else if (rem > 0) {
+        studentDueBefore += rem;
+      }
+    }
+
+    const previousMonths: { label: string; amountPaise: number; paidPaise: number }[] = [];
+    let currentMonth: any = null;
+
+    const sortedTouched = [...new Set(studentPayments.map(p => p.studentFeeId))]
+      .map(id => allFees.find(f => f.id === id)!)
+      .filter(Boolean)
+      .sort((a, b) => feeMonthKey(a.month, a.year) - feeMonthKey(b.month, b.year));
+
+    const latestTouched = sortedTouched[sortedTouched.length - 1];
+    const latestKey = latestTouched ? feeMonthKey(latestTouched.month, latestTouched.year) : 0;
+
+    for (const fee of sortedTouched) {
+      const feePayments = studentPayments.filter(p => p.studentFeeId === fee.id);
+      const paidThis = feePayments.reduce((s, p) => s + p.amount, 0);
+      const feeTotal = getFeeTotalDue(fee);
+      const dueBefore = Math.max(0, feeTotal - (fee.paidAmount - paidThis));
+      const key = feeMonthKey(fee.month, fee.year);
+      const label = monthLabelFromFee(fee.month, fee.year);
+
+      if (key < latestKey || (templateType === 'ARREARS' && sortedTouched.length > 1 && fee.id !== latestTouched?.id)) {
+        previousMonths.push({ label, amountPaise: dueBefore, paidPaise: paidThis });
+        continue;
+      }
+
+      const heads: any[] = [];
+      const extras: any[] = [];
+      const headBreakdown = (fee.feeHeadBreakdown as any[]) || [];
+
+      for (const h of headBreakdown) {
+        const headAllocs = feePayments.flatMap(p => p.headAllocations.filter(a => a.feeHeadId === h.feeHeadId));
+        const paidThisHead = headAllocs.reduce((s, a) => s + a.amount, 0);
+        const priorAllocs = await prisma.paymentHeadAllocation.findMany({
+          where: {
+            studentFeeId: fee.id,
+            feeHeadId: h.feeHeadId,
+            revertedAt: null,
+            paymentId: { notIn: feePayments.map(p => p.id) },
+          },
+        });
+        const paidBefore = priorAllocs.reduce((s, a) => s + a.amount, 0);
+        const dueBeforeHead = Math.max(0, (h.amount || 0) - paidBefore);
+        if (dueBeforeHead > 0 || paidThisHead > 0) {
+          heads.push({
+            name: h.name,
+            dueBeforePaise: dueBeforeHead,
+            paidPaise: paidThisHead,
+            remainingPaise: Math.max(0, dueBeforeHead - paidThisHead),
+          });
+        }
+      }
+
+      for (const e of fee.extraItems || []) {
+        const extraAllocs = feePayments.flatMap(p => p.headAllocations.filter(a => a.feeExtraItemId === e.id));
+        const paidThisExtra = extraAllocs.reduce((s, a) => s + a.amount, 0);
+        const priorAllocs = await prisma.paymentHeadAllocation.findMany({
+          where: {
+            studentFeeId: fee.id,
+            feeExtraItemId: e.id,
+            revertedAt: null,
+            paymentId: { notIn: feePayments.map(p => p.id) },
+          },
+        });
+        const paidBefore = priorAllocs.reduce((s, a) => s + a.amount, 0);
+        const dueBeforeExtra = Math.max(0, e.amount - paidBefore);
+        if (dueBeforeExtra > 0 || paidThisExtra > 0) {
+          extras.push({
+            name: e.name,
+            dueBeforePaise: dueBeforeExtra,
+            paidPaise: paidThisExtra,
+            remainingPaise: Math.max(0, dueBeforeExtra - paidThisExtra),
+          });
+        }
+      }
+
+      if (heads.length === 0 && extras.length === 0 && paidThis > 0) {
+        heads.push({ name: label, dueBeforePaise: dueBefore, paidPaise: paidThis, remainingPaise: Math.max(0, dueBefore - paidThis) });
+      }
+
+      currentMonth = {
+        label,
+        heads,
+        extras,
+        totalDueBeforePaise: dueBefore,
+        paidPaise: paidThis,
+        remainingPaise: Math.max(0, feeTotal - fee.paidAmount),
+      };
+    }
+
+    const amountPaidPaise = studentPayments.reduce((s, p) => s + p.amount, 0);
+    studentSections.push({
+      studentId,
+      name: student.name,
+      class: sClass,
+      rollNumber: student.rollNumber,
+      previousMonths,
+      previousBalancePaise: previousMonths.reduce((s, m) => s + m.amountPaise, 0),
+      currentMonth,
+      amountPaidPaise,
+      totalDueBeforePaise: studentDueBefore,
+      balanceAfterPaise: studentBalanceAfter,
+    });
+
+    familyTotalDueBefore += studentDueBefore;
+    familyBalanceAfter += studentBalanceAfter;
+  }
+
+  const snapshot = {
+    templateType,
+    receiptNumber: fp.receiptNumber,
+    familyName: fp.family.name,
+    fatherName: fp.family.fatherName,
+    phone: fp.family.phone,
+    paymentMethod: fp.paymentMethod || 'CASH',
+    reference: fp.reference,
+    paymentDate: fp.paymentDate.toISOString(),
+    totalDuePaise: familyTotalDueBefore,
+    amountPaidPaise: fp.totalAmount,
+    balanceAfterPaise: familyBalanceAfter,
+    isFullyPaid: familyBalanceAfter <= 0,
+    students: studentSections,
+  };
+
+  await prisma.familyPaymentReceipt.upsert({
+    where: { familyPaymentId: fp.id },
+    create: {
+      familyPaymentId: fp.id,
+      receiptNumber: fp.receiptNumber,
+      templateType,
+      snapshot: snapshot as any,
+      totalDuePaise: familyTotalDueBefore,
+      amountPaidPaise: fp.totalAmount,
+      balanceAfterPaise: familyBalanceAfter,
+      paymentMethod: fp.paymentMethod,
+      reference: fp.reference,
+      paymentDate: fp.paymentDate,
+    },
+    update: {
+      templateType,
+      snapshot: snapshot as any,
+      totalDuePaise: familyTotalDueBefore,
+      amountPaidPaise: fp.totalAmount,
+      balanceAfterPaise: familyBalanceAfter,
+    },
+  });
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // PAYMENTS
 // ═══════════════════════════════════════════════════════════════════
@@ -2600,6 +2864,12 @@ router.post('/family-payments/allocate', asyncHandler(async (req: Request, res: 
     }
   }
 
+  try {
+    await createFamilyReceiptSnapshot(familyPayment.id, userId);
+  } catch (famSnapErr) {
+    console.error('Family receipt snapshot failed:', (famSnapErr as Error).message);
+  }
+
   res.status(201).json({
     success: true,
     data: {
@@ -2774,7 +3044,41 @@ router.post('/family-payments', asyncHandler(async (req: Request, res: Response)
     }
   }
 
+  try {
+    await createFamilyReceiptSnapshot(familyPayment.id, userId);
+  } catch (famSnapErr) {
+    console.error('Family receipt snapshot failed:', (famSnapErr as Error).message);
+  }
+
   res.status(201).json({ success: true, data: { familyPayment, receiptNumber, totalAmount, paymentCount: createdPayments.length } });
+}));
+
+// GET /admin/family-payments/:id/receipt — Combined family receipt snapshot
+router.get('/family-payments/:id/receipt', asyncHandler(async (req: Request, res: Response) => {
+  const receipt = await prisma.familyPaymentReceipt.findUnique({
+    where: { familyPaymentId: req.params.id },
+  });
+  if (!receipt) {
+    res.status(404).json({ success: false, message: 'No family receipt snapshot found' });
+    return;
+  }
+  res.json({ success: true, data: receipt });
+}));
+
+// POST /admin/family-payments/:id/print-receipt — Track family receipt print
+router.post('/family-payments/:id/print-receipt', asyncHandler(async (req: Request, res: Response) => {
+  const receipt = await prisma.familyPaymentReceipt.findUnique({
+    where: { familyPaymentId: req.params.id },
+  });
+  if (!receipt) { res.status(404).json({ success: false, message: 'No family receipt snapshot' }); return; }
+  const updated = await prisma.familyPaymentReceipt.update({
+    where: { id: receipt.id },
+    data: {
+      printedAt: receipt.printedAt || new Date(),
+      printCount: { increment: 1 },
+    },
+  });
+  res.json({ success: true, data: { printCount: updated.printCount } });
 }));
 
 // GET /admin/family-payments/:id — Get family payment detail (for receipt)
