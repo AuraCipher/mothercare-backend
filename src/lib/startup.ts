@@ -1,4 +1,3 @@
-import type { PrismaClient } from '@prisma/client';
 import logger from './logger';
 import env from '../config/env';
 import { testRedisConnection } from '../config/redis';
@@ -83,7 +82,7 @@ export function printStartupBanner(results: CheckResult[]) {
 /**
  * Graceful shutdown handler
  */
-export function setupGracefulShutdown(prisma: PrismaClient, server: any) {
+export function setupGracefulShutdown(prisma: { $disconnect: () => Promise<void> }, server: any) {
   const shutdown = async (signal: string) => {
     logger.info(`Received ${signal}. Shutting down gracefully...`);
 
