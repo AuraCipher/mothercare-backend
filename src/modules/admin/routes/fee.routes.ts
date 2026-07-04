@@ -6,6 +6,12 @@ const router = Router();
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
   (req: Request, res: Response, next: NextFunction) => { fn(req, res, next).catch(next); };
 
+async function resolveAcademicYearId(explicitId?: string | null): Promise<string | null> {
+  if (explicitId) return explicitId;
+  const active = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } });
+  return active?.id ?? null;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // FEE HEADS CRUD
 // ═══════════════════════════════════════════════════════════════════
@@ -282,12 +288,15 @@ router.get('/student-fees/:id/extra-items', asyncHandler(async (req: Request, re
 
 // GET /admin/fees/students-list — All active students with their fee for given period
 router.get('/fees/students-list', asyncHandler(async (req: Request, res: Response) => {
-  const { month, year, groupId, search, period } = req.query;
+  const { month, year, groupId, search, period, academicYearId } = req.query;
   const isFull = period === 'full';
   const m = parseInt(month as string, 10) || (new Date().getMonth() + 1);
   const y = parseInt(year as string, 10) || new Date().getFullYear();
 
-  const where: any = { isActive: true, status: 'ACTIVE' };
+  const ayId = await resolveAcademicYearId(academicYearId as string | undefined);
+  if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
+
+  const where: any = { isActive: true, status: 'ACTIVE', academicYearId: ayId };
   if (groupId) where.groupId = groupId as string;
   if (search) {
     where.OR = [
@@ -295,6 +304,10 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
       { rollNumber: { contains: search as string } },
     ];
   }
+
+  const feeWhere = isFull
+    ? { academicYearId: ayId }
+    : { month: m, year: y, academicYearId: ayId };
 
   const students = await prisma.student.findMany({
     where,
@@ -308,7 +321,7 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
         },
       },
       studentFees: {
-        where: isFull ? {} : { month: m, year: y },
+        where: feeWhere,
         include: { payments: { where: { revertedAt: null }, select: { id: true, amount: true, receiptNumber: true, paymentMethod: true, createdAt: true } }, extraItems: true },
       },
     },
@@ -329,15 +342,12 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
   // of dues).
   let expectedPeriodCount = 0;
   if (isFull) {
-    const activeAy = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } });
-    if (activeAy) {
-      const periods = await prisma.studentFee.findMany({
-        where: { academicYearId: activeAy.id },
-        select: { month: true, year: true },
-        distinct: ['month', 'year'],
-      });
-      expectedPeriodCount = periods.length;
-    }
+    const periods = await prisma.studentFee.findMany({
+      where: { academicYearId: ayId },
+      select: { month: true, year: true },
+      distinct: ['month', 'year'],
+    });
+    expectedPeriodCount = periods.length;
   }
 
   const data = students.map(s => {
@@ -474,8 +484,8 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
   const selectedCats: string[] = categories || ['MONTHLY'];
   const selectedHeadIds: string[] | null = headIds?.length > 0 ? headIds : null;
 
-  const ayId = academicYearId || (await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } }))?.id;
-  if (!ayId) { res.status(400).json({ success: false, message: 'No active academic year' }); return; }
+  const ayId = await resolveAcademicYearId(academicYearId);
+  if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
 
   const students = await prisma.student.findMany({
     where: { academicYearId: ayId, isActive: true, status: 'ACTIVE' },
@@ -601,8 +611,8 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
 router.post('/student-fees/recalculate', asyncHandler(async (req: Request, res: Response) => {
   const { month, year, academicYearId, studentId } = req.body;
 
-  const ayId = academicYearId || (await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } }))?.id;
-  if (!ayId) { res.status(400).json({ success: false, message: 'No active academic year' }); return; }
+  const ayId = await resolveAcademicYearId(academicYearId);
+  if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
 
   // Build filter: if studentId provided, only recalculate that student; if month/year, only that period
   const where: any = { academicYearId: ayId };
@@ -1723,8 +1733,10 @@ router.get('/fees/summary', asyncHandler(async (req: Request, res: Response) => 
   const m = parseInt(month as string, 10) || (new Date().getMonth() + 1);
   const y = parseInt(year as string, 10) || new Date().getFullYear();
 
-  const where: any = { month: m, year: y };
-  if (academicYearId) where.academicYearId = academicYearId as string;
+  const ayId = await resolveAcademicYearId(academicYearId as string | undefined);
+  if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
+
+  const where: any = { month: m, year: y, academicYearId: ayId };
 
   const allFees = await prisma.studentFee.findMany({
     where,
@@ -1742,12 +1754,15 @@ router.get('/fees/summary', asyncHandler(async (req: Request, res: Response) => 
 
 // GET /admin/fees/defaulter — Students overdue
 router.get('/fees/defaulter', asyncHandler(async (req: Request, res: Response) => {
-  const { month, year, days } = req.query;
+  const { month, year, days, academicYearId } = req.query;
   const m = parseInt(month as string, 10) || (new Date().getMonth() + 1);
   const y = parseInt(year as string, 10) || new Date().getFullYear();
 
+  const ayId = await resolveAcademicYearId(academicYearId as string | undefined);
+  if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
+
   const fees = await prisma.studentFee.findMany({
-    where: { month: m, year: y, status: { in: ['UNPAID', 'PARTIAL'] } },
+    where: { month: m, year: y, academicYearId: ayId, status: { in: ['UNPAID', 'PARTIAL'] } },
     include: { student: { select: { name: true, rollNumber: true, phone: true, group: { select: { name: true, section: true } } } } },
     orderBy: [{ netAmount: 'desc' }],
   });
@@ -1756,12 +1771,15 @@ router.get('/fees/defaulter', asyncHandler(async (req: Request, res: Response) =
 
 // GET /admin/fees/collection-report — Per-class breakdown
 router.get('/fees/collection-report', asyncHandler(async (req: Request, res: Response) => {
-  const { month, year } = req.query;
+  const { month, year, academicYearId } = req.query;
   const m = parseInt(month as string, 10) || (new Date().getMonth() + 1);
   const y = parseInt(year as string, 10) || new Date().getFullYear();
 
+  const ayId = await resolveAcademicYearId(academicYearId as string | undefined);
+  if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
+
   const fees = await prisma.studentFee.findMany({
-    where: { month: m, year: y },
+    where: { month: m, year: y, academicYearId: ayId },
     include: { group: { select: { name: true, section: true } } },
   });
 
