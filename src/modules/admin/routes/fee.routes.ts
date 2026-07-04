@@ -23,6 +23,24 @@ function computeFeeStatus(paidAmount: number, totalDue: number): string {
   return paidAmount > 0 ? 'PARTIAL' : 'UNPAID';
 }
 
+function computeStudentStatusFromFees(
+  fees: { netAmount: number; paidAmount: number; extraItems?: { amount: number }[] | null }[],
+): string {
+  if (!fees || fees.length === 0) return 'NO_FEE';
+  const totalDue = fees.reduce((s, f) => s + getFeeTotalDue(f), 0);
+  const paid = fees.reduce((s, f) => s + f.paidAmount, 0);
+  if (totalDue === 0) return 'NO_FEE';
+  return computeFeeStatus(paid, totalDue);
+}
+
+function matchesFeeStatusFilter(status: string, filter: string): boolean {
+  const f = filter.toLowerCase();
+  if (f === 'paid') return status === 'PAID' || status === 'OVERPAID';
+  if (f === 'partial') return status === 'PARTIAL';
+  if (f === 'unpaid') return status === 'UNPAID';
+  return true;
+}
+
 function feeRemainingPaise(fee: { netAmount: number; paidAmount: number; extraItems?: { amount: number }[] | null }): number {
   return Math.max(0, getFeeTotalDue(fee) - fee.paidAmount);
 }
@@ -52,7 +70,9 @@ async function appendFamilyChangeLog(
   });
 }
 
-const familyStudentInclude = (ayId: string | null, unpaidOnly = false) => {
+const familyStudentInclude = (ayId: string | null, opts?: { unpaidOnly?: boolean; includeFees?: boolean }) => {
+  const unpaidOnly = opts?.unpaidOnly ?? false;
+  const includeFees = opts?.includeFees ?? !!ayId;
   const block: any = {
     where: ayId
       ? { academicYearId: ayId, isActive: true, status: 'ACTIVE' as const }
@@ -65,7 +85,7 @@ const familyStudentInclude = (ayId: string | null, unpaidOnly = false) => {
       group: { select: { name: true, section: true, displayOrder: true } },
     },
   };
-  if (ayId) {
+  if (ayId && includeFees) {
     block.select.studentFees = {
       where: unpaidOnly
         ? { academicYearId: ayId, status: { in: ['UNPAID', 'PARTIAL'] } }
@@ -416,13 +436,14 @@ function buildStudentListWhere(query: {
 
 // GET /admin/fees/students-list — All active students with their fee for given period
 router.get('/fees/students-list', asyncHandler(async (req: Request, res: Response) => {
-  const { month, year, groupId, search, roll, period, academicYearId, fatherSearch, page: pageQ, limit: limitQ } = req.query;
+  const { month, year, groupId, search, roll, period, academicYearId, fatherSearch, feeStatus, page: pageQ, limit: limitQ } = req.query;
   const isFull = period === 'full';
   const m = parseInt(month as string, 10) || (new Date().getMonth() + 1);
   const y = parseInt(year as string, 10) || new Date().getFullYear();
   const page = Math.max(1, parseInt(pageQ as string, 10) || 1);
   const limit = Math.min(500, Math.max(1, parseInt(limitQ as string, 10) || 100));
   const skip = (page - 1) * limit;
+  const statusFilter = typeof feeStatus === 'string' && feeStatus.trim() ? feeStatus.trim().toLowerCase() : '';
 
   const ayId = await resolveAcademicYearId(academicYearId as string | undefined);
   if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
@@ -439,50 +460,8 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
     ? { academicYearId: ayId }
     : { month: m, year: y, academicYearId: ayId };
 
-  // Monthly view: paginate from StudentFee so every row has a generated fee
-  if (!isFull) {
-    const monthlyFeeWhere = { ...feeWhere, student: where };
-    const total = await prisma.studentFee.count({ where: monthlyFeeWhere });
-    const feeRecords = await prisma.studentFee.findMany({
-      where: monthlyFeeWhere,
-      include: {
-        extraItems: true,
-        payments: { where: { revertedAt: null }, select: { id: true, amount: true, receiptNumber: true, paymentMethod: true, createdAt: true } },
-        student: { select: studentListSelect },
-      },
-      orderBy: [{ student: { group: { displayOrder: 'asc' } } }, { student: { rollNumber: 'asc' } }],
-      skip,
-      take: limit,
-    });
-
-    const getExtra = (f: any) => (f.extraItems || []).reduce((s: number, e: any) => s + e.amount, 0);
-    const data = feeRecords.map(mf => {
-      const s = mf.student;
-      const mfExtra = getExtra(mf);
-      const effectiveNet = mf.netAmount + mfExtra;
-      return {
-        student: { ...s, studentFees: undefined, feeOverrides: undefined },
-        fee: mf,
-        id: mf.id,
-        netAmount: effectiveNet,
-        paidAmount: mf.paidAmount || 0,
-        status: (mf.paidAmount ?? 0) >= effectiveNet
-          ? ((mf.paidAmount ?? 0) > effectiveNet ? 'OVERPAID' : 'PAID')
-          : (mf.paidAmount ?? 0) > 0 ? 'PARTIAL' : 'UNPAID',
-        payments: mf.payments || [],
-        _extraAmount: mfExtra,
-      };
-    });
-
-    res.json({
-      success: true,
-      data,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 0 },
-    });
-    return;
-  }
-
-  const total = await prisma.student.count({ where });
+  const needsStatusFilter = !!statusFilter && ['paid', 'partial', 'unpaid'].includes(statusFilter);
+  const total = needsStatusFilter ? undefined : await prisma.student.count({ where });
   const students = await prisma.student.findMany({
     where,
     select: {
@@ -493,8 +472,7 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
       },
     },
     orderBy: [{ group: { displayOrder: 'asc' } }, { rollNumber: 'asc' }],
-    skip,
-    take: limit,
+    ...(needsStatusFilter ? {} : { skip, take: limit }),
   });
 
   const getExtra = (f: any) => (f.extraItems || []).reduce((s: number, e: any) => s + e.amount, 0);
@@ -611,10 +589,17 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
     };
   });
 
+  let filteredData = data;
+  if (needsStatusFilter) {
+    filteredData = data.filter(row => matchesFeeStatusFilter(row.status, statusFilter));
+  }
+  const filteredTotal = needsStatusFilter ? filteredData.length : (total ?? data.length);
+  const pagedData = needsStatusFilter ? filteredData.slice(skip, skip + limit) : filteredData;
+
   res.json({
     success: true,
-    data,
-    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 0 },
+    data: pagedData,
+    pagination: { page, limit, total: filteredTotal, totalPages: Math.ceil(filteredTotal / limit) || 0 },
   });
 }));
 
@@ -1098,6 +1083,50 @@ function feeMonthKey(month: number, year: number) {
 
 function monthLabelFromFee(month: number, year: number) {
   return `${MONTH_LABELS[(month || 1) - 1]} ${year}`;
+}
+
+type StudentReceiptTemplate = 'FIRST' | 'ARREARS' | 'CONTINUATION';
+
+function buildReceiptLine(name: string, dueBefore: number, paidThis: number) {
+  return {
+    name,
+    dueBeforePaise: dueBefore,
+    paidPaise: paidThis,
+    remainingPaise: Math.max(0, dueBefore - paidThis),
+    amountPaise: dueBefore,
+  };
+}
+
+async function detectStudentReceiptTemplate(
+  studentId: string,
+  paymentIds: string[],
+  prevMonthFeeIds: string[],
+  curStudentFeeId: string | null,
+): Promise<StudentReceiptTemplate> {
+  const excludeIds = paymentIds.filter(Boolean);
+  const priorCount = await prisma.payment.count({
+    where: {
+      studentId,
+      ...(excludeIds.length > 0 ? { id: { notIn: excludeIds } } : {}),
+      revertedAt: null,
+    },
+  });
+  if (priorCount === 0 && prevMonthFeeIds.length === 0) return 'FIRST';
+  if (prevMonthFeeIds.length > 0) return 'ARREARS';
+  if (curStudentFeeId) {
+    const fee = await prisma.studentFee.findUnique({ where: { id: curStudentFeeId } });
+    if (fee) {
+      const thisPaymentSum = excludeIds.length > 0
+        ? await prisma.payment.aggregate({
+            where: { studentFeeId: curStudentFeeId, id: { in: excludeIds }, revertedAt: null },
+            _sum: { amount: true },
+          })
+        : { _sum: { amount: 0 } };
+      const paidBefore = fee.paidAmount - (thisPaymentSum._sum.amount || 0);
+      if (paidBefore > 0) return 'CONTINUATION';
+    }
+  }
+  return priorCount === 0 ? 'FIRST' : 'ARREARS';
 }
 
 type FamilyReceiptTemplate = 'FIRST' | 'ARREARS' | 'CONTINUATION';
@@ -2183,11 +2212,13 @@ router.get('/families/students-picker', asyncHandler(async (req: Request, res: R
 
 // GET /admin/families — List or search families (family-pay search mode when `search` is set)
 router.get('/families', asyncHandler(async (req: Request, res: Response) => {
-  const { search, academicYearId, includeInactive } = req.query;
+  const { search, academicYearId, includeInactive, feeStatus } = req.query;
   const ayId = await resolveAcademicYearId(academicYearId as string | undefined);
 
   const searchTerm = typeof search === 'string' ? search.trim() : '';
   const isSearchMode = searchTerm.length > 0;
+  const statusFilter = typeof feeStatus === 'string' && feeStatus.trim() ? feeStatus.trim().toLowerCase() : '';
+  const needsStatusFilter = !!statusFilter && ['paid', 'partial', 'unpaid'].includes(statusFilter);
 
   const resolvedAyId = ayId ?? (isSearchMode ? null : await resolveAcademicYearId(undefined));
   if (isSearchMode && !resolvedAyId) {
@@ -2210,7 +2241,10 @@ router.get('/families', asyncHandler(async (req: Request, res: Response) => {
   const families = await prisma.family.findMany({
     where,
     include: {
-      students: familyStudentInclude(resolvedAyId, isSearchMode),
+      students: familyStudentInclude(resolvedAyId, {
+        unpaidOnly: isSearchMode && !needsStatusFilter,
+        includeFees: isSearchMode || needsStatusFilter,
+      }),
       _count: { select: { students: true, payments: true } },
       createdBy: { select: { id: true, name: true } },
       updatedBy: { select: { id: true, name: true } },
@@ -2231,7 +2265,7 @@ router.get('/families', asyncHandler(async (req: Request, res: Response) => {
       paymentCount: f._count.payments,
       totalDuePaise,
       unpaidFeeCount: unpaidCount,
-      students: isSearchMode ? students : undefined,
+      students: isSearchMode || needsStatusFilter ? students : undefined,
     };
   });
 
@@ -2243,6 +2277,17 @@ router.get('/families', asyncHandler(async (req: Request, res: Response) => {
         students: (f.students || []).filter((s: any) => (s.studentFees?.length ?? 0) > 0),
       }))
       .filter(f => (f.students?.length ?? 0) > 0);
+  }
+
+  if (needsStatusFilter) {
+    data = data
+      .filter(f => (f.students || []).some((s: any) =>
+        matchesFeeStatusFilter(computeStudentStatusFromFees(s.studentFees || []), statusFilter),
+      ))
+      .map(({ students, ...rest }) => ({
+        ...rest,
+        students: isSearchMode ? students : undefined,
+      }));
   }
 
   res.json({ success: true, data });
@@ -2322,9 +2367,10 @@ router.post('/families', asyncHandler(async (req: Request, res: Response) => {
 
 // GET /admin/families/:id — Family detail with dues and payment history
 router.get('/families/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { academicYearId } = req.query;
+  const { academicYearId, feeStatus } = req.query;
   const ayId = await resolveAcademicYearId(academicYearId as string | undefined);
   if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
+  const statusFilter = typeof feeStatus === 'string' && feeStatus.trim() ? feeStatus.trim().toLowerCase() : '';
 
   const family = await prisma.family.findUnique({
     where: { id: req.params.id },
@@ -2376,6 +2422,7 @@ router.get('/families/:id', asyncHandler(async (req: Request, res: Response) => 
 
   const studentSummaries = family.students.map(s => {
     const { totalDuePaise, unpaidCount } = summarizeStudentFees(s.studentFees);
+    const feeStatusValue = computeStudentStatusFromFees(s.studentFees);
     return {
       id: s.id,
       name: s.name,
@@ -2384,13 +2431,14 @@ router.get('/families/:id', asyncHandler(async (req: Request, res: Response) => 
       group: s.group,
       totalDuePaise,
       unpaidFeeCount: unpaidCount,
+      feeStatus: feeStatusValue,
       studentFees: s.studentFees.map(f => ({
         ...f,
         totalDuePaise: getFeeTotalDue(f),
         remainingPaise: feeRemainingPaise(f),
       })),
     };
-  });
+  }).filter(s => matchesFeeStatusFilter(s.feeStatus, statusFilter));
 
   const totalDuePaise = studentSummaries.reduce((sum, s) => sum + s.totalDuePaise, 0);
 
