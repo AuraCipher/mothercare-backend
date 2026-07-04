@@ -18,6 +18,7 @@ import examSessionRoutes from './exam-session.routes';
 import examTypeRoutes from './exam-type.routes';
 import examRoutes from './exam.routes';
 import examStructureRoutes from './exam-structure.routes';
+import marksEntryRoutes from './marks-entry.routes';
 
 const router = Router();
 const meRouter = Router();
@@ -53,6 +54,7 @@ router.use(examSessionRoutes); // Contains /exam-sessions — ExamSession CRUD
 router.use(examTypeRoutes); // Contains /exam-sessions/:sessionId/exam-types — ExamType tag manager
 router.use(examRoutes); // Contains /exam-sessions/:sessionId/exams — Exam CRUD
 router.use(examStructureRoutes); // Contains /exams/:id/structure — Exam class/subject structure
+router.use(marksEntryRoutes); // Contains /exam-class-subjects/:id/marks-grid, /exam-class-subjects/:id/marks — Marks entry
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
