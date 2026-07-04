@@ -301,50 +301,133 @@ router.get('/student-fees/:id/extra-items', asyncHandler(async (req: Request, re
 // ALL STUDENTS WITH FEE STATUS (for Collections page)
 // ═══════════════════════════════════════════════════════════════════
 
+const studentListSelect = {
+  id: true, name: true, rollNumber: true, admissionNumber: true,
+  groupId: true, customFeeAmount: true, concessionReason: true, feeOverrides: true,
+  group: { select: { name: true, section: true, displayOrder: true } },
+  parents: {
+    include: {
+      parent: { select: { relation: true, phone: true, user: { select: { name: true } } } },
+    },
+  },
+} as const;
+
+function buildStudentListWhere(query: {
+  groupId?: string; search?: string; roll?: string; fatherSearch?: string; ayId: string;
+}) {
+  const where: any = { isActive: true, status: 'ACTIVE', academicYearId: query.ayId };
+  if (query.groupId) where.groupId = query.groupId;
+  if (query.roll) where.rollNumber = query.roll;
+  if (query.search) {
+    const q = query.search;
+    where.OR = [
+      { name: { contains: q, mode: 'insensitive' } },
+      { rollNumber: { contains: q } },
+    ];
+  }
+  if (query.fatherSearch) {
+    const fq = query.fatherSearch;
+    where.AND = [
+      ...(where.AND || []),
+      {
+        parents: {
+          some: {
+            parent: {
+              relation: 'Father',
+              OR: [
+                { user: { name: { contains: fq, mode: 'insensitive' } } },
+                { phone: { contains: fq } },
+              ],
+            },
+          },
+        },
+      },
+    ];
+  }
+  return where;
+}
+
 // GET /admin/fees/students-list — All active students with their fee for given period
 router.get('/fees/students-list', asyncHandler(async (req: Request, res: Response) => {
-  const { month, year, groupId, search, roll, period, academicYearId } = req.query;
+  const { month, year, groupId, search, roll, period, academicYearId, fatherSearch, page: pageQ, limit: limitQ } = req.query;
   const isFull = period === 'full';
   const m = parseInt(month as string, 10) || (new Date().getMonth() + 1);
   const y = parseInt(year as string, 10) || new Date().getFullYear();
+  const page = Math.max(1, parseInt(pageQ as string, 10) || 1);
+  const limit = Math.min(500, Math.max(1, parseInt(limitQ as string, 10) || 100));
+  const skip = (page - 1) * limit;
 
   const ayId = await resolveAcademicYearId(academicYearId as string | undefined);
   if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
 
-  const where: any = { isActive: true, status: 'ACTIVE', academicYearId: ayId };
-  if (groupId) where.groupId = groupId as string;
-  if (roll) where.rollNumber = roll as string;
-  if (search) {
-    const q = search as string;
-    where.OR = [
-      { name: { contains: q, mode: 'insensitive' } },
-      { rollNumber: { contains: q } },
-      { parents: { some: { parent: { user: { name: { contains: q, mode: 'insensitive' } } } } } },
-      { parents: { some: { parent: { phone: { contains: q } } } } },
-    ];
-  }
+  const where = buildStudentListWhere({
+    ayId,
+    groupId: groupId as string | undefined,
+    search: search as string | undefined,
+    roll: roll as string | undefined,
+    fatherSearch: fatherSearch as string | undefined,
+  });
 
   const feeWhere = isFull
     ? { academicYearId: ayId }
     : { month: m, year: y, academicYearId: ayId };
 
+  // Monthly view: paginate from StudentFee so every row has a generated fee
+  if (!isFull) {
+    const monthlyFeeWhere = { ...feeWhere, student: where };
+    const total = await prisma.studentFee.count({ where: monthlyFeeWhere });
+    const feeRecords = await prisma.studentFee.findMany({
+      where: monthlyFeeWhere,
+      include: {
+        extraItems: true,
+        payments: { where: { revertedAt: null }, select: { id: true, amount: true, receiptNumber: true, paymentMethod: true, createdAt: true } },
+        student: { select: studentListSelect },
+      },
+      orderBy: [{ student: { group: { displayOrder: 'asc' } } }, { student: { rollNumber: 'asc' } }],
+      skip,
+      take: limit,
+    });
+
+    const getExtra = (f: any) => (f.extraItems || []).reduce((s: number, e: any) => s + e.amount, 0);
+    const data = feeRecords.map(mf => {
+      const s = mf.student;
+      const mfExtra = getExtra(mf);
+      const effectiveNet = mf.netAmount + mfExtra;
+      return {
+        student: { ...s, studentFees: undefined, feeOverrides: undefined },
+        fee: mf,
+        id: mf.id,
+        netAmount: effectiveNet,
+        paidAmount: mf.paidAmount || 0,
+        status: (mf.paidAmount ?? 0) >= effectiveNet
+          ? ((mf.paidAmount ?? 0) > effectiveNet ? 'OVERPAID' : 'PAID')
+          : (mf.paidAmount ?? 0) > 0 ? 'PARTIAL' : 'UNPAID',
+        payments: mf.payments || [],
+        _extraAmount: mfExtra,
+      };
+    });
+
+    res.json({
+      success: true,
+      data,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 0 },
+    });
+    return;
+  }
+
+  const total = await prisma.student.count({ where });
   const students = await prisma.student.findMany({
     where,
     select: {
-      id: true, name: true, rollNumber: true, admissionNumber: true,
-      groupId: true, customFeeAmount: true, concessionReason: true, feeOverrides: true,
-      group: { select: { name: true, section: true, displayOrder: true } },
-      parents: {
-        include: {
-          parent: { select: { relation: true, phone: true, user: { select: { name: true } } } },
-        },
-      },
+      ...studentListSelect,
       studentFees: {
         where: feeWhere,
         include: { payments: { where: { revertedAt: null }, select: { id: true, amount: true, receiptNumber: true, paymentMethod: true, createdAt: true } }, extraItems: true },
       },
     },
     orderBy: [{ group: { displayOrder: 'asc' } }, { rollNumber: 'asc' }],
+    skip,
+    take: limit,
   });
 
   const getExtra = (f: any) => (f.extraItems || []).reduce((s: number, e: any) => s + e.amount, 0);
@@ -459,9 +542,13 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
       payments: mf?.payments || [],
       _extraAmount: mfExtra,
     };
-  }).filter(row => isFull || row.fee != null);
+  });
 
-  res.json({ success: true, data });
+  res.json({
+    success: true,
+    data,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 0 },
+  });
 }));
 
 // ═══════════════════════════════════════════════════════════════════
@@ -500,8 +587,11 @@ router.get('/student-fees', asyncHandler(async (req: Request, res: Response) => 
 
 // POST /admin/student-fees/generate — Generate monthly fees with selected categories
 router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Response) => {
-  const { month, year, academicYearId, categories, headIds, groupIds } = req.body;
+  const { month, year, academicYearId, categories, headIds, groupIds, mode: modeRaw } = req.body;
   if (!month || !year) { res.status(400).json({ success: false, message: 'month and year required' }); return; }
+  const mode: 'generate' | 'update' | 'regenerate' = ['generate', 'update', 'regenerate'].includes(modeRaw)
+    ? modeRaw
+    : 'generate';
   const selectedCats: string[] = categories || ['MONTHLY'];
   const selectedHeadIds: string[] | null = headIds?.length > 0 ? headIds : null;
   const hasGroupFilter = Array.isArray(groupIds);
@@ -516,6 +606,23 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     where: studentWhere,
     select: { id: true, groupId: true, customFeeAmount: true, feeOverrides: true },
   });
+
+  let deleted = 0;
+  let protectedCount = 0;
+  if (mode === 'regenerate') {
+    const studentIds = students.map(s => s.id);
+    if (studentIds.length > 0) {
+      const existingFees = await prisma.studentFee.findMany({
+        where: { studentId: { in: studentIds }, month, year, academicYearId: ayId },
+        select: { id: true, paidAmount: true },
+      });
+      for (const ef of existingFees) {
+        if (ef.paidAmount > 0) { protectedCount++; continue; }
+        await prisma.studentFee.delete({ where: { id: ef.id } });
+        deleted++;
+      }
+    }
+  }
 
   // Get fee structures with their head categories
   const monthStart = new Date(year, month - 1, 1);
@@ -596,19 +703,53 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
 
     const existing = await prisma.studentFee.findUnique({
       where: { studentId_month_year_academicYearId: { studentId: student.id, month, year, academicYearId: ayId } },
+      include: { extraItems: { select: { amount: true } } },
     });
 
-    if (existing) {
-      // Update existing record if amount differs or breakdown is missing
+    if (mode === 'generate') {
+      if (existing) { skipped++; continue; }
+      if (totalAmount > 0) {
+        await prisma.studentFee.create({
+          data: {
+            academicYearId: ayId,
+            studentId: student.id,
+            groupId: student.groupId,
+            month, year,
+            totalAmount,
+            netAmount: totalAmount,
+            feeHeadBreakdown: breakdown,
+          },
+        });
+        generated++;
+      }
+      continue;
+    }
+
+    if (mode === 'update') {
+      if (!existing) { skipped++; continue; }
+      const extraSum = (existing.extraItems || []).reduce((s, e) => s + e.amount, 0);
       if (totalAmount > 0 && (totalAmount !== existing.netAmount || !(existing as any).feeHeadBreakdown)) {
+        const totalDue = totalAmount + extraSum;
+        const status = computeFeeStatus(existing.paidAmount, totalDue);
         await prisma.studentFee.update({
           where: { id: existing.id },
-          data: { totalAmount, netAmount: totalAmount, feeHeadBreakdown: breakdown },
+          data: {
+            totalAmount, netAmount: totalAmount, feeHeadBreakdown: breakdown,
+            status,
+            paidAt: status === 'PAID' || status === 'OVERPAID' ? (existing.paidAt ?? new Date()) : null,
+          },
         });
         updated++;
       } else {
         skipped++;
       }
+      continue;
+    }
+
+    // regenerate: unpaid records were deleted above; paid records are protected
+    if (existing) {
+      if (existing.paidAmount > 0) { skipped++; continue; }
+      skipped++;
       continue;
     }
 
@@ -628,7 +769,13 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     }
   }
 
-  res.json({ success: true, data: { generated, skipped, updated, total: students.length } });
+  res.json({
+    success: true,
+    data: {
+      generated, skipped, updated, deleted, protected: protectedCount,
+      total: students.length, mode,
+    },
+  });
 }));
 
 // POST /admin/student-fees/recalculate — Recalculate existing StudentFee records
