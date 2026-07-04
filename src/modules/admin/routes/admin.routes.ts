@@ -19,6 +19,7 @@ import examTypeRoutes from './exam-type.routes';
 import examRoutes from './exam.routes';
 import examStructureRoutes from './exam-structure.routes';
 import marksEntryRoutes from './marks-entry.routes';
+import subjectResultRoutes from './subject-result.routes';
 
 const router = Router();
 const meRouter = Router();
@@ -55,6 +56,7 @@ router.use(examTypeRoutes); // Contains /exam-sessions/:sessionId/exam-types —
 router.use(examRoutes); // Contains /exam-sessions/:sessionId/exams — Exam CRUD
 router.use(examStructureRoutes); // Contains /exams/:id/structure — Exam class/subject structure
 router.use(marksEntryRoutes); // Contains /exam-class-subjects/:id/marks-grid, /exam-class-subjects/:id/marks — Marks entry
+router.use(subjectResultRoutes); // Contains /exam-sessions/:id/compute-results — SubjectResult computation
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
