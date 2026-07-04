@@ -1085,6 +1085,10 @@ describe('Admin — Groups', () => {
     jest.clearAllMocks();
     mockBranch = createMockBranch();
     mockGroup = createMockGroup();
+    (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({
+      id: mockGroup.academicYearId,
+      branchId: mockBranch.id,
+    });
   });
 
   test('GET /admin/groups returns groups with _count', async () => {
@@ -1092,7 +1096,9 @@ describe('Admin — Groups', () => {
       { ...mockGroup, _count: { members: 5, students: 15 } },
     ] as any);
 
-    const res = await request(app).get('/admin/groups').set(adminToken);
+    const res = await request(app)
+      .get(`/admin/groups?academicYearId=${mockGroup.academicYearId}&branchId=${mockBranch.id}`)
+      .set(adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data[0]._count.members).toBe(5);
   });
@@ -1100,7 +1106,7 @@ describe('Admin — Groups', () => {
   test('GET /admin/groups filters by academicYearId', async () => {
     prismaMock.group.findMany.mockResolvedValue([]);
     await request(app)
-      .get(`/admin/groups?academicYearId=${mockGroup.academicYearId}`)
+      .get(`/admin/groups?academicYearId=${mockGroup.academicYearId}&branchId=${mockBranch.id}`)
       .set(adminToken);
 
     expect(prismaMock.group.findMany).toHaveBeenCalledWith(
@@ -1186,8 +1192,14 @@ describe('Admin — Students', () => {
   });
 
   test('GET /admin/students returns list of students', async () => {
+    (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({
+      id: mockStudent.academicYearId,
+      branchId: mockBranch.id,
+    });
     prismaMock.student.findMany.mockResolvedValue([{ ...mockStudent, group: { name: 'Class 1' } }] as any);
-    const res = await request(app).get('/admin/students').set(adminToken);
+    const res = await request(app)
+      .get(`/admin/students?academicYearId=${mockStudent.academicYearId}&branchId=${mockBranch.id}`)
+      .set(adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
   });
@@ -1236,33 +1248,38 @@ describe('Admin — Students', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('Admin — Stats', () => {
-  beforeEach(() => jest.clearAllMocks());
+  const ayId = 'ay-stats-1';
+  const branchId = 'branch-stats-1';
 
-  test('GET /admin/stats returns aggregated counts (updated for new schema)', async () => {
-    prismaMock.user.count.mockResolvedValue(100);
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({ id: ayId, branchId });
+  });
+
+  test('GET /admin/stats returns aggregated counts scoped to branch + AY', async () => {
     prismaMock.group.count.mockResolvedValue(10);
     prismaMock.student.count.mockResolvedValue(500);
+    prismaMock.user.count.mockResolvedValue(20);
+    prismaMock.branchMember.count.mockResolvedValue(15);
     prismaMock.academicYear.count.mockResolvedValue(1);
     prismaMock.branch.count.mockResolvedValue(1);
     prismaMock.apiKey.count.mockResolvedValue(3);
-    (prismaMock.user.groupBy as jest.Mock).mockResolvedValue([
-      { role: 'super_admin', _count: { role: 1 } },
-      { role: 'management', _count: { role: 2 } },
-      { role: 'teacher', _count: { role: 20 } },
-      { role: 'parent', _count: { role: 77 } },
-    ]);
 
-    const res = await request(app).get('/admin/stats').set(adminToken);
+    const res = await request(app)
+      .get(`/admin/stats?academicYearId=${ayId}&branchId=${branchId}`)
+      .set(adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual({
-      totalUsers: 100,
       totalGroups: 10,
       totalStudents: 500,
+      totalTeachers: 20,
+      totalStaff: 15,
       totalAcademicYears: 1,
       totalBranches: 1,
       activeApiKeys: 3,
-      byRole: { super_admin: 1, management: 2, teacher: 20, parent: 77 },
+      academicYearId: ayId,
+      branchId,
     });
   });
 });
@@ -1387,8 +1404,12 @@ describe('Phase 04 — Branch Member Management', () => {
 
 describe('Admin — Branch Stats (/admin/branches/:id/stats)', () => {
   const mockBranch = { id: 'branch-1', name: 'Test Branch', code: 'TST', address: 'Test', phone: null, email: null, isActive: true, _count: { academicYears: 2, branchMembers: 10 } };
+  const ayId = 'ay-branch-stats';
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({ id: ayId, branchId: mockBranch.id });
+  });
 
   test('GET /admin/branches/:id/stats returns per-branch stats and admins', async () => {
     prismaMock.branch.findUnique.mockResolvedValue(mockBranch as any);
@@ -1413,7 +1434,9 @@ describe('Admin — Branch Stats (/admin/branches/:id/stats)', () => {
       { user: { id: 'u-2', name: 'Admin One', email: 'admin@test.com', phone: null, status: 'active', role: 'management' }, createdAt: new Date('2025-01-01') },
     ] as any);
 
-    const res = await request(app).get(`/admin/branches/${mockBranch.id}/stats`).set(adminToken);
+    const res = await request(app)
+      .get(`/admin/branches/${mockBranch.id}/stats?academicYearId=${ayId}`)
+      .set(adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -1427,15 +1450,18 @@ describe('Admin — Branch Stats (/admin/branches/:id/stats)', () => {
   });
 
   test('GET /admin/branches/:id/stats returns 404 for unknown branch', async () => {
+    (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({ id: ayId, branchId: 'unknown' });
     prismaMock.branch.findUnique.mockResolvedValue(null);
 
-    const res = await request(app).get('/admin/branches/unknown/stats').set(adminToken);
+    const res = await request(app)
+      .get(`/admin/branches/unknown/stats?academicYearId=${ayId}`)
+      .set(adminToken);
 
     expect(res.status).toBe(404);
   });
 
   test('GET /admin/branches/:id/stats returns 401 without token', async () => {
-    const res = await request(app).get(`/admin/branches/${mockBranch.id}/stats`);
+    const res = await request(app).get(`/admin/branches/${mockBranch.id}/stats?academicYearId=${ayId}`);
     expect(res.status).toBe(401);
   });
 
@@ -1447,7 +1473,9 @@ describe('Admin — Branch Stats (/admin/branches/:id/stats)', () => {
     prismaMock.branchMember.findMany.mockResolvedValueOnce([]);
     prismaMock.branchMember.findMany.mockResolvedValueOnce([]);
 
-    const res = await request(app).get(`/admin/branches/${mockBranch.id}/stats`).set(adminToken);
+    const res = await request(app)
+      .get(`/admin/branches/${mockBranch.id}/stats?academicYearId=${ayId}`)
+      .set(adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.data.admins).toHaveLength(0);
@@ -2014,10 +2042,12 @@ describe('Admin — Teacher Assignments', () => {
   // TC-018: GET /admin/groups/:groupId/assignments — Get group's assignments
   describe('GET /admin/groups/:groupId/assignments', () => {
     test('returns all teachers assigned to a group', async () => {
+      const ayId = mockAssignment.academicYearId;
+      (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({ id: ayId, branchId: 'branch-1' });
       prismaMock.teacherAssignment.findMany.mockResolvedValue([mockAssignment] as any);
 
       const res = await request(app)
-        .get('/admin/groups/group-1/assignments')
+        .get(`/admin/groups/group-1/assignments?academicYearId=${ayId}&branchId=branch-1`)
         .set(adminToken);
 
       expect(res.status).toBe(200);
@@ -2146,18 +2176,22 @@ describe('Admin — Teacher Assignments', () => {
     });
 
     test('GET teachers/:id/assignments returns role field', async () => {
+      const ayId = mockAssignment.academicYearId;
+      (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({ id: ayId, branchId: 'branch-1' });
       prismaMock.teacherAssignment.findMany.mockResolvedValue([{ ...mockAssignment, role: 'hod' }] as any);
       const res = await request(app)
-        .get('/admin/teachers/teacher-u-1/assignments')
+        .get(`/admin/teachers/teacher-u-1/assignments?academicYearId=${ayId}&branchId=branch-1`)
         .set(adminToken);
       expect(res.status).toBe(200);
       expect(res.body.data[0].role).toBe('hod');
     });
 
     test('GET groups/:id/assignments returns teacher info', async () => {
+      const ayId = mockAssignment.academicYearId;
+      (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({ id: ayId, branchId: 'branch-1' });
       prismaMock.teacherAssignment.findMany.mockResolvedValue([mockAssignment] as any);
       const res = await request(app)
-        .get('/admin/groups/group-1/assignments')
+        .get(`/admin/groups/group-1/assignments?academicYearId=${ayId}&branchId=branch-1`)
         .set(adminToken);
       expect(res.status).toBe(200);
       expect(res.body.data[0].teacher.name).toBe('Ms. Sarah');

@@ -676,6 +676,9 @@ describe('POST /admin/student-fees/generate — class selection', () => {
       { id: 's1', groupId: 'g-empty', customFeeAmount: null, feeOverrides: null },
     ] as any);
     prismaMock.feeStructure.findMany.mockResolvedValue([] as any);
+    prismaMock.group.findMany.mockResolvedValue([
+      { id: 'g-empty', displayOrder: 10, name: 'Empty Class', section: null },
+    ] as any);
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
 
     const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({

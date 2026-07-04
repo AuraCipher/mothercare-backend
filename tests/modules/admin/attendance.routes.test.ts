@@ -18,68 +18,90 @@ import { generateTestToken, getAuthHeader } from '../../helpers/auth';
 
 const adminToken = getAuthHeader(generateTestToken('admin-1', 'super_admin'));
 const managementToken = getAuthHeader(generateTestToken('mgmt-1', 'management'));
+const SCOPE_QS = 'academicYearId=ay1&branchId=b1';
+
+function mockScope() {
+  (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({ id: 'ay1', branchId: 'b1' });
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // STUDENT ATTENDANCE
 // ═══════════════════════════════════════════════════════════════════
 
 describe('GET /admin/attendance — Student attendance', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockScope();
+  });
 
   test('returns all students when no groupId', async () => {
     const students = [createMockStudent({ id: 's1', name: 'Alice' }), createMockStudent({ id: 's2', name: 'Bob' })];
     (prismaMock.student.findMany as jest.Mock).mockResolvedValue(students);
-    const res = await request(app).get('/admin/attendance?date=2026-06-24').set(adminToken);
+    const res = await request(app).get(`/admin/attendance?date=2026-06-24&${SCOPE_QS}`).set(adminToken);
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(2);
     expect(prismaMock.student.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { isActive: true } })
+      expect.objectContaining({
+        where: expect.objectContaining({
+          isActive: true,
+          academicYearId: 'ay1',
+          academicYear: { branchId: 'b1' },
+        }),
+      }),
     );
   });
 
   test('filters by groupId when provided', async () => {
+    (prismaMock.group.findFirst as jest.Mock).mockResolvedValue({ id: 'g1' });
     (prismaMock.student.findMany as jest.Mock).mockResolvedValue([]);
-    await request(app).get('/admin/attendance?date=2026-06-24&groupId=g1').set(adminToken);
+    await request(app).get(`/admin/attendance?date=2026-06-24&groupId=g1&${SCOPE_QS}`).set(adminToken);
     expect(prismaMock.student.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { isActive: true, groupId: 'g1' } })
+      expect.objectContaining({ where: expect.objectContaining({ groupId: 'g1', academicYearId: 'ay1' }) }),
     );
   });
 
+  test('returns 400 without academic year scope', async () => {
+    (prismaMock.academicYear.findFirst as jest.Mock).mockResolvedValue(null);
+    const res = await request(app).get('/admin/attendance?date=2026-06-24').set(adminToken);
+    expect(res.status).toBe(400);
+  });
+
   test('returns 401 without auth header', async () => {
-    const res = await request(app).get('/admin/attendance?date=2026-06-24');
+    const res = await request(app).get(`/admin/attendance?date=2026-06-24&${SCOPE_QS}`);
     expect(res.status).toBe(401);
   });
 
   test('returns 403 for non-management role', async () => {
     const teacherToken = getAuthHeader(generateTestToken('t1', 'teacher'));
-    const res = await request(app).get('/admin/attendance?date=2026-06-24').set(teacherToken);
+    const res = await request(app).get(`/admin/attendance?date=2026-06-24&${SCOPE_QS}`).set(teacherToken);
     expect(res.status).toBe(403);
   });
 
   test('orders by name when no groupId', async () => {
     (prismaMock.student.findMany as jest.Mock).mockResolvedValue([]);
-    await request(app).get('/admin/attendance?date=2026-06-24').set(adminToken);
+    await request(app).get(`/admin/attendance?date=2026-06-24&${SCOPE_QS}`).set(adminToken);
     const call = (prismaMock.student.findMany as jest.Mock).mock.calls[0][0];
     expect(call.orderBy).toEqual([{ name: 'asc' }]);
   });
 
   test('orders by rollNumber when groupId provided', async () => {
+    (prismaMock.group.findFirst as jest.Mock).mockResolvedValue({ id: 'g1' });
     (prismaMock.student.findMany as jest.Mock).mockResolvedValue([]);
-    await request(app).get('/admin/attendance?date=2026-06-24&groupId=g1').set(adminToken);
+    await request(app).get(`/admin/attendance?date=2026-06-24&groupId=g1&${SCOPE_QS}`).set(adminToken);
     const call = (prismaMock.student.findMany as jest.Mock).mock.calls[0][0];
     expect(call.orderBy).toEqual([{ rollNumber: 'asc' }]);
   });
 
   test('includes attendance records for given date', async () => {
     (prismaMock.student.findMany as jest.Mock).mockResolvedValue([{ id: 's1', name: 'Alice', rollNumber: '1', admissionNumber: 'ADM-1', groupId: 'g1', attendances: [{ date: '2026-06-24', status: 'present' }] }]);
-    const res = await request(app).get('/admin/attendance?date=2026-06-24').set(adminToken);
+    const res = await request(app).get(`/admin/attendance?date=2026-06-24&${SCOPE_QS}`).set(adminToken);
     expect(res.body.data[0].attendances).toBeDefined();
   });
 
   test('includes attendance records for date range', async () => {
     (prismaMock.student.findMany as jest.Mock).mockResolvedValue([{ id: 's1', name: 'Alice', rollNumber: '1', admissionNumber: 'ADM-1', groupId: 'g1', attendances: [] }]);
-    const res = await request(app).get('/admin/attendance?from=2026-06-01&to=2026-06-30').set(adminToken);
+    const res = await request(app).get(`/admin/attendance?from=2026-06-01&to=2026-06-30&${SCOPE_QS}`).set(adminToken);
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
   });
@@ -150,26 +172,35 @@ describe('POST /admin/attendance/batch — Save attendance', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('GET /admin/attendance/teachers — Teacher attendance', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockScope();
+  });
 
   test('returns all active teachers', async () => {
     (prismaMock.user.findMany as jest.Mock).mockResolvedValue([{ id: 't1', name: 'Teacher A', role: 'teacher', teacherAttendances: [] }]);
-    const res = await request(app).get('/admin/attendance/teachers?date=2026-06-24').set(adminToken);
+    const res = await request(app).get(`/admin/attendance/teachers?date=2026-06-24&${SCOPE_QS}`).set(adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
     expect(prismaMock.user.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { role: 'teacher', status: 'active' } })
+      expect.objectContaining({
+        where: expect.objectContaining({
+          role: 'teacher',
+          status: 'active',
+          branchMembers: { some: { branchId: 'b1', isActive: true } },
+        }),
+      }),
     );
   });
 
   test('returns 401 without auth', async () => {
-    const res = await request(app).get('/admin/attendance/teachers?date=2026-06-24');
+    const res = await request(app).get(`/admin/attendance/teachers?date=2026-06-24&${SCOPE_QS}`);
     expect(res.status).toBe(401);
   });
 
   test('includes teacher attendances', async () => {
     (prismaMock.user.findMany as jest.Mock).mockResolvedValue([{ id: 't1', name: 'Teacher A', teacherAttendances: [{ date: '2026-06-24', status: 'present' }] }]);
-    const res = await request(app).get('/admin/attendance/teachers?date=2026-06-24').set(adminToken);
+    const res = await request(app).get(`/admin/attendance/teachers?date=2026-06-24&${SCOPE_QS}`).set(adminToken);
     expect(res.body.data[0].attendances).toBeDefined();
   });
 });
