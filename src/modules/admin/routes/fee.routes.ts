@@ -479,16 +479,20 @@ router.get('/student-fees', asyncHandler(async (req: Request, res: Response) => 
 
 // POST /admin/student-fees/generate — Generate monthly fees with selected categories
 router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Response) => {
-  const { month, year, academicYearId, categories, headIds } = req.body;
+  const { month, year, academicYearId, categories, headIds, groupIds } = req.body;
   if (!month || !year) { res.status(400).json({ success: false, message: 'month and year required' }); return; }
   const selectedCats: string[] = categories || ['MONTHLY'];
   const selectedHeadIds: string[] | null = headIds?.length > 0 ? headIds : null;
+  const selectedGroupIds: string[] | null = groupIds?.length > 0 ? groupIds : null;
 
   const ayId = await resolveAcademicYearId(academicYearId);
   if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
 
+  const studentWhere: any = { academicYearId: ayId, isActive: true, status: 'ACTIVE' };
+  if (selectedGroupIds) studentWhere.groupId = { in: selectedGroupIds };
+
   const students = await prisma.student.findMany({
-    where: { academicYearId: ayId, isActive: true, status: 'ACTIVE' },
+    where: studentWhere,
     select: { id: true, groupId: true, customFeeAmount: true, feeOverrides: true },
   });
 

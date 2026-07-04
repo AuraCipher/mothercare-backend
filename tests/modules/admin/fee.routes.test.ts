@@ -165,10 +165,29 @@ describe('POST /admin/student-fees/generate', () => {
     ] as any);
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
 
-    // Only MONTHLY category selected — TERM should be excluded
     const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({ month: 6, year: 2026, categories: ['MONTHLY'] });
     expect(res.status).toBe(200);
-    // Only MONTHLY head included (500000), TERM (100000) excluded
+    expect(res.body.data.generated).toBe(1);
+  });
+
+  test('filters by selected groupIds', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([
+      { id: 's1', groupId: 'g2', customFeeAmount: null },
+    ] as any);
+    prismaMock.feeStructure.findMany.mockResolvedValue([
+      { id: 'fs1', groupId: 'g2', feeHeadId: 'fh1', amount: 500000, effectiveFrom: new Date(), effectiveTo: null, academicYearId: 'ay1', feeHead: { category: 'MONTHLY', name: 'Tuition' } },
+    ] as any);
+    prismaMock.studentFee.findUnique.mockResolvedValue(null);
+    prismaMock.studentFee.create.mockResolvedValue({} as any);
+
+    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+      month: 6, year: 2026, academicYearId: 'ay1', groupIds: ['g2'], headIds: ['fh1'],
+    });
+    expect(res.status).toBe(200);
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ groupId: { in: ['g2'] } }),
+    }));
     expect(res.body.data.generated).toBe(1);
   });
 
