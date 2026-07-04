@@ -1769,6 +1769,11 @@ model PaymentReceipt {
   // Previous months — one combined line
   previousBalancePaise Int // sum of what was due from earlier months
   previousMonthsCount  Int // how many months in the previous balance
+  // Per-month arrears detail — [{label, dueBeforePaise, paidPaise, remainingPaise}, ...]
+  previousMonths Json?
+
+  // FIRST | ARREARS | CONTINUATION — mirrors family receipt templates
+  templateType String?
 
   // Per-month allocation breakdown for waterfall/family payments that span
   // multiple months in one transaction — [{label:"Jun 2026", amountPaise:50000}, ...]
