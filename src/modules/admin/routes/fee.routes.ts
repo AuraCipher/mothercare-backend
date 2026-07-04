@@ -69,13 +69,45 @@ router.post('/fee-structures', asyncHandler(async (req: Request, res: Response) 
     res.status(400).json({ success: false, message: 'academicYearId, groupId, feeHeadId, amount required' });
     return;
   }
-  const structure = await prisma.feeStructure.create({
-    data: {
-      academicYearId, groupId, feeHeadId, amount,
-      effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : new Date(),
-    },
+  const ef = effectiveFrom ? new Date(effectiveFrom) : new Date();
+
+  // Find existing active record for this group+feeHead (effectiveTo = null)
+  const existing = await prisma.feeStructure.findFirst({
+    where: { academicYearId, groupId, feeHeadId, effectiveTo: null },
   });
-  res.status(201).json({ success: true, data: structure });
+
+  if (existing) {
+    // If amount is same, just return existing (no-op)
+    if (existing.amount === amount) {
+      res.json({ success: true, data: existing });
+      return;
+    }
+    // Expire the old record
+    await prisma.feeStructure.update({
+      where: { id: existing.id },
+      data: { effectiveTo: ef },
+    });
+  }
+
+  // Create new record with new amount
+  const structure = await prisma.feeStructure.create({
+    data: { academicYearId, groupId, feeHeadId, amount, effectiveFrom: ef },
+  });
+
+  // Log the change if this was an update
+  if (existing && existing.amount !== amount) {
+    await prisma.feeChangeLog.create({
+      data: {
+        feeStructureId: existing.id,
+        previousAmount: existing.amount,
+        newAmount: amount,
+        reason: 'Amount update',
+        changedById: (req as any).user?.id,
+      },
+    });
+  }
+
+  res.status(existing ? 200 : 201).json({ success: true, data: structure });
 }));
 
 // POST /admin/fee-structures/update-amount — Increase fee with history
