@@ -612,16 +612,199 @@ describe('PUT /admin/students/:id/custom-fee', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// AY DATA INTEGRITY
+// ═══════════════════════════════════════════════════════════════════
+
+describe('GET /admin/students/:id/fee — academic year scope', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('returns 400 without resolvable academic year', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue(null);
+    const res = await request(app).get('/admin/students/s1/fee').set('Authorization', adminToken);
+    expect(res.status).toBe(400);
+  });
+
+  test('filters studentFees by academicYearId', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findUnique.mockResolvedValue({
+      id: 's1', name: 'Ahmed',
+      group: { name: 'Class 2', section: 'A', displayOrder: 2 },
+      parents: [],
+      studentFees: [{ id: 'sf1', month: 6, year: 2026, academicYearId: 'ay1', netAmount: 500000, paidAmount: 0, payments: [], extraItems: [] }],
+    } as any);
+
+    const res = await request(app).get('/admin/students/s1/fee?academicYearId=ay1').set('Authorization', adminToken);
+    expect(res.status).toBe(200);
+    expect(prismaMock.student.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        studentFees: expect.objectContaining({
+          where: { academicYearId: 'ay1' },
+        }),
+      }),
+    }));
+    expect(res.body.data.studentFees).toHaveLength(1);
+  });
+
+  test('explicit academicYearId overrides active year lookup', async () => {
+    prismaMock.student.findUnique.mockResolvedValue({ id: 's1', studentFees: [], group: null, parents: [] } as any);
+    await request(app).get('/admin/students/s1/fee?academicYearId=ay-old').set('Authorization', adminToken);
+    expect(prismaMock.student.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        studentFees: expect.objectContaining({ where: { academicYearId: 'ay-old' } }),
+      }),
+    }));
+  });
+});
+
+describe('POST /admin/student-fees/generate — AY unique key', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('upserts by studentId + month + year + academicYearId', async () => {
+    prismaMock.student.findMany.mockResolvedValue([
+      { id: 's1', groupId: 'g1', customFeeAmount: null, feeOverrides: null },
+    ] as any);
+    prismaMock.feeStructure.findMany.mockResolvedValue([
+      { id: 'fs1', groupId: 'g1', feeHeadId: 'fh1', amount: 500000, effectiveFrom: new Date(), effectiveTo: null, academicYearId: 'ay-old', feeHead: { category: 'MONTHLY', name: 'Tuition' } },
+    ] as any);
+    prismaMock.studentFee.findUnique.mockResolvedValue(null);
+    prismaMock.studentFee.create.mockResolvedValue({} as any);
+
+    await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+      month: 6, year: 2026, academicYearId: 'ay-old', headIds: ['fh1'],
+    });
+
+    expect(prismaMock.studentFee.findUnique).toHaveBeenCalledWith({
+      where: { studentId_month_year_academicYearId: { studentId: 's1', month: 6, year: 2026, academicYearId: 'ay-old' } },
+    });
+  });
+});
+
+describe('GET /admin/families — AY scope', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('returns 400 without academic year', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue(null);
+    const res = await request(app).get('/admin/families?search=Ali').set('Authorization', adminToken);
+    expect(res.status).toBe(400);
+  });
+
+  test('scopes unpaid fees and students to academicYearId', async () => {
+    prismaMock.family.findMany.mockResolvedValue([
+      {
+        id: 'fam1', fatherName: 'Ali Khan', phone: '0300',
+        students: [
+          { id: 's1', name: 'Ahmed', studentFees: [{ id: 'sf1', month: 6, year: 2026, netAmount: 500000, paidAmount: 0, extraItems: [] }], group: { name: 'Class 2' } },
+          { id: 's2', name: 'Sara', studentFees: [], group: { name: 'Class 3' } },
+        ],
+      },
+    ] as any);
+
+    const res = await request(app).get('/admin/families?search=Ali&academicYearId=ay1').set('Authorization', adminToken);
+    expect(res.status).toBe(200);
+    expect(prismaMock.family.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        students: expect.objectContaining({
+          where: { academicYearId: 'ay1', isActive: true, status: 'ACTIVE' },
+          include: expect.objectContaining({
+            studentFees: expect.objectContaining({
+              where: { academicYearId: 'ay1', status: { in: ['UNPAID', 'PARTIAL'] } },
+            }),
+          }),
+        }),
+      }),
+    }));
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].students).toHaveLength(1);
+    expect(res.body.data[0].students[0].id).toBe('s1');
+  });
+});
+
+describe('POST /admin/family-payments — AY integrity', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('returns 400 without academicYearId', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue(null);
+    const res = await request(app).post('/admin/family-payments').set('Authorization', adminToken).send({
+      familyId: 'fam1', payments: [{ studentFeeId: 'sf1', amount: 100000, paymentMethod: 'CASH' }],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test('rejects fees from a different academic year', async () => {
+    const txMock = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      studentFee: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      payment: { create: jest.fn() },
+      familyPayment: { create: jest.fn() },
+    };
+    prismaMock.familyPayment.findMany.mockResolvedValue([]);
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
+
+    const res = await request(app).post('/admin/family-payments').set('Authorization', adminToken).send({
+      familyId: 'fam1', academicYearId: 'ay1',
+      payments: [{ studentFeeId: 'sf-wrong', amount: 100000, paymentMethod: 'CASH' }],
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/academic year/i);
+  });
+
+  test('status accounts for extra items when marking PAID', async () => {
+    const fee = {
+      id: 'sf1', studentId: 's1', academicYearId: 'ay1',
+      netAmount: 400000, paidAmount: 0,
+      extraItems: [{ amount: 50000 }],
+    };
+    const txMock = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      studentFee: {
+        findMany: jest.fn().mockResolvedValue([fee]),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      payment: {
+        create: jest.fn().mockResolvedValue({ id: 'p1', studentFeeId: 'sf1', studentId: 's1', amount: 450000, paymentMethod: 'CASH', receiptNumber: 'FMP-202607-0001-1', reference: null }),
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 450000 } }),
+      },
+      familyPayment: {
+        create: jest.fn().mockResolvedValue({ id: 'fp1', receiptNumber: 'FMP-202607-0001', payments: [], family: { fatherName: 'Ali', phone: '0300' } }),
+      },
+    };
+    prismaMock.familyPayment.findMany.mockResolvedValue([]);
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
+    prismaMock.studentFee.findUnique.mockResolvedValue({
+      ...fee, month: 6, year: 2026, feeHeadBreakdown: [], extraItems: [{ name: 'Lab', amount: 50000 }],
+      student: { name: 'Ahmed', rollNumber: '1', group: { name: 'Class 2', section: 'A' }, parents: [] },
+    } as any);
+    prismaMock.studentFee.findMany.mockResolvedValue([]);
+    prismaMock.paymentReceipt.create.mockResolvedValue({} as any);
+    prismaMock.paymentAuditLog.create.mockResolvedValue({} as any);
+
+    const res = await request(app).post('/admin/family-payments').set('Authorization', adminToken).send({
+      familyId: 'fam1', academicYearId: 'ay1',
+      payments: [{ studentFeeId: 'sf1', amount: 450000, paymentMethod: 'CASH' }],
+    });
+
+    expect(res.status).toBe(201);
+    expect(txMock.studentFee.update).toHaveBeenCalledWith({
+      where: { id: 'sf1' },
+      data: expect.objectContaining({ status: 'PAID', paidAmount: 450000 }),
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // FEE REPORTS
 // ═══════════════════════════════════════════════════════════════════
 
 describe('GET /admin/fees/summary', () => {
   test('returns summary stats', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
     prismaMock.studentFee.findMany.mockResolvedValue([
       { netAmount: 500000, paidAmount: 500000, status: 'PAID', extraItems: [] },
       { netAmount: 500000, paidAmount: 0, status: 'UNPAID', extraItems: [] },
     ] as any);
-    const res = await request(app).get('/admin/fees/summary?month=6&year=2026').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/fees/summary?month=6&year=2026&academicYearId=ay1').set('Authorization', adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data.totalDue).toBe(1000000);
     expect(res.body.data.pendingCount).toBe(1);

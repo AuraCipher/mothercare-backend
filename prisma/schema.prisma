@@ -1591,7 +1591,7 @@ model StudentFee {
   extraItems      FeeExtraItem[]
   headAllocations PaymentHeadAllocation[]
 
-  @@unique([studentId, month, year])
+  @@unique([studentId, month, year, academicYearId])
   @@index([month, year, status])
   @@index([academicYearId, status])
   @@map("student_fees")

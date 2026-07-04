@@ -1072,7 +1072,7 @@ async function main() {
     let genCount = 0;
     for (const student of students) {
       const existing = await prisma.studentFee.findUnique({
-        where: { studentId_month_year: { studentId: student.id, month: adjM, year: adjY } },
+        where: { studentId_month_year_academicYearId: { studentId: student.id, month: adjM, year: adjY, academicYearId: academicYear.id } },
       });
       if (existing) continue;
       const groupStructures = await prisma.feeStructure.findMany({
