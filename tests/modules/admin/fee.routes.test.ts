@@ -1043,6 +1043,42 @@ describe('POST /admin/families — CRUD', () => {
   });
 });
 
+describe('POST /admin/family-payments/allocate', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('returns 400 when student totals do not match family amount', async () => {
+    prismaMock.family.findUnique.mockResolvedValue({
+      id: 'fam1', isActive: true, students: [{ id: 's1' }],
+    } as any);
+
+    const res = await request(app).post('/admin/family-payments/allocate').set('Authorization', adminToken).send({
+      familyId: 'fam1',
+      academicYearId: 'ay1',
+      amountPaidPaise: 100000,
+      paymentMethod: 'CASH',
+      students: [{ studentId: 's1', amountPaidPaise: 50000, previousMonths: [{ studentFeeId: 'sf1', amountPaise: 50000 }] }],
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/do not match family amount/i);
+  });
+
+  test('returns 400 when student is not in family', async () => {
+    prismaMock.family.findUnique.mockResolvedValue({
+      id: 'fam1', isActive: true, students: [{ id: 's1' }],
+    } as any);
+
+    const res = await request(app).post('/admin/family-payments/allocate').set('Authorization', adminToken).send({
+      familyId: 'fam1',
+      academicYearId: 'ay1',
+      amountPaidPaise: 100000,
+      paymentMethod: 'CASH',
+      students: [{ studentId: 's-other', amountPaidPaise: 100000, previousMonths: [{ studentFeeId: 'sf1', amountPaise: 100000 }] }],
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/not in this family/i);
+  });
+});
+
 describe('POST /admin/family-payments — AY integrity', () => {
   beforeEach(() => jest.clearAllMocks());
 
