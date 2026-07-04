@@ -328,9 +328,11 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
         id: 'full-ay-' + s.id,
         netAmount: totalDue,
         paidAmount,
-        status: paidAmount >= totalDue
-          ? (paidAmount > totalDue ? 'OVERPAID' : 'PAID')
-          : paidAmount > 0 ? 'PARTIAL' : totalDue > 0 ? 'UNPAID' : 'NO_FEE',
+        status: totalFees.length === 0 && totalDue === 0
+          ? 'NO_FEE'
+          : paidAmount >= totalDue
+            ? (paidAmount > totalDue ? 'OVERPAID' : 'PAID')
+            : paidAmount > 0 ? 'PARTIAL' : 'UNPAID',
         payments: allPayments,
         _monthCount: totalFees.length,
         _extraAmount: extraAmount,
@@ -362,9 +364,11 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
       id: mf?.id || s.id,
       netAmount: effectiveNet,
       paidAmount: mf?.paidAmount || 0,
-      status: (mf?.paidAmount ?? 0) >= effectiveNet
-        ? ((mf?.paidAmount ?? 0) > effectiveNet ? 'OVERPAID' : 'PAID')
-        : (mf?.paidAmount ?? 0) > 0 ? 'PARTIAL' : effectiveNet > 0 ? 'UNPAID' : 'NO_FEE',
+      status: !mf && effectiveNet === 0
+        ? 'NO_FEE'
+        : (mf?.paidAmount ?? 0) >= effectiveNet
+          ? ((mf?.paidAmount ?? 0) > effectiveNet ? 'OVERPAID' : 'PAID')
+          : (mf?.paidAmount ?? 0) > 0 ? 'PARTIAL' : 'UNPAID',
       payments: mf?.payments || [],
       _extraAmount: mfExtra,
     };
