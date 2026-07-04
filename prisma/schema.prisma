@@ -1069,8 +1069,9 @@ model PasswordResetToken {
 
 model ExamType {
   id            String   @id @default(uuid())
-  name          String   @unique
+  name          String
   defaultWeight Float?
+  examSessionId String
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -1078,8 +1079,11 @@ model ExamType {
   createdById String?
   updatedById String?
 
-  exams Exam[]
+  examSession ExamSession @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
+  exams       Exam[]
 
+  @@unique([examSessionId, name])
+  @@index([examSessionId])
   @@map("exam_types")
 }
 
@@ -1096,6 +1100,7 @@ model ExamSession {
   updatedById String?
 
   academicYear   AcademicYear    @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  examTypes      ExamType[]
   exams          Exam[]
   subjectResults SubjectResult[]
   reportCards    ReportCard[]
