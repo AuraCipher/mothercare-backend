@@ -300,6 +300,23 @@ describe('GET /admin/fees/students-list', () => {
     expect(res.body.pagination).toBeDefined();
   });
 
+  test('feeStatus=unpaid filters computed rows before pagination', async () => {
+    prismaMock.student.findMany.mockResolvedValue([
+      { ...studentWithFee, studentFees: [{ id: 'sf1', netAmount: 500000, paidAmount: 0, status: 'UNPAID', payments: [], extraItems: [] }] },
+      { ...studentWithFee, id: 's3', name: 'Bilal', studentFees: [{ id: 'sf3', netAmount: 600000, paidAmount: 600000, status: 'PAID', payments: [], extraItems: [] }] },
+    ] as any);
+
+    const res = await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1&feeStatus=unpaid')
+      .set('Authorization', adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].status).toBe('UNPAID');
+    expect(res.body.pagination.total).toBe(1);
+    expect(prismaMock.student.count).not.toHaveBeenCalled();
+  });
+
   test('scopes students to academicYearId', async () => {
     mockMonthlyList([]);
 
