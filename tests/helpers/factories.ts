@@ -450,3 +450,61 @@ export function createMockCommunityMember(overrides: Partial<MockCommunityMember
     ...overrides,
   };
 }
+
+// ─── Exam Session ──────────────────────────────────────────
+
+export interface MockExamSession {
+  id: string;
+  name: string;
+  academicYearId: string;
+  startDate: Date;
+  endDate: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  createdById: string | null;
+  updatedById: string | null;
+}
+
+export function createMockExamSession(overrides: Partial<MockExamSession> = {}): MockExamSession {
+  return {
+    id: unique('es'),
+    name: '1st Term 2026',
+    academicYearId: unique('ay'),
+    startDate: new Date('2026-04-01'),
+    endDate: new Date('2026-09-30'),
+    createdAt: pastDate(10),
+    updatedAt: pastDate(10),
+    createdById: unique('user'),
+    updatedById: unique('user'),
+    ...overrides,
+  };
+}
+
+// ─── Exam Type ─────────────────────────────────────────────
+
+export interface MockExamType {
+  id: string;
+  name: string;
+  defaultWeight: number | null;
+  examSessionId: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  createdById: string | null;
+  updatedById: string | null;
+}
+
+export function createMockExamType(overrides: Partial<MockExamType> = {}): MockExamType {
+  return {
+    id: unique('et'),
+    name: 'Quiz',
+    defaultWeight: 10,
+    examSessionId: unique('es'),
+    isActive: true,
+    createdAt: pastDate(5),
+    updatedAt: pastDate(5),
+    createdById: unique('user'),
+    updatedById: unique('user'),
+    ...overrides,
+  };
+}

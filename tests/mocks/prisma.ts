@@ -93,5 +93,18 @@ jest.mock('@prisma/client', () => ({
     GRADUATED: 'GRADUATED',
     WITHDRAWN: 'WITHDRAWN',
     TRANSFERRED: 'TRANSFERRED',
+    SUSPENDED: 'SUSPENDED',
+    EXPELED: 'EXPELED',
+    DECEASED: 'DECEASED',
+  },
+
+  ExamStatus: {
+    DRAFT: 'DRAFT',
+    ACTIVE: 'ACTIVE',
+  },
+
+  ReportCardStatus: {
+    DRAFT: 'DRAFT',
+    PUBLISHED: 'PUBLISHED',
   },
 }));
