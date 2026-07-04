@@ -49,15 +49,16 @@ router.delete('/fee-heads/:id', asyncHandler(async (req: Request, res: Response)
 // FEE STRUCTURES — Per-class amounts with effective dating
 // ═══════════════════════════════════════════════════════════════════
 
-// GET /admin/fee-structures — List, optionally filtered by groupId
+// GET /admin/fee-structures — List, optionally filtered by groupId / academicYearId
 router.get('/fee-structures', asyncHandler(async (req: Request, res: Response) => {
-  const { groupId } = req.query;
-  const where: any = {};
+  const { groupId, academicYearId } = req.query;
+  const where: any = { effectiveTo: null };
   if (groupId) where.groupId = groupId as string;
+  if (academicYearId) where.academicYearId = academicYearId as string;
   const structures = await prisma.feeStructure.findMany({
     where,
     include: { feeHead: true, group: { select: { name: true, section: true } } },
-    orderBy: [{ groupId: 'asc' }, { feeHead: { name: 'asc' } }],
+    orderBy: [{ groupId: 'asc' }, { feeHead: { name: 'asc' } }, { createdAt: 'desc' }],
   });
   res.json({ success: true, data: structures });
 }));
@@ -70,44 +71,67 @@ router.post('/fee-structures', asyncHandler(async (req: Request, res: Response) 
     return;
   }
   const ef = effectiveFrom ? new Date(effectiveFrom) : new Date();
+  const userId = (req as any).user?.id;
 
-  // Find existing active record for this group+feeHead (effectiveTo = null)
-  const existing = await prisma.feeStructure.findFirst({
-    where: { academicYearId, groupId, feeHeadId, effectiveTo: null },
-  });
-
-  if (existing) {
-    // If amount is same, just return existing (no-op)
-    if (existing.amount === amount) {
-      res.json({ success: true, data: existing });
-      return;
-    }
-    // Expire the old record
-    await prisma.feeStructure.update({
-      where: { id: existing.id },
-      data: { effectiveTo: ef },
+  const result = await prisma.$transaction(async (tx) => {
+    const activeRecords = await tx.feeStructure.findMany({
+      where: { academicYearId, groupId, feeHeadId, effectiveTo: null },
+      orderBy: { createdAt: 'desc' },
     });
-  }
 
-  // Create new record with new amount
-  const structure = await prisma.feeStructure.create({
-    data: { academicYearId, groupId, feeHeadId, amount, effectiveFrom: ef },
+    const latest = activeRecords[0] ?? null;
+
+    // Same amount and only one active row — nothing to do
+    if (latest && latest.amount === amount && activeRecords.length === 1) {
+      return { structure: latest, isNew: false, logChange: false as const };
+    }
+
+    // Same amount but duplicate active rows — dedupe, keep newest
+    if (latest && latest.amount === amount && activeRecords.length > 1) {
+      await tx.feeStructure.updateMany({
+        where: { id: { in: activeRecords.slice(1).map((r) => r.id) } },
+        data: { effectiveTo: ef },
+      });
+      return { structure: latest, isNew: false, logChange: false as const };
+    }
+
+    const previousAmount = latest?.amount ?? null;
+    const expiredId = latest?.id ?? null;
+
+    // Expire ALL active rows (handles legacy duplicates)
+    if (activeRecords.length > 0) {
+      await tx.feeStructure.updateMany({
+        where: { academicYearId, groupId, feeHeadId, effectiveTo: null },
+        data: { effectiveTo: ef },
+      });
+    }
+
+    const structure = await tx.feeStructure.create({
+      data: { academicYearId, groupId, feeHeadId, amount, effectiveFrom: ef },
+    });
+
+    return {
+      structure,
+      isNew: activeRecords.length === 0,
+      logChange: previousAmount != null && previousAmount !== amount,
+      previousAmount,
+      expiredId,
+    };
   });
 
-  // Log the change if this was an update
-  if (existing && existing.amount !== amount) {
+  if (result.logChange && result.expiredId && result.previousAmount != null) {
     await prisma.feeChangeLog.create({
       data: {
-        feeStructureId: existing.id,
-        previousAmount: existing.amount,
+        feeStructureId: result.expiredId,
+        previousAmount: result.previousAmount,
         newAmount: amount,
         reason: 'Amount update',
-        changedById: (req as any).user?.id,
+        changedById: userId,
       },
     });
   }
 
-  res.status(existing ? 200 : 201).json({ success: true, data: structure });
+  res.status(result.isNew ? 201 : 200).json({ success: true, data: result.structure });
 }));
 
 // POST /admin/fee-structures/update-amount — Increase fee with history
