@@ -1079,6 +1079,31 @@ describe('POST /admin/family-payments/allocate', () => {
   });
 });
 
+describe('GET /admin/family-payments/:id/receipt', () => {
+  test('returns 404 when no snapshot', async () => {
+    prismaMock.familyPaymentReceipt.findUnique.mockResolvedValue(null);
+    const res = await request(app).get('/admin/family-payments/fp1/receipt').set('Authorization', adminToken);
+    expect(res.status).toBe(404);
+  });
+
+  test('returns family receipt snapshot', async () => {
+    prismaMock.familyPaymentReceipt.findUnique.mockResolvedValue({
+      id: 'fpr1',
+      familyPaymentId: 'fp1',
+      receiptNumber: 'FMP-202607-0001',
+      templateType: 'FIRST',
+      snapshot: { familyName: 'Khan Family', students: [] },
+      totalDuePaise: 500000,
+      amountPaidPaise: 500000,
+      balanceAfterPaise: 0,
+      printCount: 0,
+    } as any);
+    const res = await request(app).get('/admin/family-payments/fp1/receipt').set('Authorization', adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data.templateType).toBe('FIRST');
+  });
+});
+
 describe('POST /admin/family-payments — AY integrity', () => {
   beforeEach(() => jest.clearAllMocks());
 
