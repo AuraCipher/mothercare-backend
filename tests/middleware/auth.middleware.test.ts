@@ -28,6 +28,10 @@ describe('Auth enforcement — Attendance routes', () => {
 
   test('GET /admin/attendance allows management role', async () => {
     (prismaMock.student.findMany as jest.Mock).mockResolvedValue([]);
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    (prismaMock.academicYear.findUnique as jest.Mock).mockImplementation(({ where: { id } }: any) => {
+      return Promise.resolve({ id, branchId: 'b1' } as any);
+    });
     const token = getAuthHeader(generateTestToken('m1', 'management'));
     const res = await request(app).get('/admin/attendance?date=2026-06-24').set(token);
     expect(res.status).toBe(200);

@@ -74,6 +74,14 @@ describe('PUT /admin/fee-heads/:id', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('GET /admin/fee-structures', () => {
+  beforeEach(() => {
+    // requireScope middleware needs an active AY to resolve
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    (prismaMock.academicYear.findUnique as jest.Mock).mockImplementation(({ where: { id } }: any) => {
+      return Promise.resolve({ id, branchId: 'b1' } as any);
+    });
+  });
+
   test('returns structures', async () => {
     prismaMock.feeStructure.findMany.mockResolvedValue([
       { id: 'fs1', groupId: 'g1', feeHeadId: 'fh1', amount: 500000, effectiveFrom: new Date(), effectiveTo: null, academicYearId: 'ay1', createdAt: new Date(), updatedAt: new Date(), feeHead: { name: 'Tuition' }, group: { name: 'Class 1', section: null } },
@@ -205,6 +213,7 @@ describe('POST /admin/student-fees/generate', () => {
       { id: 's1', groupId: 'g1', customFeeAmount: 600000 },
     ] as any);
     prismaMock.feeStructure.findMany.mockResolvedValue([] as any);
+    prismaMock.group.findMany.mockResolvedValue([{ id: 'g1', displayOrder: 1, name: 'Class 1', section: null }] as any);
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
     prismaMock.studentFee.create.mockResolvedValue({} as any);
 
@@ -216,7 +225,14 @@ describe('POST /admin/student-fees/generate', () => {
 });
 
 describe('GET /admin/fees/students-list', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // requireScope middleware needs an active AY to resolve
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    (prismaMock.academicYear.findUnique as jest.Mock).mockImplementation(({ where: { id } }: any) => {
+      return Promise.resolve({ id, branchId: 'b1' } as any);
+    });
+  });
 
   const studentWithFee = {
     id: 's1', name: 'Ahmed', rollNumber: '1', admissionNumber: 'A1', groupId: 'g1',
@@ -233,18 +249,20 @@ describe('GET /admin/fees/students-list', () => {
   };
 
   const feeRow = (student: any, fee: any) => ({
-    id: fee.id,
-    netAmount: fee.netAmount,
-    paidAmount: fee.paidAmount ?? 0,
-    status: fee.status,
-    payments: fee.payments || [],
-    extraItems: fee.extraItems || [],
-    student,
+    ...student,
+    studentFees: [{
+      id: fee.id,
+      netAmount: fee.netAmount,
+      paidAmount: fee.paidAmount ?? 0,
+      status: fee.status,
+      payments: fee.payments || [],
+      extraItems: fee.extraItems || [],
+    }],
   });
 
   const mockMonthlyList = (records: any[], total?: number) => {
-    prismaMock.studentFee.count.mockResolvedValue(total ?? records.length);
-    prismaMock.studentFee.findMany.mockResolvedValue(records);
+    prismaMock.student.count.mockResolvedValue(total ?? records.length);
+    prismaMock.student.findMany.mockResolvedValue(records);
   };
 
   test('monthly view only returns students with a generated fee for that month', async () => {
@@ -324,10 +342,8 @@ describe('GET /admin/fees/students-list', () => {
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay-old')
       .set('Authorization', adminToken);
 
-    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        student: expect.objectContaining({ academicYearId: 'ay-old' }),
-      }),
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ academicYearId: 'ay-old' }),
     }));
   });
 
@@ -383,8 +399,12 @@ describe('GET /admin/fees/students-list', () => {
       .get('/admin/fees/students-list?month=7&year=2026&period=monthly&academicYearId=ay1')
       .set('Authorization', adminToken);
 
-    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ month: 7, year: 2026, academicYearId: 'ay1' }),
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({
+        studentFees: expect.objectContaining({
+          where: expect.objectContaining({ month: 7, year: 2026, academicYearId: 'ay1' }),
+        }),
+      }),
     }));
   });
 
@@ -397,10 +417,8 @@ describe('GET /admin/fees/students-list', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(0);
-    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        student: expect.objectContaining({ groupId: 'g2' }),
-      }),
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ groupId: 'g2' }),
     }));
   });
 
@@ -438,10 +456,8 @@ describe('GET /admin/fees/students-list', () => {
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1&roll=42')
       .set('Authorization', adminToken);
 
-    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        student: expect.objectContaining({ rollNumber: '42' }),
-      }),
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ rollNumber: '42' }),
     }));
   });
 
@@ -452,15 +468,13 @@ describe('GET /admin/fees/students-list', () => {
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1&fatherSearch=Ali')
       .set('Authorization', adminToken);
 
-    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        student: expect.objectContaining({
-          AND: expect.arrayContaining([
-            expect.objectContaining({
-              parents: expect.objectContaining({ some: expect.any(Object) }),
-            }),
-          ]),
-        }),
+        AND: expect.arrayContaining([
+          expect.objectContaining({
+            parents: expect.objectContaining({ some: expect.any(Object) }),
+          }),
+        ]),
       }),
     }));
   });
@@ -474,7 +488,7 @@ describe('GET /admin/fees/students-list', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.pagination).toEqual({ page: 2, limit: 100, total: 250, totalPages: 3 });
-    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
       skip: 100,
       take: 100,
     }));
