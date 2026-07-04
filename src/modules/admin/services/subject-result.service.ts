@@ -172,7 +172,7 @@ class SubjectResultService {
     }
 
     if (entriesByStudent.size === 0) {
-      throw { status: 400, message: 'No students have marks entries for this subject. Enter marks first.' };
+      return [];
     }
 
     // Compute each student's percentage
