@@ -415,6 +415,41 @@ describe('GET /admin/fees/students-list', () => {
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/academic year/i);
   });
+
+  test('filters by exact roll number', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.student.findMany.mockResolvedValue([] as any);
+
+    await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1&roll=42')
+      .set('Authorization', adminToken);
+
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ rollNumber: '42' }),
+    }));
+  });
+
+  test('full AY marks estimated rows when missing generated months', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValue({ id: 'ay1', status: 'ACTIVE' } as any);
+    prismaMock.studentFee.findMany.mockResolvedValue([
+      { month: 5, year: 2026 }, { month: 6, year: 2026 },
+    ] as any);
+    prismaMock.student.findMany.mockResolvedValue([{
+      id: 's1', name: 'Ahmed', rollNumber: '1', admissionNumber: 'A1', groupId: 'g1',
+      customFeeAmount: 500000, concessionReason: null, feeOverrides: null,
+      group: { name: 'Class 2', section: 'A', displayOrder: 2 },
+      parents: [],
+      studentFees: [{ id: 'sf1', netAmount: 500000, paidAmount: 0, status: 'UNPAID', payments: [], extraItems: [] }],
+    }] as any);
+
+    const res = await request(app)
+      .get('/admin/fees/students-list?month=6&year=2026&period=full&academicYearId=ay1')
+      .set('Authorization', adminToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data[0]._isEstimated).toBe(true);
+    expect(res.body.data[0]._missingMonths).toBe(1);
+  });
 });
 
 describe('POST /admin/student-fees/generate — class selection', () => {
