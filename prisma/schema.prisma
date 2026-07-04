@@ -132,28 +132,28 @@ model User {
   passwordResetTokens PasswordResetToken[]
 
   // New relations for Academic Year System
-  branchMembers         BranchMember[]
+  branchMembers             BranchMember[]
   // Reverse relations for BranchMember.assignedBy and BranchMember.resignedInFavorOf
-  assignedMembers       BranchMember[]         @relation("AssignedBy")
-  resignedToMembers     BranchMember[]         @relation("ResignedInFavorOf")
-  academicYearMembers   AcademicYearMember[]
-  teacherAssignments    TeacherAssignment[]
-  teacherAttendances    TeacherAttendance[] @relation("TeacherAttendanceTeacher")
-  academicYearSnapshots AcademicYearSnapshot[] @relation("SnapshotTriggeredBy")
-  timetableEntries      TimetableEntry[]       @relation("TimetableTeacher")
-  uploadedFiles         FileRecord[]
-  student               Student?
-  createdStudents       Student[]  @relation("StudentCreatedBy")
-  updatedStudents       Student[]  @relation("StudentUpdatedBy")
-  credentialSends       CredentialSend[]
+  assignedMembers           BranchMember[]         @relation("AssignedBy")
+  resignedToMembers         BranchMember[]         @relation("ResignedInFavorOf")
+  academicYearMembers       AcademicYearMember[]
+  teacherAssignments        TeacherAssignment[]
+  teacherAttendances        TeacherAttendance[]    @relation("TeacherAttendanceTeacher")
+  academicYearSnapshots     AcademicYearSnapshot[] @relation("SnapshotTriggeredBy")
+  timetableEntries          TimetableEntry[]       @relation("TimetableTeacher")
+  uploadedFiles             FileRecord[]
+  student                   Student?
+  createdStudents           Student[]              @relation("StudentCreatedBy")
+  updatedStudents           Student[]              @relation("StudentUpdatedBy")
+  credentialSends           CredentialSend[]
   markedAttendances         Attendance[]
-  teacherAttendanceMarkedBy TeacherAttendance[] @relation("TeacherAttendanceMarkedBy")
+  teacherAttendanceMarkedBy TeacherAttendance[]    @relation("TeacherAttendanceMarkedBy")
   studentStatusChanges      StudentStatusLog[]
   feeChangeLogs             FeeChangeLog[]
-  recordedPayments          Payment[]         @relation("PaymentRecordedBy")
-  revertedPayments          Payment[]         @relation("PaymentRevertedBy")
+  recordedPayments          Payment[]              @relation("PaymentRecordedBy")
+  revertedPayments          Payment[]              @relation("PaymentRevertedBy")
   recordedFamilyPayments    FamilyPayment[]
-  enteredMarks              MarksEntry[]      @relation("MarksEnteredBy")
+  enteredMarks              MarksEntry[]           @relation("MarksEnteredBy")
 
   @@index([username])
   @@index([email])
@@ -185,11 +185,10 @@ model FileRecord {
   profileUser    User?    @relation("UserProfilePhoto")
   profileStudent Student? @relation("StudentProfilePhoto")
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
   @@index([entityType, entityId])
   @@map("file_records")
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -212,11 +211,10 @@ model School {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@map("schools")
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -241,11 +239,10 @@ model Branch {
   branchMembers    BranchMember[]
   adminInvitations AdminInvitation[]
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@map("branches")
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -265,14 +262,12 @@ model AcademicCalendar {
 
   academicYears AcademicYear[]
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@map("academic_calendars")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -310,15 +305,13 @@ model AcademicYear {
   teacherAttendances TeacherAttendance[]
   examSessions       ExamSession[]
 
-  createdById     String?
-  updatedById     String?
+  createdById   String?
+  updatedById   String?
+  feeStructures FeeStructure[]
+  studentFees   StudentFee[]
 
   @@unique([branchId, calendarId])
-  feeStructures    FeeStructure[]
-  studentFees      StudentFee[]
-
   @@map("academic_years")
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -335,16 +328,14 @@ model AcademicYearMember {
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@unique([academicYearId, userId])
   @@map("academic_year_members")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -370,13 +361,12 @@ model BranchMember {
   assignedBy        User?  @relation("AssignedBy", fields: [assignedById], references: [id])
   resignedInFavorOf User?  @relation("ResignedInFavorOf", fields: [resignedInFavorOfId], references: [id])
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@unique([branchId, userId])
   @@index([userId])
   @@map("branch_members")
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -407,15 +397,13 @@ model Group {
   timetableEntries   TimetableEntry[]
   examClasses        ExamClass[]
 
-  createdById     String?
-  updatedById     String?
+  createdById   String?
+  updatedById   String?
+  feeStructures FeeStructure[]
+  studentFees   StudentFee[]
 
   @@unique([academicYearId, name, section])
-  feeStructures    FeeStructure[]
-  studentFees      StudentFee[]
-
   @@map("groups")
-
 }
 
 // Group membership (users in a group)
@@ -429,16 +417,14 @@ model GroupMember {
   group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@unique([groupId, userId])
   @@map("group_members")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -468,15 +454,13 @@ model Subject {
   subjectResults     SubjectResult[]
   hod                User?               @relation("SubjectHOD", fields: [hodId], references: [id])
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@unique([academicYearId, code])
   @@map("subjects")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -493,16 +477,14 @@ model GroupSubject {
   group   Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
   subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
 
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@unique([groupId, subjectId])
   @@map("group_subjects")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -534,17 +516,16 @@ model TeacherProfile {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  createdById         String?
-  updatedById         String?
-  credentialGeneratedAt  DateTime?
-  credentialSentAt       DateTime?
-  credentialDeliveredAt  DateTime?
-  credentialSeenAt       DateTime?
-  passwordSetAt          DateTime?
-  credentialStatus       String?       @default("none")
+  createdById           String?
+  updatedById           String?
+  credentialGeneratedAt DateTime?
+  credentialSentAt      DateTime?
+  credentialDeliveredAt DateTime?
+  credentialSeenAt      DateTime?
+  passwordSetAt         DateTime?
+  credentialStatus      String?   @default("none")
 
   @@map("teacher_profiles")
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -568,15 +549,13 @@ model TeacherAssignment {
   group        Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
   subject      Subject      @relation(fields: [subjectId], references: [id], onDelete: Cascade)
 
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@map("teacher_assignments")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -598,11 +577,10 @@ model ManagementProfile {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@map("management_profiles")
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -626,14 +604,12 @@ model ParentProfile {
   user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   children StudentParent[]
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@map("parent_profiles")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -643,57 +619,57 @@ model ParentProfile {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model Student {
-  id              String        @id @default(uuid())
-  academicYearId  String
-  groupId         String?
-  familyId        String?
-  name            String
-  rollNumber      String?
-  admissionNumber String?       @unique
-  dateOfBirth     DateTime?
-  gender          Gender?
-  religion        String?
-  nationality     String?       @default("Pakistani")
-  customFeeAmount Int?          // Per-student fee override (paise). Null = use class structure.
-  concessionReason String?        // Reason: scholarship, discount, teachers child, etc.
-  feeOverrides    Json?           // Per-head overrides: {"headId": amount}
-  address         String?
-  phone           String?
-  bloodGroup      String?
-  bformCnic       String?
-  motherTongue    String?
-  studentEmail    String?
-  studentWhatsapp String?
-  city            String?
-  postalCode      String?
-  country         String?
-  previousSchool  String?
-  previousClass   String?
-  tcNumber        String?
-  referredBy      String?
-  profilePhotoId  String?       @unique
-  profileFile     FileRecord?   @relation("StudentProfilePhoto", fields: [profilePhotoId], references: [id])
-  userId          String?       @unique
-  user            User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
-  username        String?
-  studentNumber   Int?          @unique
-  status          StudentStatus @default(ACTIVE)
-  isActive        Boolean       @default(true)
-  admissionDate   DateTime      @default(now())
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  createdById     String?
-  updatedById     String?
-  createdBy       User?         @relation("StudentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy       User?         @relation("StudentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  credentialGeneratedAt  DateTime?
-  credentialSentAt       DateTime?
-  credentialDeliveredAt  DateTime?
-  credentialSeenAt       DateTime?
-  passwordSetAt          DateTime?
-  credentialStatus       String?       @default("none")
-  credentialSends        CredentialSend[]
-  statusLogs             StudentStatusLog[]
+  id                      String                   @id @default(uuid())
+  academicYearId          String
+  groupId                 String?
+  familyId                String?
+  name                    String
+  rollNumber              String?
+  admissionNumber         String?                  @unique
+  dateOfBirth             DateTime?
+  gender                  Gender?
+  religion                String?
+  nationality             String?                  @default("Pakistani")
+  customFeeAmount         Int? // Per-student fee override (paise). Null = use class structure.
+  concessionReason        String? // Reason: scholarship, discount, teachers child, etc.
+  feeOverrides            Json? // Per-head overrides: {"headId": amount}
+  address                 String?
+  phone                   String?
+  bloodGroup              String?
+  bformCnic               String?
+  motherTongue            String?
+  studentEmail            String?
+  studentWhatsapp         String?
+  city                    String?
+  postalCode              String?
+  country                 String?
+  previousSchool          String?
+  previousClass           String?
+  tcNumber                String?
+  referredBy              String?
+  profilePhotoId          String?                  @unique
+  profileFile             FileRecord?              @relation("StudentProfilePhoto", fields: [profilePhotoId], references: [id])
+  userId                  String?                  @unique
+  user                    User?                    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  username                String?
+  studentNumber           Int?                     @unique
+  status                  StudentStatus            @default(ACTIVE)
+  isActive                Boolean                  @default(true)
+  admissionDate           DateTime                 @default(now())
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  createdById             String?
+  updatedById             String?
+  createdBy               User?                    @relation("StudentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy               User?                    @relation("StudentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  credentialGeneratedAt   DateTime?
+  credentialSentAt        DateTime?
+  credentialDeliveredAt   DateTime?
+  credentialSeenAt        DateTime?
+  passwordSetAt           DateTime?
+  credentialStatus        String?                  @default("none")
+  credentialSends         CredentialSend[]
+  statusLogs              StudentStatusLog[]
   attendanceNotifications AttendanceNotification[]
 
   academicYear      AcademicYear       @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
@@ -705,7 +681,7 @@ model Student {
   healthRecord      HealthRecord?
   attendances       Attendance[]
   studentFees       StudentFee[]
-  feePayments       Payment[]     @relation("PaymentStudent")
+  feePayments       Payment[]          @relation("PaymentStudent")
   examMarks         MarksEntry[]
   subjectResults    SubjectResult[]
   reportCards       ReportCard[]
@@ -722,7 +698,7 @@ model Attendance {
   studentId      String
   academicYearId String
   date           DateTime @db.Date
-  status         String   // "present" | "absent" | "late" | "leave" | "holiday" | "function"
+  status         String // "present" | "absent" | "late" | "leave" | "holiday" | "function"
   note           String?
   markedById     String?
 
@@ -730,8 +706,8 @@ model Attendance {
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
   markedBy     User?        @relation(fields: [markedById], references: [id])
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([studentId, date])
   @@index([academicYearId, date])
@@ -743,7 +719,7 @@ model TeacherAttendance {
   teacherId      String
   academicYearId String
   date           DateTime @db.Date
-  status         String   // "present" | "absent" | "late" | "leave" | "holiday" | "function"
+  status         String // "present" | "absent" | "late" | "leave" | "holiday" | "function"
   note           String?
   markedById     String?
 
@@ -751,8 +727,8 @@ model TeacherAttendance {
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
   markedBy     User?        @relation("TeacherAttendanceMarkedBy", fields: [markedById], references: [id])
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([teacherId, date])
   @@index([academicYearId, date])
@@ -761,13 +737,13 @@ model TeacherAttendance {
 
 // Credential send history (redacted — no passwords stored)
 model CredentialSend {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   studentId   String
-  sentAt      DateTime @default(now())
+  sentAt      DateTime  @default(now())
   deliveredAt DateTime?
   seenAt      DateTime?
-  status      String   // "sent" | "delivered" | "read" | "failed"
-  to          String?  // Masked phone: "03XX-XXXXXX"
+  status      String // "sent" | "delivered" | "read" | "failed"
+  to          String? // Masked phone: "03XX-XXXXXX"
   errorMsg    String?
   sentById    String?
 
@@ -790,15 +766,13 @@ model StudentParent {
   student Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
   parent  ParentProfile @relation(fields: [parentId], references: [id], onDelete: Cascade)
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@unique([studentId, parentId])
   @@map("student_parents")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -817,14 +791,12 @@ model EmergencyContact {
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@map("emergency_contacts")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -847,14 +819,12 @@ model HealthRecord {
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  createdAt       DateTime      @default(now())
+  createdAt DateTime @default(now())
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@map("health_records")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -876,16 +846,14 @@ model Enrollment {
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   group        Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@unique([studentId, academicYearId])
   @@map("enrollments")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -913,14 +881,12 @@ model AcademicYearSnapshot {
   triggeredBy     User            @relation("SnapshotTriggeredBy", fields: [triggeredById], references: [id])
   groupSnapshots  GroupSnapshot[]
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@map("academic_year_snapshots")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -942,15 +908,13 @@ model GroupSnapshot {
 
   snapshot AcademicYearSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
 
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@map("group_snapshots")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -969,11 +933,10 @@ model Announcement {
 
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
   @@index([academicYearId, createdAt])
   @@map("announcements")
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -998,14 +961,14 @@ model Message {
 
 // Attendance notifications for parents (queued for chat app pickup)
 model AttendanceNotification {
-  id          String   @id @default(uuid())
-  studentId   String
-  date        DateTime @db.Date
-  status      String
-  message     String
-  sent        Boolean  @default(false)
-  sentAt      DateTime?
-  createdAt   DateTime @default(now())
+  id        String    @id @default(uuid())
+  studentId String
+  date      DateTime  @db.Date
+  status    String
+  message   String
+  sent      Boolean   @default(false)
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
@@ -1035,14 +998,12 @@ model BatchPromotion {
 
   promotedBy User @relation("PromotedByUser", fields: [promotedById], references: [id])
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@map("batch_promotions")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -1062,11 +1023,10 @@ model NotificationRecipient {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
   @@index([userId, isRead])
   @@map("notification_recipients")
-
 }
 
 // Device tokens for push notifications
@@ -1097,11 +1057,10 @@ model PasswordResetToken {
 
   user User @relation(fields: [userId], references: [id])
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
   @@index([token])
   @@map("password_reset_tokens")
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -1125,19 +1084,19 @@ model ExamType {
 }
 
 model ExamSession {
-  id              String   @id @default(uuid())
-  name            String
-  academicYearId  String
-  startDate       DateTime
-  endDate         DateTime
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(uuid())
+  name           String
+  academicYearId String
+  startDate      DateTime
+  endDate        DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   createdById String?
   updatedById String?
 
-  academicYear AcademicYear  @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
-  exams        Exam[]
+  academicYear   AcademicYear    @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  exams          Exam[]
   subjectResults SubjectResult[]
   reportCards    ReportCard[]
 
@@ -1146,16 +1105,16 @@ model ExamSession {
 }
 
 model Exam {
-  id              String     @id @default(uuid())
-  examSessionId   String
-  examTypeId      String
-  name            String
-  weightOverride  Float?
-  startDate       DateTime
-  endDate         DateTime?
-  status          ExamStatus @default(DRAFT)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id             String     @id @default(uuid())
+  examSessionId  String
+  examTypeId     String
+  name           String
+  weightOverride Float?
+  startDate      DateTime
+  endDate        DateTime?
+  status         ExamStatus @default(DRAFT)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
   createdById String?
   updatedById String?
@@ -1170,19 +1129,19 @@ model Exam {
 }
 
 model ExamClass {
-  id        String  @id @default(uuid())
+  id        String   @id @default(uuid())
   examId    String
   classId   String
-  isActive  Boolean @default(true)
+  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   createdById String?
   updatedById String?
 
-  exam      Exam                @relation(fields: [examId], references: [id], onDelete: Cascade)
-  class     Group               @relation(fields: [classId], references: [id])
-  subjects  ExamClassSubject[]
+  exam     Exam               @relation(fields: [examId], references: [id], onDelete: Cascade)
+  class    Group              @relation(fields: [classId], references: [id])
+  subjects ExamClassSubject[]
 
   @@unique([examId, classId])
   @@index([classId])
@@ -1190,14 +1149,14 @@ model ExamClass {
 }
 
 model ExamClassSubject {
-  id            String  @id @default(uuid())
-  examClassId   String
-  subjectId     String
-  isActive      Boolean @default(true)
-  totalMarks    Int?
-  passingMarks  Int?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(uuid())
+  examClassId  String
+  subjectId    String
+  isActive     Boolean  @default(true)
+  totalMarks   Int?
+  passingMarks Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   createdById String?
   updatedById String?
@@ -1212,14 +1171,14 @@ model ExamClassSubject {
 }
 
 model MarksEntry {
-  id                  String   @id @default(uuid())
-  examClassSubjectId  String
-  studentId           String
-  marksObtained       Float?
-  isAbsent            Boolean  @default(false)
-  enteredBy           String
-  enteredAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                 String   @id @default(uuid())
+  examClassSubjectId String
+  studentId          String
+  marksObtained      Float?
+  isAbsent           Boolean  @default(false)
+  enteredBy          String
+  enteredAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   createdById String?
   updatedById String?
@@ -1235,9 +1194,9 @@ model MarksEntry {
 }
 
 model GradeScale {
-  id        String  @id @default(uuid())
+  id        String   @id @default(uuid())
   name      String
-  isDefault Boolean @default(false)
+  isDefault Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1250,7 +1209,7 @@ model GradeScale {
 }
 
 model GradeBand {
-  id           String  @id @default(uuid())
+  id           String   @id @default(uuid())
   gradeScaleId String
   minPercent   Float
   maxPercent   Float
@@ -1323,7 +1282,7 @@ model ReportCard {
 
 model AuditLog {
   id        String   @id @default(uuid())
-  userId    String?  // nullable — system events and deleted-user scenarios must never break the audit trail
+  userId    String? // nullable — system events and deleted-user scenarios must never break the audit trail
   action    String
   entity    String
   entityId  String?
@@ -1361,13 +1320,12 @@ model ApiKey {
   revokedAt  DateTime?
   createdAt  DateTime   @default(now())
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
   @@index([prefix])
   @@index([revokedAt])
   @@index([type])
   @@map("api_keys")
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -1387,17 +1345,15 @@ model AdminInvitation {
 
   branch Branch @relation(fields: [branchId], references: [id])
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@index([token])
   @@index([email])
   @@index([branchId])
   @@map("admin_invitations")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -1424,15 +1380,13 @@ model Timetable {
   slots        TimetableSlot[]
   dayConfigs   TimetableDayConfig[]
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@unique([academicYearId, name])
   @@map("timetables")
-
-
 }
 
 model TimetableSlot {
@@ -1448,15 +1402,13 @@ model TimetableSlot {
   timetable Timetable        @relation(fields: [timetableId], references: [id], onDelete: Cascade)
   entries   TimetableEntry[]
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@unique([timetableId, lectureNumber])
   @@map("timetable_slots")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -1478,16 +1430,14 @@ model TimetableEntry {
   subject Subject?      @relation(fields: [subjectId], references: [id])
   teacher User?         @relation("TimetableTeacher", fields: [teacherId], references: [id])
 
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@unique([slotId, groupId])
   @@map("timetable_entries")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -1504,15 +1454,13 @@ model TimetableDayConfig {
 
   timetable Timetable @relation(fields: [timetableId], references: [id], onDelete: Cascade)
 
-  updatedAt       DateTime      @updatedAt
+  updatedAt DateTime @updatedAt
 
-  createdById     String?
-  updatedById     String?
+  createdById String?
+  updatedById String?
 
   @@unique([timetableId, dayOfWeek])
   @@map("timetable_day_configs")
-
-
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -1521,13 +1469,13 @@ model TimetableDayConfig {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model StudentStatusLog {
-  id              String        @id @default(uuid())
-  studentId       String
-  previousStatus  StudentStatus?
-  newStatus       StudentStatus
-  reason          String?
-  changedById     String?
-  createdAt       DateTime      @default(now())
+  id             String         @id @default(uuid())
+  studentId      String
+  previousStatus StudentStatus?
+  newStatus      StudentStatus
+  reason         String?
+  changedById    String?
+  createdAt      DateTime       @default(now())
 
   student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
   changedBy User?   @relation(fields: [changedById], references: [id])
@@ -1543,13 +1491,13 @@ model StudentStatusLog {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model Family {
-  id         String    @id @default(uuid())
+  id         String   @id @default(uuid())
   name       String?
   fatherName String?
   motherName String?
   phone      String?
   address    String?
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime @default(now())
 
   students Student[]       @relation("StudentFamily")
   payments FamilyPayment[]
@@ -1559,7 +1507,7 @@ model Family {
 
 model FeeHead {
   id          String   @id @default(uuid())
-  name        String   // Tuition, Transport, Lab, Library, etc.
+  name        String // Tuition, Transport, Lab, Library, etc.
   description String?
   isOptional  Boolean  @default(false)
   isActive    Boolean  @default(true)
@@ -1567,7 +1515,7 @@ model FeeHead {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  structures FeeStructure[]
+  structures      FeeStructure[]
   headAllocations PaymentHeadAllocation[]
 
   @@map("fee_heads")
@@ -1578,15 +1526,15 @@ model FeeStructure {
   academicYearId String
   groupId        String
   feeHeadId      String
-  amount         Int       // In paise (500000 = 5000 PKR)
+  amount         Int // In paise (500000 = 5000 PKR)
   effectiveFrom  DateTime  @default(now())
   effectiveTo    DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
-  group        Group        @relation(fields: [groupId], references: [id])
-  feeHead      FeeHead      @relation(fields: [feeHeadId], references: [id])
+  academicYear AcademicYear   @relation(fields: [academicYearId], references: [id])
+  group        Group          @relation(fields: [groupId], references: [id])
+  feeHead      FeeHead        @relation(fields: [feeHeadId], references: [id])
   changeLogs   FeeChangeLog[]
 
   @@unique([academicYearId, groupId, feeHeadId, effectiveFrom])
@@ -1611,31 +1559,31 @@ model FeeChangeLog {
 }
 
 model StudentFee {
-  id             String   @id @default(uuid())
-  academicYearId String
-  studentId      String
-  groupId        String?  // Snapshot of class at generation time
-  month          Int      // 1-12
-  year           Int
-  totalAmount    Int      // Sum of all applicable heads (paise)
-  concession     Int      @default(0)
-  lateFee        Int      @default(0)
-  netAmount      Int      // totalAmount - concession + lateFee
-  extraCharges   Int      @default(0) // Additional charges on top of base fee
-  extraReason    String?  // Reason for extra charges
-  paidAmount     Int      @default(0)
-  feeHeadBreakdown Json?   // Array of {name, amount, category} from generation
-  status         String   @default("UNPAID") // UNPAID | PARTIAL | PAID | OVERPAID | WAIVED
-  dueDate        DateTime?
-  paidAt         DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String    @id @default(uuid())
+  academicYearId   String
+  studentId        String
+  groupId          String? // Snapshot of class at generation time
+  month            Int // 1-12
+  year             Int
+  totalAmount      Int // Sum of all applicable heads (paise)
+  concession       Int       @default(0)
+  lateFee          Int       @default(0)
+  netAmount        Int // totalAmount - concession + lateFee
+  extraCharges     Int       @default(0) // Additional charges on top of base fee
+  extraReason      String? // Reason for extra charges
+  paidAmount       Int       @default(0)
+  feeHeadBreakdown Json? // Array of {name, amount, category} from generation
+  status           String    @default("UNPAID") // UNPAID | PARTIAL | PAID | OVERPAID | WAIVED
+  dueDate          DateTime?
+  paidAt           DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
-  student      Student      @relation(fields: [studentId], references: [id])
-  group        Group?       @relation(fields: [groupId], references: [id])
-  payments     Payment[]
-  extraItems   FeeExtraItem[]
+  academicYear    AcademicYear            @relation(fields: [academicYearId], references: [id])
+  student         Student                 @relation(fields: [studentId], references: [id])
+  group           Group?                  @relation(fields: [groupId], references: [id])
+  payments        Payment[]
+  extraItems      FeeExtraItem[]
   headAllocations PaymentHeadAllocation[]
 
   @@unique([studentId, month, year])
@@ -1648,27 +1596,28 @@ model FeeExtraItem {
   id           String   @id @default(uuid())
   studentFeeId String
   name         String
-  amount       Int      // in paise
+  amount       Int // in paise
   createdAt    DateTime @default(now())
 
-  studentFee StudentFee @relation(fields: [studentFeeId], references: [id], onDelete: Cascade)
+  studentFee      StudentFee              @relation(fields: [studentFeeId], references: [id], onDelete: Cascade)
+  headAllocations PaymentHeadAllocation[]
 
   @@index([studentFeeId])
   @@map("fee_extra_items")
 }
 
 model FamilyPayment {
-  id            String    @id @default(uuid())
+  id            String   @id @default(uuid())
   familyId      String
-  receiptNumber String    @unique // FMP-YYYYMM-XXXX
+  receiptNumber String   @unique // FMP-YYYYMM-XXXX
   totalAmount   Int
-  paymentDate   DateTime  @default(now())
+  paymentDate   DateTime @default(now())
   recordedById  String
-  createdAt     DateTime  @default(now())
+  createdAt     DateTime @default(now())
 
-  family   Family    @relation(fields: [familyId], references: [id])
-  payments Payment[]
-  recordedBy User    @relation(fields: [recordedById], references: [id])
+  family     Family    @relation(fields: [familyId], references: [id])
+  payments   Payment[]
+  recordedBy User      @relation(fields: [recordedById], references: [id])
 
   @@index([familyId])
   @@map("family_payments")
@@ -1679,10 +1628,10 @@ model Payment {
   studentFeeId    String
   studentId       String
   familyPaymentId String?
-  amount          Int       // In paise
-  paymentMethod   String    // CASH | CHEQUE | BANK_TRANSFER
+  amount          Int // In paise
+  paymentMethod   String // CASH | CHEQUE | BANK_TRANSFER
   receiptNumber   String    @unique // RCP-YYYYMM-XXXX
-  reference       String?   // Cheque number / transaction ID
+  reference       String? // Cheque number / transaction ID
   paymentDate     DateTime  @default(now())
   recordedById    String
   note            String?
@@ -1691,15 +1640,15 @@ model Payment {
   revertReason    String?
   createdAt       DateTime  @default(now())
 
-  studentFee    StudentFee     @relation(fields: [studentFeeId], references: [id])
-  student       Student        @relation("PaymentStudent", fields: [studentId], references: [id], onDelete: Cascade)
-  familyPayment FamilyPayment? @relation(fields: [familyPaymentId], references: [id])
-  receipt      PaymentReceipt?  // One immutable receipt per payment
-  auditLogs    PaymentAuditLog[]
+  studentFee      StudentFee              @relation(fields: [studentFeeId], references: [id])
+  student         Student                 @relation("PaymentStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  familyPayment   FamilyPayment?          @relation(fields: [familyPaymentId], references: [id])
+  receipt         PaymentReceipt? // One immutable receipt per payment
+  auditLogs       PaymentAuditLog[]
   headAllocations PaymentHeadAllocation[]
 
-  recordedBy    User           @relation("PaymentRecordedBy", fields: [recordedById], references: [id])
-  revertedBy    User?          @relation("PaymentRevertedBy", fields: [revertedById], references: [id])
+  recordedBy User  @relation("PaymentRecordedBy", fields: [recordedById], references: [id])
+  revertedBy User? @relation("PaymentRevertedBy", fields: [revertedById], references: [id])
 
   @@index([studentFeeId])
   @@index([familyPaymentId])
@@ -1722,13 +1671,13 @@ model PaymentHeadAllocation {
   studentFeeId   String
   feeHeadId      String?
   feeExtraItemId String?
-  amount         Int       // in paise
+  amount         Int // in paise
   revertedAt     DateTime?
   createdAt      DateTime  @default(now())
 
-  payment      Payment      @relation(fields: [paymentId], references: [id])
-  studentFee   StudentFee   @relation(fields: [studentFeeId], references: [id])
-  feeHead      FeeHead?     @relation(fields: [feeHeadId], references: [id])
+  payment      Payment       @relation(fields: [paymentId], references: [id])
+  studentFee   StudentFee    @relation(fields: [studentFeeId], references: [id])
+  feeHead      FeeHead?      @relation(fields: [feeHeadId], references: [id])
   feeExtraItem FeeExtraItem? @relation(fields: [feeExtraItemId], references: [id])
 
   @@index([paymentId])
@@ -1738,20 +1687,19 @@ model PaymentHeadAllocation {
   @@map("payment_head_allocations")
 }
 
-
 // ─── Receipt Snapshot ───────────────────────────────────────────────
 // Stores exactly what was shown on the receipt at payment time.
 // One snapshot per Payment. Immutable after creation.
 model PaymentReceipt {
-  id            String   @id @default(uuid())
-  paymentId     String   @unique
-  receiptNumber String   // Denormalized for fast lookup
+  id            String @id @default(uuid())
+  paymentId     String @unique
+  receiptNumber String // Denormalized for fast lookup
 
   // Current month (the one being paid) — full breakdown
-  currentMonthLabel  String  // "Jun 2026"
-  currentMonthTotal  Int     // in paise
-  currentMonthHeads  Json    // [{name:"Tuition", amount:300000}, ...]
-  currentMonthExtras Json?   // [{name:"Lab", amount:50000}, ...]
+  currentMonthLabel  String // "Jun 2026"
+  currentMonthTotal  Int // in paise
+  currentMonthHeads  Json // [{name:"Tuition", amount:300000}, ...]
+  currentMonthExtras Json? // [{name:"Lab", amount:50000}, ...]
 
   // Previous months — one combined line
   previousBalancePaise Int // sum of what was due from earlier months
@@ -1763,29 +1711,28 @@ model PaymentReceipt {
   allocations Json?
 
   // Summary
-  totalDuePaise     Int    // currentMonthTotal + previousBalancePaise
-  amountPaidPaise   Int    // what this payment covered
-  balanceAfterPaise Int    // remaining after this payment
+  totalDuePaise     Int // currentMonthTotal + previousBalancePaise
+  amountPaidPaise   Int // what this payment covered
+  balanceAfterPaise Int // remaining after this payment
 
   // Context at time of payment
   paymentMethod String
-  reference    String?
-  studentName  String
-  studentClass String
-  studentRoll  String?
-  fatherName   String?
-  isFullyPaid  Boolean
+  reference     String?
+  studentName   String
+  studentClass  String
+  studentRoll   String?
+  fatherName    String?
+  isFullyPaid   Boolean
 
   // Audit
   paymentDate DateTime
-  printedAt   DateTime?  // first print timestamp
-  printCount  Int        @default(0)
-  createdAt   DateTime   @default(now())
+  printedAt   DateTime? // first print timestamp
+  printCount  Int       @default(0)
+  createdAt   DateTime  @default(now())
 
   payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
   @@index([paymentId])
-
   @@index([receiptNumber])
   @@map("payment_receipts")
 }
@@ -1795,11 +1742,11 @@ model PaymentReceipt {
 model PaymentAuditLog {
   id              String   @id @default(uuid())
   paymentId       String
-  action          String   // CREATED | REVERTED | REPRINTED | DOWNLOADED | MODIFIED
-  previousValue   Json?    // Payment state before change
-  newValue        Json?    // Payment state after change
+  action          String // CREATED | REVERTED | REPRINTED | DOWNLOADED | MODIFIED
+  previousValue   Json? // Payment state before change
+  newValue        Json? // Payment state after change
   performedById   String
-  performedByName String?  // Denormalized for audit readability
+  performedByName String? // Denormalized for audit readability
   ipAddress       String?
   userAgent       String?
   createdAt       DateTime @default(now())

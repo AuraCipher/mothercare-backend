@@ -487,12 +487,12 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
       totalAmount = Object.values(sOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
       breakdown = groupStructures
         .filter(s => (sOverrides as any)[(s as any).feeHeadId] !== undefined)
-        .map(s => ({ name: s.feeHead.name, amount: (sOverrides as any)[(s as any).feeHeadId], category: s.feeHead.category }));
+        .map(s => ({ feeHeadId: (s as any).feeHeadId, name: s.feeHead.name, amount: (sOverrides as any)[(s as any).feeHeadId], category: s.feeHead.category }));
     } else if ((student as any).customFeeAmount != null) {
       totalAmount = (student as any).customFeeAmount;
       breakdown = [{ name: 'Custom Fee', amount: (student as any).customFeeAmount, category: 'CUSTOM' }];
     } else {
-      breakdown = groupStructures.map(s => ({ name: s.feeHead.name, amount: s.amount, category: s.feeHead.category }));
+      breakdown = groupStructures.map(s => ({ feeHeadId: (s as any).feeHeadId, name: s.feeHead.name, amount: s.amount, category: s.feeHead.category }));
     }
     // Fallback: if breakdown is empty but total > 0, show a generic entry
     if (breakdown.length === 0 && totalAmount > 0) {
@@ -598,13 +598,13 @@ router.post('/student-fees/recalculate', asyncHandler(async (req: Request, res: 
       totalAmount = Object.values(fOverrides).reduce((sum: number, v: any) => sum + (v || 0), 0);
       breakdown = effectiveStructures
         .filter(s => (fOverrides as any)[(s as any).feeHeadId] !== undefined)
-        .map(s => ({ name: s.feeHead.name, amount: (fOverrides as any)[(s as any).feeHeadId], category: s.feeHead.category }));
+        .map(s => ({ feeHeadId: (s as any).feeHeadId, name: s.feeHead.name, amount: (fOverrides as any)[(s as any).feeHeadId], category: s.feeHead.category }));
     } else if (student.customFeeAmount != null) {
       totalAmount = student.customFeeAmount;
       breakdown = [{ name: 'Custom Fee', amount: student.customFeeAmount, category: 'CUSTOM' }];
     } else {
       totalAmount = baseAmount;
-      breakdown = effectiveStructures.map(s => ({ name: s.feeHead.name, amount: s.amount, category: s.feeHead.category }));
+      breakdown = effectiveStructures.map(s => ({ feeHeadId: (s as any).feeHeadId, name: s.feeHead.name, amount: s.amount, category: s.feeHead.category }));
     }
     // Fallback: if breakdown is empty but total > 0, show a generic entry
     if (breakdown.length === 0 && totalAmount > 0) {
@@ -1063,6 +1063,309 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
       totalAmount: amount,
       allocations: allocations.map((a: any) => ({ id: a.id, studentFeeId: a.studentFeeId, amount: a.amount, receiptNumber: a.receiptNumber })),
       monthsCovered: allocations.length,
+    },
+  });
+}));
+
+// POST /admin/payments/allocate — Manual allocation payment (Step 1 UI).
+// Unlike /payments/waterfall (which decides allocation itself, oldest-first,
+// no accountant input), this endpoint takes an EXPLICIT selection: which
+// previous months (whole, no head split) and which current-month heads/
+// extras (individually) the accountant checked on the allocation screen.
+// Backend re-validates every amount against fresh DB state inside a locked
+// transaction — it never trusts client-sent due amounts, only client-sent
+// *selection* (which studentFeeId/feeHeadId/feeExtraItemId got how much).
+router.post('/payments/allocate', asyncHandler(async (req: Request, res: Response) => {
+  const { studentId, amountPaidPaise, paymentMethod, reference, note, previousMonths, currentMonth } = req.body;
+  const userId = (req as any).user?.id;
+
+  if (!studentId || !amountPaidPaise || amountPaidPaise <= 0) {
+    res.status(400).json({ success: false, message: 'studentId and amountPaidPaise (>0) required' });
+    return;
+  }
+  const prevList: { studentFeeId: string; amountPaise: number }[] = Array.isArray(previousMonths) ? previousMonths : [];
+  const curHeads: { feeHeadId?: string; headName?: string; amountPaise: number }[] = currentMonth?.heads || [];
+  const curExtras: { feeExtraItemId: string; amountPaise: number }[] = currentMonth?.extras || [];
+  const curStudentFeeId: string | undefined = currentMonth?.studentFeeId;
+
+  if (prevList.length === 0 && curHeads.length === 0 && curExtras.length === 0) {
+    res.status(400).json({ success: false, message: 'No allocation selected' });
+    return;
+  }
+  if ((curHeads.length > 0 || curExtras.length > 0) && !curStudentFeeId) {
+    res.status(400).json({ success: false, message: 'currentMonth.studentFeeId required when heads/extras are selected' });
+    return;
+  }
+
+  // Selection amounts must sum to exactly the amount being paid — this is
+  // the same rule the Step 1 Next button enforces client-side; the backend
+  // can't skip re-checking it since the client payload isn't trusted.
+  const selectedTotal =
+    prevList.reduce((s, p) => s + (p.amountPaise || 0), 0) +
+    curHeads.reduce((s, h) => s + (h.amountPaise || 0), 0) +
+    curExtras.reduce((s, e) => s + (e.amountPaise || 0), 0);
+  if (selectedTotal !== amountPaidPaise) {
+    res.status(400).json({ success: false, message: `Selected total (${selectedTotal}) does not match amount paid (${amountPaidPaise})` });
+    return;
+  }
+
+  const allFeeIds = Array.from(new Set([...prevList.map(p => p.studentFeeId), ...(curStudentFeeId ? [curStudentFeeId] : [])]));
+
+  let payments: any[] = [];
+  let receiptNumber = '';
+  try {
+    const result = await generateReceiptNumber(async (receiptBase) => {
+      return prisma.$transaction(async (tx) => {
+        // Lock every StudentFee row this request touches, up front — same
+        // pattern as waterfall: without FOR UPDATE, two concurrent payment
+        // requests against the same fee/head can both read stale amounts
+        // and the second commit silently overwrites the first.
+        await tx.$queryRaw`
+          SELECT id FROM "student_fees" WHERE id = ANY(${allFeeIds}) FOR UPDATE
+        `;
+
+        const freshFees = await tx.studentFee.findMany({
+          where: { id: { in: allFeeIds }, studentId },
+          include: { extraItems: true },
+        });
+        const feeById = new Map(freshFees.map(f => [f.id, f]));
+        if (freshFees.length !== allFeeIds.length) {
+          throw Object.assign(new Error('One or more selected fees do not belong to this student'), { statusCode: 400 });
+        }
+
+        const createdPayments: any[] = [];
+        let seq = 0;
+
+        // Previous months: whole-fee payments, validated against fresh remaining due
+        const sortedPrev = [...prevList].sort((a, b) => {
+          const fa = feeById.get(a.studentFeeId), fb = feeById.get(b.studentFeeId);
+          return ((fa?.year || 0) - (fb?.year || 0)) || ((fa?.month || 0) - (fb?.month || 0));
+        });
+        for (const p of sortedPrev) {
+          const fee = feeById.get(p.studentFeeId);
+          if (!fee) throw Object.assign(new Error('Selected previous-month fee not found'), { statusCode: 400 });
+          const extraSum = (fee.extraItems || []).reduce((s, e) => s + e.amount, 0);
+          const remaining = fee.netAmount + extraSum - fee.paidAmount;
+          if (p.amountPaise <= 0 || p.amountPaise > remaining) {
+            throw Object.assign(new Error(`Selected amount for ${fee.month}/${fee.year} exceeds its remaining due (${remaining})`), { statusCode: 400 });
+          }
+          seq++;
+          const payment = await tx.payment.create({
+            data: {
+              studentFeeId: fee.id, studentId,
+              amount: p.amountPaise, paymentMethod: paymentMethod || 'CASH',
+              receiptNumber: `${receiptBase}-${seq}`,
+              reference, note, recordedById: userId,
+            },
+          });
+          createdPayments.push(payment);
+          const newPaid = fee.paidAmount + p.amountPaise;
+          const feeTotalDue = fee.netAmount + extraSum;
+          const newStatus = newPaid >= feeTotalDue ? (newPaid > feeTotalDue ? 'OVERPAID' : 'PAID') : 'PARTIAL';
+          await tx.studentFee.update({
+            where: { id: fee.id },
+            data: { paidAmount: newPaid, status: newStatus, paidAt: newStatus === 'PAID' ? new Date() : undefined },
+          });
+        }
+
+        // Current month: one Payment row + PaymentHeadAllocation children,
+        // validated per-head/per-extra against fresh remaining (sticker
+        // price minus whatever was already allocated to that specific
+        // head/extra in prior, non-reverted allocations).
+        let currentMonthPayment: any = null;
+        if (curStudentFeeId && (curHeads.length > 0 || curExtras.length > 0)) {
+          const fee = feeById.get(curStudentFeeId);
+          if (!fee) throw Object.assign(new Error('Current month fee not found'), { statusCode: 400 });
+
+          const priorAllocs = await tx.paymentHeadAllocation.findMany({
+            where: { studentFeeId: curStudentFeeId, revertedAt: null },
+          });
+          const priorByHead = new Map<string, number>();
+          for (const a of priorAllocs) {
+            const key = a.feeHeadId ? `h:${a.feeHeadId}` : `e:${a.feeExtraItemId}`;
+            priorByHead.set(key, (priorByHead.get(key) || 0) + a.amount);
+          }
+
+          const headBreakdown = (fee.feeHeadBreakdown as any[]) || [];
+          const allocInputs: { feeHeadId?: string; feeExtraItemId?: string; amount: number }[] = [];
+
+          for (const h of curHeads) {
+            // feeHeadBreakdown now stores feeHeadId going forward (fixed
+            // alongside this endpoint), but StudentFee rows generated
+            // before that fix still have breakdown entries with only
+            // {name, amount, category} — no feeHeadId. No backfill exists
+            // for those, so match by id when present, falling back to name
+            // (h.headName, sent by the frontend from whatever the breakdown
+            // API returned) for pre-fix records.
+            const headDef = headBreakdown.find((b: any) =>
+              (h.feeHeadId && b.feeHeadId === h.feeHeadId) || (h.headName && b.name === h.headName)
+            );
+            if (!headDef) throw Object.assign(new Error('Selected fee head not found on this month'), { statusCode: 400 });
+            const headKey = headDef.feeHeadId || `name:${headDef.name}`;
+            const already = priorByHead.get(`h:${headKey}`) || 0;
+            const remaining = (headDef.amount || 0) - already;
+            if (h.amountPaise <= 0 || h.amountPaise > remaining) {
+              throw Object.assign(new Error(`Selected amount for head "${headDef.name}" exceeds its remaining due (${remaining})`), { statusCode: 400 });
+            }
+            allocInputs.push({ feeHeadId: h.feeHeadId, amount: h.amountPaise });
+          }
+          for (const e of curExtras) {
+            const extraDef = fee.extraItems.find(ei => ei.id === e.feeExtraItemId);
+            if (!extraDef) throw Object.assign(new Error('Selected extra item not found on this month'), { statusCode: 400 });
+            const already = priorByHead.get(`e:${e.feeExtraItemId}`) || 0;
+            const remaining = extraDef.amount - already;
+            if (e.amountPaise <= 0 || e.amountPaise > remaining) {
+              throw Object.assign(new Error(`Selected amount for extra "${extraDef.name}" exceeds its remaining due (${remaining})`), { statusCode: 400 });
+            }
+            allocInputs.push({ feeExtraItemId: e.feeExtraItemId, amount: e.amountPaise });
+          }
+
+          const curAmount = allocInputs.reduce((s, a) => s + a.amount, 0);
+          seq++;
+          currentMonthPayment = await tx.payment.create({
+            data: {
+              studentFeeId: fee.id, studentId,
+              amount: curAmount, paymentMethod: paymentMethod || 'CASH',
+              receiptNumber: `${receiptBase}-${seq}`,
+              reference, note, recordedById: userId,
+            },
+          });
+          for (const a of allocInputs) {
+            await tx.paymentHeadAllocation.create({
+              data: {
+                paymentId: currentMonthPayment.id,
+                studentFeeId: fee.id,
+                feeHeadId: a.feeHeadId || null,
+                feeExtraItemId: a.feeExtraItemId || null,
+                amount: a.amount,
+              },
+            });
+          }
+          createdPayments.push(currentMonthPayment);
+
+          const extraSum = fee.extraItems.reduce((s, e2) => s + e2.amount, 0);
+          const newPaid = fee.paidAmount + curAmount;
+          const feeTotalDue = fee.netAmount + extraSum;
+          const newStatus = newPaid >= feeTotalDue ? (newPaid > feeTotalDue ? 'OVERPAID' : 'PAID') : 'PARTIAL';
+          await tx.studentFee.update({
+            where: { id: fee.id },
+            data: { paidAmount: newPaid, status: newStatus, paidAt: newStatus === 'PAID' ? new Date() : undefined },
+          });
+        }
+
+        return createdPayments;
+      });
+    }, 'RCP');
+    payments = result.result;
+    receiptNumber = result.receiptNumber;
+  } catch (allocErr: any) {
+    if (allocErr.statusCode === 400) {
+      res.status(400).json({ success: false, message: allocErr.message });
+      return;
+    }
+    throw allocErr;
+  }
+
+  // Receipt snapshot — same shape as waterfall's, plus a per-head/per-extra
+  // paid-vs-due breakdown for the current month (this is the thing that
+  // was previously just a sticker price on the receipt; now it reflects
+  // what was actually selected and paid in this transaction).
+  const studentData = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { name: true, rollNumber: true, group: { select: { name: true, section: true } }, parents: { include: { parent: { select: { relation: true, phone: true, user: { select: { name: true } } } } } } },
+  });
+  const father = studentData?.parents?.find((p: any) => p.parent?.relation === 'Father');
+  const fatherName = father?.parent?.user?.name || father?.parent?.phone || null;
+  const studentClass = [studentData?.group?.name, studentData?.group?.section].filter(Boolean).join(' — ') || '—';
+
+  const touchedFeeIds = new Set(payments.map((p: any) => p.studentFeeId));
+  const touchedFees = await prisma.studentFee.findMany({
+    where: { id: { in: Array.from(touchedFeeIds) } },
+    include: { extraItems: true },
+  });
+  const currentFee = curStudentFeeId ? touchedFees.find(f => f.id === curStudentFeeId) : undefined;
+  const sortedTouched = [...touchedFees].sort((a, b) => (b.year - a.year) || (b.month - a.month));
+  const latestFee = currentFee || sortedTouched[0];
+
+  const otherFees = await prisma.studentFee.findMany({
+    where: { studentId, id: { notIn: Array.from(touchedFeeIds) } },
+    include: { extraItems: { select: { amount: true } } },
+  });
+  let previousBalance = 0;
+  let prevMonthsCount = 0;
+  for (const f of otherFees) {
+    const fe = f.extraItems.reduce((s, e) => s + e.amount, 0);
+    const due = f.netAmount + fe - f.paidAmount;
+    if (due > 0) { previousBalance += due; prevMonthsCount++; }
+  }
+
+  const monthLabel = latestFee
+    ? (['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(latestFee.month || 1) - 1] + ' ' + (latestFee.year || ''))
+    : 'Allocated Payment';
+
+  // Per-head/extra paid-vs-due for the current month, using exactly what
+  // was selected in this transaction (curHeads/curExtras) plus the sticker
+  // price already resolved during allocation.
+  const cmHeads = curStudentFeeId && currentFee
+    ? ((currentFee.feeHeadBreakdown as any[]) || []).map((b: any) => {
+        const selected = curHeads.find((h: any) => (h.feeHeadId && h.feeHeadId === b.feeHeadId) || (h.headName && h.headName === b.name));
+        return { name: b.name, amountPaise: b.amount || 0, paidPaise: selected?.amountPaise || 0 };
+      })
+    : [];
+  const cmExtras = curStudentFeeId && currentFee
+    ? curExtras.map((e: any) => {
+        const def = currentFee.extraItems.find(ei => ei.id === e.feeExtraItemId);
+        return { name: def?.name || 'Extra', amountPaise: def?.amount || 0, paidPaise: e.amountPaise };
+      })
+    : [];
+  const currentTotal = currentFee ? (currentFee.netAmount + currentFee.extraItems.reduce((s, e) => s + e.amount, 0)) : 0;
+  const totalDueBefore = previousBalance + currentTotal;
+  // touchedFees were re-fetched AFTER the transaction committed, so their
+  // paidAmount already reflects this payment — remaining due on them, plus
+  // whatever's still owed on untouched fees (previousBalance), is the true
+  // post-payment balance.
+  const touchedRemaining = touchedFees.reduce((s, f) => s + Math.max(0, (f.netAmount + f.extraItems.reduce((se, e) => se + e.amount, 0)) - f.paidAmount), 0);
+  const balanceAfter = previousBalance + touchedRemaining;
+
+  const allocationLabels = payments.map((p: any) => {
+    const f = touchedFees.find(tf => tf.id === p.studentFeeId);
+    const label = f ? (['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(f.month || 1) - 1] + ' ' + (f.year || '')) : 'Allocation';
+    return { label, amountPaise: p.amount };
+  });
+
+  try {
+    await createReceiptSnapshot(
+      payments[0]?.id || 'unknown', receiptNumber,
+      {
+        amountPaidPaise: amountPaidPaise,
+        currentMonthLabel: monthLabel,
+        currentMonthHeads: cmHeads,
+        currentMonthExtras: cmExtras,
+        previousBalancePaise: previousBalance,
+        previousMonthsCount: prevMonthsCount,
+        allocations: allocationLabels,
+        totalDuePaise: totalDueBefore,
+        balanceAfterPaise: Math.max(0, balanceAfter),
+        paymentMethod: paymentMethod || 'CASH',
+        reference: reference || null,
+        studentName: studentData?.name || '',
+        studentClass,
+        studentRoll: studentData?.rollNumber || null,
+        fatherName,
+        isFullyPaid: balanceAfter <= 0,
+      },
+      userId,
+    );
+  } catch (snapErr) {
+    console.error('Receipt snapshot creation failed (allocate):', (snapErr as Error).message);
+  }
+
+  res.status(201).json({
+    success: true,
+    data: {
+      receiptNumber,
+      totalAmount: amountPaidPaise,
+      payments: payments.map((p: any) => ({ id: p.id, studentFeeId: p.studentFeeId, amount: p.amount, receiptNumber: p.receiptNumber })),
     },
   });
 }));
