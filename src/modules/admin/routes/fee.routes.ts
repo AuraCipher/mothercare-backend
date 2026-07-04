@@ -438,7 +438,7 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
       payments: mf?.payments || [],
       _extraAmount: mfExtra,
     };
-  });
+  }).filter(row => isFull || row.fee != null);
 
   res.json({ success: true, data });
 }));
@@ -483,13 +483,13 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
   if (!month || !year) { res.status(400).json({ success: false, message: 'month and year required' }); return; }
   const selectedCats: string[] = categories || ['MONTHLY'];
   const selectedHeadIds: string[] | null = headIds?.length > 0 ? headIds : null;
-  const selectedGroupIds: string[] | null = groupIds?.length > 0 ? groupIds : null;
+  const hasGroupFilter = Array.isArray(groupIds);
 
   const ayId = await resolveAcademicYearId(academicYearId);
   if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
 
   const studentWhere: any = { academicYearId: ayId, isActive: true, status: 'ACTIVE' };
-  if (selectedGroupIds) studentWhere.groupId = { in: selectedGroupIds };
+  if (hasGroupFilter) studentWhere.groupId = { in: groupIds };
 
   const students = await prisma.student.findMany({
     where: studentWhere,
