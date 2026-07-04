@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../../lib/prisma';
 import { logAudit, diffFields } from '../../../services/audit.service';
 import { resolveAcademicYearId, requireScope } from '../utils/scope-context';
+import { computeFeeAnalytics, resolveFeeAnalyticsFilters } from '../services/fee-analytics.service';
 
 const router = Router();
 
@@ -721,6 +722,7 @@ router.get('/student-fees', asyncHandler(async (req: Request, res: Response) => 
         },
       },
       payments: { where: { revertedAt: null } },
+      extraItems: true,
     },
     orderBy: [{ netAmount: 'desc' }],
   });
@@ -3301,15 +3303,39 @@ router.get('/fees/collection-report', asyncHandler(async (req: Request, res: Res
     classMap[key].count++;
   }
 
-  const report = Object.entries(classMap).map(([key, d]) => ({
-    groupId: key,
-    total: d.total, collected: d.collected,
-    pending: d.total - d.collected,
-    students: d.count,
-    rate: d.total ? Math.round((d.collected / d.total) * 100) : 0,
-  }));
+  const report = Object.entries(classMap).map(([key, d]) => {
+    const sample = fees.find(f => (f.groupId || 'Unassigned') === key);
+    const groupName = sample?.group?.name || (key === 'Unassigned' ? 'Unassigned' : key);
+    const section = sample?.group?.section || null;
+    return {
+      groupId: key,
+      groupName,
+      section,
+      total: d.total, collected: d.collected,
+      pending: d.total - d.collected,
+      students: d.count,
+      rate: d.total ? Math.round((d.collected / d.total) * 100) : 0,
+    };
+  });
 
   res.json({ success: true, data: report });
+}));
+
+// GET /admin/fees/analytics — Dashboard analytics (summary, trends, breakdowns)
+router.get('/fees/analytics', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { academicYearId } = scope;
+  const filters = resolveFeeAnalyticsFilters({
+    period: req.query.period as string,
+    month: req.query.month as string,
+    year: req.query.year as string,
+    from: req.query.from as string,
+    to: req.query.to as string,
+    groupId: req.query.groupId as string,
+  });
+  const data = await computeFeeAnalytics(academicYearId, filters);
+  res.json({ success: true, data });
 }));
 
 export default router;
