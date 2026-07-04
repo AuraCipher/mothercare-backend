@@ -230,7 +230,11 @@ router.get('/students/:id/fee', asyncHandler(async (req: Request, res: Response)
       parents: { include: { parent: { select: { relation: true, phone: true, occupation: true, user: { select: { name: true } } } } } },
       studentFees: {
         where: { academicYearId: ayId },
-        include: { payments: { where: { revertedAt: null }, orderBy: { createdAt: 'desc' } }, extraItems: true },
+        include: {
+          payments: { where: { revertedAt: null }, orderBy: { createdAt: 'desc' } },
+          extraItems: true,
+          headAllocations: { where: { revertedAt: null }, select: { feeHeadId: true, feeExtraItemId: true, amount: true } },
+        },
         orderBy: [{ year: 'desc' }, { month: 'desc' }],
       },
     },
@@ -1460,32 +1464,28 @@ router.post('/payments/allocate', asyncHandler(async (req: Request, res: Respons
           });
           const priorByHead = new Map<string, number>();
           for (const a of priorAllocs) {
-            const key = a.feeHeadId ? `h:${a.feeHeadId}` : `e:${a.feeExtraItemId}`;
-            priorByHead.set(key, (priorByHead.get(key) || 0) + a.amount);
+            if (a.feeHeadId) {
+              priorByHead.set(`h:${a.feeHeadId}`, (priorByHead.get(`h:${a.feeHeadId}`) || 0) + a.amount);
+            } else if (a.feeExtraItemId) {
+              priorByHead.set(`e:${a.feeExtraItemId}`, (priorByHead.get(`e:${a.feeExtraItemId}`) || 0) + a.amount);
+            }
           }
 
           const headBreakdown = (fee.feeHeadBreakdown as any[]) || [];
           const allocInputs: { feeHeadId?: string; feeExtraItemId?: string; amount: number }[] = [];
 
           for (const h of curHeads) {
-            // feeHeadBreakdown now stores feeHeadId going forward (fixed
-            // alongside this endpoint), but StudentFee rows generated
-            // before that fix still have breakdown entries with only
-            // {name, amount, category} — no feeHeadId. No backfill exists
-            // for those, so match by id when present, falling back to name
-            // (h.headName, sent by the frontend from whatever the breakdown
-            // API returned) for pre-fix records.
             const headDef = headBreakdown.find((b: any) =>
               (h.feeHeadId && b.feeHeadId === h.feeHeadId) || (h.headName && b.name === h.headName)
             );
             if (!headDef) throw Object.assign(new Error('Selected fee head not found on this month'), { statusCode: 400 });
-            const headKey = headDef.feeHeadId || `name:${headDef.name}`;
-            const already = priorByHead.get(`h:${headKey}`) || 0;
+            const headKey = headDef.feeHeadId ? `h:${headDef.feeHeadId}` : `n:${headDef.name}`;
+            const already = priorByHead.get(headKey) || 0;
             const remaining = (headDef.amount || 0) - already;
             if (h.amountPaise <= 0 || h.amountPaise > remaining) {
               throw Object.assign(new Error(`Selected amount for head "${headDef.name}" exceeds its remaining due (${remaining})`), { statusCode: 400 });
             }
-            allocInputs.push({ feeHeadId: h.feeHeadId, amount: h.amountPaise });
+            allocInputs.push({ feeHeadId: headDef.feeHeadId || undefined, amount: h.amountPaise });
           }
           for (const e of curExtras) {
             const extraDef = fee.extraItems.find(ei => ei.id === e.feeExtraItemId);
@@ -1581,23 +1581,59 @@ router.post('/payments/allocate', asyncHandler(async (req: Request, res: Respons
     ? (['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(latestFee.month || 1) - 1] + ' ' + (latestFee.year || ''))
     : 'Allocated Payment';
 
-  // Per-head/extra paid-vs-due for the current month, using exactly what
-  // was selected in this transaction (curHeads/curExtras) plus the sticker
-  // price already resolved during allocation.
-  const cmHeads = curStudentFeeId && currentFee
-    ? ((currentFee.feeHeadBreakdown as any[]) || []).map((b: any) => {
-        const selected = curHeads.find((h: any) => (h.feeHeadId && h.feeHeadId === b.feeHeadId) || (h.headName && h.headName === b.name));
-        return { name: b.name, amountPaise: b.amount || 0, paidPaise: selected?.amountPaise || 0 };
-      })
+  // Per-head/extra paid-vs-due for the current month — use remaining due
+  // BEFORE this payment, not full sticker prices (critical for 2nd+ partial
+  // payments where MonthlyFee/PaperFund are already cleared).
+  const curPaymentOnCurrent = curStudentFeeId
+    ? payments.filter((p: any) => p.studentFeeId === curStudentFeeId).reduce((s, p) => s + p.amount, 0)
+    : 0;
+  const headBreakdownForReceipt = curStudentFeeId && currentFee
+    ? ((currentFee.feeHeadBreakdown as any[]) || [])
     : [];
+
+  let priorHeadPaid = new Map<string, number>();
+  if (curStudentFeeId) {
+    const allPriorAllocs = await prisma.paymentHeadAllocation.findMany({
+      where: { studentFeeId: curStudentFeeId, revertedAt: null },
+      select: { feeHeadId: true, feeExtraItemId: true, amount: true, paymentId: true },
+    });
+    const thisPaymentIds = new Set(payments.map((p: any) => p.id));
+    for (const a of allPriorAllocs) {
+      if (thisPaymentIds.has(a.paymentId)) continue;
+      if (a.feeHeadId) {
+        priorHeadPaid.set(`h:${a.feeHeadId}`, (priorHeadPaid.get(`h:${a.feeHeadId}`) || 0) + a.amount);
+      } else if (a.feeExtraItemId) {
+        priorHeadPaid.set(`e:${a.feeExtraItemId}`, (priorHeadPaid.get(`e:${a.feeExtraItemId}`) || 0) + a.amount);
+      }
+    }
+  }
+
+  const cmHeads: { name: string; amountPaise: number; paidPaise?: number }[] = [];
+  if (curStudentFeeId && currentFee) {
+    for (const b of headBreakdownForReceipt) {
+      const headKey = b.feeHeadId ? `h:${b.feeHeadId}` : `n:${b.name}`;
+      const paidBefore = priorHeadPaid.get(headKey) || 0;
+      const dueBefore = Math.max(0, (b.amount || 0) - paidBefore);
+      const selected = curHeads.find((h: any) => (h.feeHeadId && h.feeHeadId === b.feeHeadId) || (h.headName && h.headName === b.name));
+      const paidThis = selected?.amountPaise || 0;
+      if (dueBefore > 0 || paidThis > 0) {
+        cmHeads.push({ name: b.name, amountPaise: dueBefore > 0 ? dueBefore : (b.amount || 0), paidPaise: paidThis });
+      }
+    }
+  }
   const cmExtras = curStudentFeeId && currentFee
     ? curExtras.map((e: any) => {
         const def = currentFee.extraItems.find(ei => ei.id === e.feeExtraItemId);
-        return { name: def?.name || 'Extra', amountPaise: def?.amount || 0, paidPaise: e.amountPaise };
+        const paidBefore = priorHeadPaid.get(`e:${e.feeExtraItemId}`) || 0;
+        const dueBefore = Math.max(0, (def?.amount || 0) - paidBefore);
+        return { name: def?.name || 'Extra', amountPaise: dueBefore > 0 ? dueBefore : (def?.amount || 0), paidPaise: e.amountPaise };
       })
     : [];
-  const currentTotal = currentFee ? (currentFee.netAmount + currentFee.extraItems.reduce((s, e) => s + e.amount, 0)) : 0;
-  const totalDueBefore = previousBalance + currentTotal;
+  const currentStickerTotal = currentFee ? (currentFee.netAmount + currentFee.extraItems.reduce((s, e) => s + e.amount, 0)) : 0;
+  const currentRemainingBefore = currentFee
+    ? Math.max(0, currentStickerTotal - (currentFee.paidAmount - curPaymentOnCurrent))
+    : 0;
+  const totalDueBefore = previousBalance + currentRemainingBefore;
   // touchedFees were re-fetched AFTER the transaction committed, so their
   // paidAmount already reflects this payment — remaining due on them, plus
   // whatever's still owed on untouched fees (previousBalance), is the true
