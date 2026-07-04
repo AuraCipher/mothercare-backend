@@ -19,6 +19,18 @@ export type MockPrismaClient = DeepMockProxy<PrismaClient>;
 // ─── Create the mock instance ─────────────────────────────
 export const prismaMock = mockDeep<PrismaClient>();
 
+// ─── Fix: $extends must return the mock itself ────────────
+// src/lib/prisma.ts calls createAuditExtension(basePrisma) at module-load
+// time, which does basePrisma.$extends({...}) to attach audit hooks.
+// jest-mock-extended creates $extends as a bare jest.fn() that returns
+// undefined by default. Without this stub, createAuditExtension returns
+// undefined, the exported `prisma` is undefined, and every route handler
+// crashes with "Cannot read properties of undefined (reading 'findMany')".
+// This configures $extends to return the mock itself, preserving the
+// expected shape (payment.findMany, user.findUnique, etc.) so routes can
+// be set up per-test with prismaMock.xxx.mockReturnValue/ResolvedValue.
+(prismaMock as any).$extends.mockReturnValue(prismaMock);
+
 // ─── Mock the @prisma/client module ───────────────────────
 // This ensures that anywhere in the codebase that does
 // `new PrismaClient()` or imports enums from @prisma/client,
