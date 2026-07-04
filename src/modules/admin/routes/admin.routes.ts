@@ -16,6 +16,7 @@ import studentRoutes from './student.routes';
 import feeRoutes from './fee.routes';
 import examSessionRoutes from './exam-session.routes';
 import examTypeRoutes from './exam-type.routes';
+import examRoutes from './exam.routes';
 
 const router = Router();
 const meRouter = Router();
@@ -49,6 +50,7 @@ router.use(feeRoutes); // Contains /fee-heads, /fee-structures, /student-fees, /
 router.use(studentRoutes); // Contains /students, /students/:id, /students/:id/emergency-contact, etc.
 router.use(examSessionRoutes); // Contains /exam-sessions — ExamSession CRUD
 router.use(examTypeRoutes); // Contains /exam-sessions/:sessionId/exam-types — ExamType tag manager
+router.use(examRoutes); // Contains /exam-sessions/:sessionId/exams — Exam CRUD
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
