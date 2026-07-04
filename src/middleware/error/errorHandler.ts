@@ -23,5 +23,6 @@ export default function errorHandler(err: any, req: Request, res: Response, _nex
     success: false,
     message: isDev ? message : (status === 500 ? 'Internal server error' : message),
     ...(isDev && { stack: err.stack }),
+    ...(err.errors && { errors: err.errors }),
   });
 }
