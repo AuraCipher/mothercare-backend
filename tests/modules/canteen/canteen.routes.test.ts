@@ -81,6 +81,46 @@ describe('Canteen routes', () => {
     expect(res.body.data[0].name).toBe('Snacks');
   });
 
+  test('POST /admin/canteen/categories returns 409 for duplicate name', async () => {
+    prismaMock.canteenProductCategory.findFirst.mockResolvedValue({
+      id: 'c1',
+      branchId,
+      name: 'Snacks',
+      isActive: true,
+    } as any);
+
+    const res = await request(app)
+      .post(`/admin/canteen/categories?branchId=${branchId}`)
+      .set(adminToken)
+      .send({ name: 'Snacks' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/already exists/i);
+  });
+
+  test('POST /admin/canteen/categories reactivates inactive category', async () => {
+    prismaMock.canteenProductCategory.findFirst.mockResolvedValue({
+      id: 'c1',
+      branchId,
+      name: 'Snacks',
+      isActive: false,
+    } as any);
+    prismaMock.canteenProductCategory.update.mockResolvedValue({
+      id: 'c1',
+      name: 'Snacks',
+      isActive: true,
+    } as any);
+
+    const res = await request(app)
+      .post(`/admin/canteen/categories?branchId=${branchId}`)
+      .set(adminToken)
+      .send({ name: 'Snacks' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.isActive).toBe(true);
+    expect(prismaMock.canteenProductCategory.create).not.toHaveBeenCalled();
+  });
+
   test('POST /admin/canteen/sales cash decrements stock', async () => {
     mockCanteenStaffMembership();
     prismaMock.canteenProduct.findMany.mockResolvedValue([

@@ -32,6 +32,26 @@ async function activeAcademicYearId(branchId: string) {
   return ay?.id ?? null;
 }
 
+function normalizeName(name: string) {
+  return name.trim();
+}
+
+async function findCategoryByName(branchId: string, name: string) {
+  const trimmed = normalizeName(name);
+  if (!trimmed) return null;
+  return prisma.canteenProductCategory.findFirst({
+    where: { branchId, name: trimmed },
+  });
+}
+
+async function findSupplierByName(branchId: string, name: string) {
+  const trimmed = normalizeName(name);
+  if (!trimmed) return null;
+  return prisma.canteenSupplier.findFirst({
+    where: { branchId, name: trimmed },
+  });
+}
+
 // ─── Categories ───────────────────────────────────────────────────
 
 export async function listCategories(branchId: string) {
@@ -42,9 +62,28 @@ export async function listCategories(branchId: string) {
 }
 
 export async function createCategory(branchId: string, name: string) {
-  return prisma.canteenProductCategory.create({
-    data: { branchId, name: name.trim() },
-  });
+  const trimmed = normalizeName(name);
+  if (!trimmed) httpError(400, 'name is required');
+
+  const existing = await findCategoryByName(branchId, trimmed);
+  if (existing) {
+    if (!existing.isActive) {
+      return prisma.canteenProductCategory.update({
+        where: { id: existing.id },
+        data: { isActive: true },
+      });
+    }
+    httpError(409, `Category "${trimmed}" already exists`);
+  }
+
+  try {
+    return await prisma.canteenProductCategory.create({
+      data: { branchId, name: trimmed },
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2002') httpError(409, `Category "${trimmed}" already exists`);
+    throw err;
+  }
 }
 
 export async function updateCategory(
@@ -54,13 +93,32 @@ export async function updateCategory(
 ) {
   const row = await prisma.canteenProductCategory.findFirst({ where: { id, branchId } });
   if (!row) httpError(404, 'Category not found');
-  return prisma.canteenProductCategory.update({
-    where: { id },
-    data: {
-      ...(data.name !== undefined ? { name: data.name.trim() } : {}),
-      ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
-    },
-  });
+
+  if (data.name !== undefined) {
+    const trimmed = normalizeName(data.name);
+    if (!trimmed) httpError(400, 'name is required');
+    if (trimmed !== row.name) {
+      const duplicate = await findCategoryByName(branchId, trimmed);
+      if (duplicate && duplicate.id !== id) {
+        httpError(409, `Category "${trimmed}" already exists`);
+      }
+    }
+  }
+
+  try {
+    return await prisma.canteenProductCategory.update({
+      where: { id },
+      data: {
+        ...(data.name !== undefined ? { name: normalizeName(data.name) } : {}),
+        ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+      },
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2002' && data.name) {
+      httpError(409, `Category "${normalizeName(data.name)}" already exists`);
+    }
+    throw err;
+  }
 }
 
 // ─── Suppliers ────────────────────────────────────────────────────
@@ -77,14 +135,36 @@ export async function createSupplier(
   data: { name: string; contactNumber?: string },
   createdById?: string,
 ) {
-  return prisma.canteenSupplier.create({
-    data: {
-      branchId,
-      name: data.name.trim(),
-      contactNumber: data.contactNumber?.trim() || null,
-      createdById,
-    },
-  });
+  const trimmed = normalizeName(data.name);
+  if (!trimmed) httpError(400, 'name is required');
+
+  const existing = await findSupplierByName(branchId, trimmed);
+  if (existing) {
+    if (!existing.isActive) {
+      return prisma.canteenSupplier.update({
+        where: { id: existing.id },
+        data: {
+          isActive: true,
+          contactNumber: data.contactNumber?.trim() || existing.contactNumber,
+        },
+      });
+    }
+    httpError(409, `Supplier "${trimmed}" already exists`);
+  }
+
+  try {
+    return await prisma.canteenSupplier.create({
+      data: {
+        branchId,
+        name: trimmed,
+        contactNumber: data.contactNumber?.trim() || null,
+        createdById,
+      },
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2002') httpError(409, `Supplier "${trimmed}" already exists`);
+    throw err;
+  }
 }
 
 export async function updateSupplier(
@@ -94,14 +174,33 @@ export async function updateSupplier(
 ) {
   const row = await prisma.canteenSupplier.findFirst({ where: { id, branchId } });
   if (!row) httpError(404, 'Supplier not found');
-  return prisma.canteenSupplier.update({
-    where: { id },
-    data: {
-      ...(data.name !== undefined ? { name: data.name.trim() } : {}),
-      ...(data.contactNumber !== undefined ? { contactNumber: data.contactNumber?.trim() || null } : {}),
-      ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
-    },
-  });
+
+  if (data.name !== undefined) {
+    const trimmed = normalizeName(data.name);
+    if (!trimmed) httpError(400, 'name is required');
+    if (trimmed !== row.name) {
+      const duplicate = await findSupplierByName(branchId, trimmed);
+      if (duplicate && duplicate.id !== id) {
+        httpError(409, `Supplier "${trimmed}" already exists`);
+      }
+    }
+  }
+
+  try {
+    return await prisma.canteenSupplier.update({
+      where: { id },
+      data: {
+        ...(data.name !== undefined ? { name: normalizeName(data.name) } : {}),
+        ...(data.contactNumber !== undefined ? { contactNumber: data.contactNumber?.trim() || null } : {}),
+        ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+      },
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2002' && data.name) {
+      httpError(409, `Supplier "${normalizeName(data.name)}" already exists`);
+    }
+    throw err;
+  }
 }
 
 export async function logSupplierPayment(
@@ -185,19 +284,46 @@ export async function createProduct(
     if (!supplier) httpError(400, 'Supplier not found in this branch');
   }
 
-  return prisma.canteenProduct.create({
-    data: {
-      branchId,
-      categoryId: data.categoryId,
-      supplierId: data.supplierId || null,
-      name: data.name.trim(),
-      unitPrice: money(data.unitPrice),
-      stockQuantity: data.stockQuantity ?? 0,
-      lowStockThreshold: data.lowStockThreshold ?? 5,
-      createdById,
-    },
-    include: { category: true, supplier: true },
+  const trimmed = normalizeName(data.name);
+  if (!trimmed) httpError(400, 'name is required');
+
+  const existing = await prisma.canteenProduct.findFirst({
+    where: { branchId, categoryId: data.categoryId, name: trimmed },
   });
+  if (existing) {
+    if (!existing.isActive) {
+      return prisma.canteenProduct.update({
+        where: { id: existing.id },
+        data: {
+          isActive: true,
+          unitPrice: money(data.unitPrice),
+          lowStockThreshold: data.lowStockThreshold ?? existing.lowStockThreshold,
+          supplierId: data.supplierId || null,
+        },
+        include: { category: true, supplier: true },
+      });
+    }
+    httpError(409, `Product "${trimmed}" already exists in this category`);
+  }
+
+  try {
+    return await prisma.canteenProduct.create({
+      data: {
+        branchId,
+        categoryId: data.categoryId,
+        supplierId: data.supplierId || null,
+        name: trimmed,
+        unitPrice: money(data.unitPrice),
+        stockQuantity: data.stockQuantity ?? 0,
+        lowStockThreshold: data.lowStockThreshold ?? 5,
+        createdById,
+      },
+      include: { category: true, supplier: true },
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2002') httpError(409, `Product "${trimmed}" already exists in this category`);
+    throw err;
+  }
 }
 
 export async function updateProduct(
@@ -228,18 +354,43 @@ export async function updateProduct(
     if (!supplier) httpError(400, 'Supplier not found in this branch');
   }
 
-  return prisma.canteenProduct.update({
-    where: { id },
-    data: {
-      ...(data.categoryId !== undefined ? { categoryId: data.categoryId } : {}),
-      ...(data.supplierId !== undefined ? { supplierId: data.supplierId } : {}),
-      ...(data.name !== undefined ? { name: data.name.trim() } : {}),
-      ...(data.unitPrice !== undefined ? { unitPrice: money(data.unitPrice) } : {}),
-      ...(data.lowStockThreshold !== undefined ? { lowStockThreshold: data.lowStockThreshold } : {}),
-      ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
-    },
-    include: { category: true, supplier: true },
-  });
+  const nextCategoryId = data.categoryId ?? product.categoryId;
+  if (data.name !== undefined) {
+    const trimmed = normalizeName(data.name);
+    if (!trimmed) httpError(400, 'name is required');
+    if (trimmed !== product.name || nextCategoryId !== product.categoryId) {
+      const duplicate = await prisma.canteenProduct.findFirst({
+        where: { branchId, categoryId: nextCategoryId, name: trimmed, NOT: { id } },
+      });
+      if (duplicate) httpError(409, `Product "${trimmed}" already exists in this category`);
+    }
+  } else if (data.categoryId && data.categoryId !== product.categoryId) {
+    const duplicate = await prisma.canteenProduct.findFirst({
+      where: { branchId, categoryId: data.categoryId, name: product.name, NOT: { id } },
+    });
+    if (duplicate) httpError(409, `Product "${product.name}" already exists in this category`);
+  }
+
+  try {
+    return await prisma.canteenProduct.update({
+      where: { id },
+      data: {
+        ...(data.categoryId !== undefined ? { categoryId: data.categoryId } : {}),
+        ...(data.supplierId !== undefined ? { supplierId: data.supplierId } : {}),
+        ...(data.name !== undefined ? { name: normalizeName(data.name) } : {}),
+        ...(data.unitPrice !== undefined ? { unitPrice: money(data.unitPrice) } : {}),
+        ...(data.lowStockThreshold !== undefined ? { lowStockThreshold: data.lowStockThreshold } : {}),
+        ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+      },
+      include: { category: true, supplier: true },
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2002') {
+      const label = data.name ? normalizeName(data.name) : product.name;
+      httpError(409, `Product "${label}" already exists in this category`);
+    }
+    throw err;
+  }
 }
 
 export async function deactivateProduct(branchId: string, id: string) {
