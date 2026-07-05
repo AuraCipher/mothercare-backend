@@ -1,5 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { examTypeService } from '../services/exam-type.service';
+import { requireScope } from '../utils/scope-context';
+import { assertExamSessionInScope } from '../utils/exam-scope';
 
 const router = Router();
 
@@ -13,6 +15,9 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
 // List exam types in a session
 // ═══════════════════════════════════════════════════════════════════
 router.get('/exam-sessions/:sessionId/exam-types', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  await assertExamSessionInScope(req.params.sessionId, scope);
   const types = await examTypeService.findAll(req.params.sessionId);
   res.json({ success: true, data: types });
 }));
@@ -22,6 +27,9 @@ router.get('/exam-sessions/:sessionId/exam-types', asyncHandler(async (req: Requ
 // Create an exam type within a session
 // ═══════════════════════════════════════════════════════════════════
 router.post('/exam-sessions/:sessionId/exam-types', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  await assertExamSessionInScope(req.params.sessionId, scope);
   const { name, defaultWeight } = req.body;
 
   // Validation
@@ -52,6 +60,9 @@ router.post('/exam-sessions/:sessionId/exam-types', asyncHandler(async (req: Req
 // Update an exam type
 // ═══════════════════════════════════════════════════════════════════
 router.patch('/exam-sessions/:sessionId/exam-types/:id', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  await assertExamSessionInScope(req.params.sessionId, scope);
   const { name, defaultWeight } = req.body;
 
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
@@ -76,6 +87,9 @@ router.patch('/exam-sessions/:sessionId/exam-types/:id', asyncHandler(async (req
 // Delete an exam type (blocked if referenced by exams)
 // ═══════════════════════════════════════════════════════════════════
 router.delete('/exam-sessions/:sessionId/exam-types/:id', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  await assertExamSessionInScope(req.params.sessionId, scope);
   const result = await examTypeService.delete(req.params.id);
   res.json({ success: true, message: result.message });
 }));
