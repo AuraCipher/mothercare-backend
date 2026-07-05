@@ -1,6 +1,13 @@
 import { prisma } from '../../../lib/prisma';
 import { basePrisma } from '../../../lib/prisma';
 import { logAudit } from '../../../services/audit.service';
+import type { ScopeContext } from '../utils/scope-context';
+import {
+  assertExamSessionInScope,
+  assertGroupInScope,
+  assertSubjectInScope,
+  assertStudentInScope,
+} from '../utils/exam-scope';
 
 // ─── Pure Math Functions (individually testable) ──────────────────────
 
@@ -73,7 +80,11 @@ export function lookupGrade(
 // ─── Service ──────────────────────────────────────────────────────────
 
 class SubjectResultService {
-  async getResult(studentId: string, examSessionId: string, subjectId: string) {
+  async getResult(studentId: string, examSessionId: string, subjectId: string, scope: ScopeContext) {
+    await assertStudentInScope(studentId, scope);
+    await assertExamSessionInScope(examSessionId, scope);
+    await assertSubjectInScope(subjectId, scope);
+
     const result = await prisma.subjectResult.findUnique({
       where: {
         studentId_examSessionId_subjectId: { studentId, examSessionId, subjectId },
@@ -87,8 +98,12 @@ class SubjectResultService {
     return result;
   }
 
-  async computeForStudent(studentId: string, examSessionId: string, subjectId: string) {
-    const { exams, gradeBands } = await this._fetchData(examSessionId, subjectId, [studentId]);
+  async computeForStudent(studentId: string, examSessionId: string, subjectId: string, scope: ScopeContext) {
+    await assertStudentInScope(studentId, scope);
+    await assertExamSessionInScope(examSessionId, scope);
+    await assertSubjectInScope(subjectId, scope);
+
+    const { exams, gradeBands } = await this._fetchData(examSessionId, subjectId, [studentId], scope.academicYearId);
 
     if (exams.length === 0) {
       throw { status: 400, message: 'No active exams found for this subject in this session' };
@@ -133,17 +148,25 @@ class SubjectResultService {
     return result;
   }
 
-  async computeForClass(classId: string, examSessionId: string, subjectId: string) {
-    // Get all students in this class
+  async computeForClass(classId: string, examSessionId: string, subjectId: string, scope: ScopeContext) {
+    await assertExamSessionInScope(examSessionId, scope);
+    await assertGroupInScope(classId, scope);
+    await assertSubjectInScope(subjectId, scope);
+
     const students = await prisma.student.findMany({
-      where: { groupId: classId, isActive: true },
+      where: {
+        groupId: classId,
+        isActive: true,
+        academicYearId: scope.academicYearId,
+        academicYear: { branchId: scope.branchId },
+      },
       select: { id: true, name: true, rollNumber: true },
       orderBy: { rollNumber: 'asc' },
     });
     if (students.length === 0) throw { status: 400, message: 'No students found in this class' };
 
     const studentIds = students.map((s) => s.id);
-    const { exams, gradeBands } = await this._fetchData(examSessionId, subjectId, studentIds);
+    const { exams, gradeBands } = await this._fetchData(examSessionId, subjectId, studentIds, scope.academicYearId);
 
     if (exams.length === 0) {
       throw { status: 400, message: 'No active exams found for this subject in this session' };
@@ -215,6 +238,22 @@ class SubjectResultService {
       }
     });
 
+    await logAudit({
+      action: 'CREATE',
+      module: 'exams',
+      entityType: 'SubjectResult',
+      entityId: examSessionId,
+      metadata: {
+        action: 'class_compute',
+        classId,
+        subjectId,
+        studentCount: results.length,
+        examSessionId,
+        academicYearId: scope.academicYearId,
+        branchId: scope.branchId,
+      },
+    });
+
     // Return with student info
     const studentMap = new Map(students.map((s) => [s.id, s]));
     return results.map((r, i) => ({
@@ -224,12 +263,15 @@ class SubjectResultService {
     }));
   }
 
-  async computeForSession(examSessionId: string) {
+  async computeForSession(examSessionId: string, scope: ScopeContext) {
+    await assertExamSessionInScope(examSessionId, scope);
+
     // Find all unique (classId, subjectId) combos from ACTIVE exams in this session
     const ecsRows = await prisma.examClassSubject.findMany({
       where: {
         examClass: {
           exam: { examSessionId, status: 'ACTIVE' },
+          class: { academicYearId: scope.academicYearId },
         },
         isActive: true,
       },
@@ -250,7 +292,7 @@ class SubjectResultService {
     let totalStudents = 0;
     for (const combo of combos) {
       const [classId, subjectId] = combo.split('|');
-      const results = await this.computeForClass(classId, examSessionId, subjectId);
+      const results = await this.computeForClass(classId, examSessionId, subjectId, scope);
       totalStudents += results.length;
     }
 
@@ -259,20 +301,40 @@ class SubjectResultService {
       module: 'exams',
       entityType: 'SubjectResult',
       entityId: examSessionId,
-      metadata: { action: 'bulk_compute', classSubjectCount: combos.size, studentCount: totalStudents, examSessionId },
+      metadata: {
+        action: 'bulk_compute',
+        classSubjectCount: combos.size,
+        studentCount: totalStudents,
+        examSessionId,
+        academicYearId: scope.academicYearId,
+        branchId: scope.branchId,
+      },
     });
 
-    return { classSubjectCombos: combos.size, totalStudents };
+    return {
+      classSubjectCombos: combos.size,
+      classSubjectCount: combos.size,
+      totalStudents,
+      studentCount: totalStudents,
+    };
   }
 
   /**
    * Shared data fetcher: gets all ACTIVE exams + marks + grade bands for a
    * session+subject+set of students in one go.
    */
-  private async _fetchData(examSessionId: string, subjectId: string, studentIds: string[]) {
+  private async _fetchData(
+    examSessionId: string,
+    subjectId: string,
+    studentIds: string[],
+    academicYearId?: string,
+  ) {
     const ecsList = await prisma.examClassSubject.findMany({
       where: {
-        examClass: { exam: { examSessionId, status: 'ACTIVE' } },
+        examClass: {
+          exam: { examSessionId, status: 'ACTIVE' },
+          ...(academicYearId ? { class: { academicYearId } } : {}),
+        },
         subjectId,
         isActive: true,
       },
