@@ -18,9 +18,77 @@ export type StaffMemberRow = {
   status: string;
   branchRole: string;
   permissions: ResolvedModulePermission[];
+  profilePhotoId?: string | null;
+  employeeId?: string | null;
+  qualification?: string | null;
+};
+
+export type StaffProfileFields = {
+  employeeId?: string;
+  qualification?: string;
+  specialization?: string;
+  joiningDate?: string;
+  salary?: number;
+  phone?: string;
+  emergencyContact?: string;
+  address?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  bloodGroup?: string;
+  fatherName?: string;
+  cardId?: string;
+  severeDisease?: string;
+  experience?: string;
+  bio?: string;
+  profilePhotoId?: string | null;
 };
 
 class StaffService {
+  private async ensureStaffProfile(userId: string) {
+    const existing = await prisma.staffProfile.findUnique({ where: { userId } });
+    if (existing) return existing;
+    return prisma.staffProfile.create({ data: { userId } });
+  }
+
+  private serializeProfile(profile: {
+    id: string;
+    employeeId: string | null;
+    qualification: string | null;
+    specialization: string | null;
+    joiningDate: Date | null;
+    salary: { toString(): string } | null;
+    phone: string | null;
+    emergencyContact: string | null;
+    address: string | null;
+    dateOfBirth: Date | null;
+    gender: string | null;
+    bloodGroup: string | null;
+    fatherName: string | null;
+    cardId: string | null;
+    severeDisease: string | null;
+    experience: string | null;
+    bio: string | null;
+  }) {
+    return {
+      profileId: profile.id,
+      employeeId: profile.employeeId,
+      qualification: profile.qualification,
+      specialization: profile.specialization,
+      joiningDate: profile.joiningDate,
+      salary: profile.salary != null ? Number(profile.salary) : null,
+      phone: profile.phone,
+      emergencyContact: profile.emergencyContact,
+      address: profile.address,
+      dateOfBirth: profile.dateOfBirth,
+      gender: profile.gender,
+      bloodGroup: profile.bloodGroup,
+      fatherName: profile.fatherName,
+      cardId: profile.cardId,
+      severeDisease: profile.severeDisease,
+      experience: profile.experience,
+      bio: profile.bio,
+    };
+  }
   private mapMember(m: {
     id: string;
     role: string;
@@ -31,6 +99,11 @@ class StaffService {
       email: string | null;
       phone: string | null;
       status: string;
+      profilePhotoId?: string | null;
+      staffProfile?: {
+        employeeId: string | null;
+        qualification: string | null;
+      } | null;
     };
     modulePermissions: Array<{
       module: StaffModule;
@@ -48,6 +121,9 @@ class StaffService {
       phone: m.user.phone,
       status: m.user.status,
       branchRole: m.role,
+      profilePhotoId: m.user.profilePhotoId,
+      employeeId: m.user.staffProfile?.employeeId ?? null,
+      qualification: m.user.staffProfile?.qualification ?? null,
       permissions: m.modulePermissions.map((p) => ({
         module: p.module as ResolvedModulePermission['module'],
         canCreate: p.canCreate,
@@ -82,6 +158,8 @@ class StaffService {
             email: true,
             phone: true,
             status: true,
+            profilePhotoId: true,
+            staffProfile: true,
           },
         },
         modulePermissions: true,
@@ -100,7 +178,8 @@ class StaffService {
         (r) =>
           r.name.toLowerCase().includes(q)
           || (r.username || '').toLowerCase().includes(q)
-          || (r.email || '').toLowerCase().includes(q),
+          || (r.email || '').toLowerCase().includes(q)
+          || (r.employeeId || '').toLowerCase().includes(q),
       );
     }
     return rows;
@@ -119,8 +198,10 @@ class StaffService {
             email: true,
             phone: true,
             status: true,
+            profilePhotoId: true,
             createdAt: true,
             lastLoginAt: true,
+            staffProfile: true,
           },
         },
       },
@@ -129,8 +210,13 @@ class StaffService {
     if (!['management', 'canteen_staff'].includes(member.role)) {
       throw { status: 404, message: 'Staff member not found in this branch' };
     }
+
+    const profile = member.user.staffProfile ?? await this.ensureStaffProfile(userId);
+
     return {
       ...this.mapMember(member),
+      ...this.serializeProfile(profile),
+      profilePhotoId: member.user.profilePhotoId,
       createdAt: member.user.createdAt,
       lastLoginAt: member.user.lastLoginAt,
       isActive: member.isActive,
@@ -140,7 +226,11 @@ class StaffService {
   async updateStaffProfile(
     branchId: string,
     userId: string,
-    data: { name?: string; email?: string; phone?: string },
+    data: {
+      name?: string;
+      email?: string;
+      phone?: string;
+    } & StaffProfileFields,
   ) {
     const member = await prisma.branchMember.findUnique({
       where: { branchId_userId: { branchId, userId } },
@@ -154,12 +244,69 @@ class StaffService {
       if (clash) throw { status: 409, message: 'Email already in use' };
     }
 
+    if (data.employeeId) {
+      const clash = await prisma.staffProfile.findFirst({
+        where: { employeeId: data.employeeId.trim(), userId: { not: userId } },
+      });
+      if (clash) throw { status: 409, message: `Employee ID "${data.employeeId}" is already in use` };
+    }
+
+    await this.ensureStaffProfile(userId);
+
+    const profilePhone = data.phone?.trim() || undefined;
+    const userPhone = profilePhone ?? data.phone;
+
     await prisma.user.update({
       where: { id: userId },
       data: {
         ...(data.name?.trim() ? { name: data.name.trim() } : {}),
         ...(data.email !== undefined ? { email: data.email?.trim() || null } : {}),
-        ...(data.phone !== undefined ? { phone: data.phone?.trim() || null } : {}),
+        ...(userPhone !== undefined ? { phone: userPhone?.trim() || null } : {}),
+      },
+    });
+
+    if (data.profilePhotoId !== undefined) {
+      const oldUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { profilePhotoId: true },
+      });
+      const oldPhotoId = oldUser?.profilePhotoId;
+      if (oldPhotoId && oldPhotoId !== data.profilePhotoId) {
+        try {
+          const oldRecord = await prisma.fileRecord.findUnique({ where: { id: oldPhotoId } });
+          if (oldRecord) {
+            const fs = await import('fs/promises');
+            const path = await import('path');
+            await fs.unlink(path.join(process.cwd(), oldRecord.storagePath)).catch(() => {});
+            await prisma.fileRecord.delete({ where: { id: oldPhotoId } }).catch(() => {});
+          }
+        } catch { /* best-effort */ }
+      }
+      await prisma.user.update({
+        where: { id: userId },
+        data: { profilePhotoId: data.profilePhotoId || null },
+      });
+    }
+
+    await prisma.staffProfile.update({
+      where: { userId },
+      data: {
+        employeeId: data.employeeId !== undefined ? (data.employeeId.trim() || null) : undefined,
+        qualification: data.qualification !== undefined ? (data.qualification.trim() || null) : undefined,
+        specialization: data.specialization !== undefined ? (data.specialization.trim() || null) : undefined,
+        joiningDate: data.joiningDate ? new Date(data.joiningDate) : data.joiningDate === '' ? null : undefined,
+        salary: data.salary !== undefined ? data.salary : undefined,
+        phone: profilePhone !== undefined ? (profilePhone || null) : undefined,
+        emergencyContact: data.emergencyContact !== undefined ? (data.emergencyContact.trim() || null) : undefined,
+        address: data.address !== undefined ? (data.address.trim() || null) : undefined,
+        dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : data.dateOfBirth === '' ? null : undefined,
+        gender: data.gender !== undefined ? (data.gender as any || null) : undefined,
+        bloodGroup: data.bloodGroup !== undefined ? (data.bloodGroup.trim() || null) : undefined,
+        fatherName: data.fatherName !== undefined ? (data.fatherName.trim() || null) : undefined,
+        cardId: data.cardId !== undefined ? (data.cardId.trim() || null) : undefined,
+        severeDisease: data.severeDisease !== undefined ? (data.severeDisease.trim() || null) : undefined,
+        experience: data.experience !== undefined ? (data.experience.trim() || null) : undefined,
+        bio: data.bio !== undefined ? (data.bio.trim() || null) : undefined,
       },
     });
 
@@ -219,7 +366,7 @@ class StaffService {
       email?: string;
       phone?: string;
       permissions: ModulePermissionInput[];
-    },
+    } & StaffProfileFields,
     createdById?: string,
   ) {
     const permissions = normalizePermissionInput(data.permissions);
@@ -236,10 +383,18 @@ class StaffService {
       throw { status: 409, message: 'Username or email already exists' };
     }
 
+    if (data.employeeId?.trim()) {
+      const clash = await prisma.staffProfile.findFirst({
+        where: { employeeId: data.employeeId.trim() },
+      });
+      if (clash) throw { status: 409, message: `Employee ID "${data.employeeId}" is already in use` };
+    }
+
     const password = data.password?.trim()
       || `tmp_${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 6)}`;
 
     const passwordHash = await hashPassword(password);
+    const profilePhone = data.phone?.trim() || null;
 
     return prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
@@ -247,10 +402,11 @@ class StaffService {
           name: data.name.trim(),
           username: data.username.trim(),
           email: data.email?.trim() || null,
-          phone: data.phone?.trim() || null,
+          phone: profilePhone,
           passwordHash,
           role: 'management',
           status: 'active',
+          ...(data.profilePhotoId ? { profilePhotoId: data.profilePhotoId } : {}),
         },
       });
 
@@ -272,6 +428,28 @@ class StaffService {
           canUpdate: p.canUpdate,
           canDelete: p.canDelete,
         })),
+      });
+
+      await tx.staffProfile.create({
+        data: {
+          userId: user.id,
+          phone: profilePhone,
+          employeeId: data.employeeId?.trim() || null,
+          qualification: data.qualification?.trim() || null,
+          specialization: data.specialization?.trim() || null,
+          joiningDate: data.joiningDate ? new Date(data.joiningDate) : null,
+          salary: data.salary ?? null,
+          emergencyContact: data.emergencyContact?.trim() || null,
+          address: data.address?.trim() || null,
+          dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null,
+          gender: (data.gender as any) || null,
+          bloodGroup: data.bloodGroup?.trim() || null,
+          fatherName: data.fatherName?.trim() || null,
+          cardId: data.cardId?.trim() || null,
+          severeDisease: data.severeDisease?.trim() || null,
+          experience: data.experience?.trim() || null,
+          bio: data.bio?.trim() || null,
+        },
       });
 
       const saved = await tx.staffModulePermission.findMany({
@@ -484,7 +662,7 @@ class StaffService {
     });
     if (!member) throw { status: 404, message: 'Staff member not found' };
 
-    const phone = member.user.phone?.trim();
+    const phone = member.user.phone?.trim() || (await prisma.staffProfile.findUnique({ where: { userId: staffUserId }, select: { phone: true } }))?.phone?.trim();
     if (!phone) throw { status: 400, message: 'No phone number on file. Add a phone number first.' };
 
     const { generatePassword } = await import('../../../utils/username');
