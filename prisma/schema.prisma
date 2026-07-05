@@ -42,6 +42,7 @@ enum BranchRole {
   management // Accountant, Admin Staff
   teacher // Teaching staff
   parent // Parent representative
+  canteen_staff // Canteen — daily sales only (assigned by admin)
 }
 
 // Academic Year lifecycle: BUILD_STAGE → ACTIVE → ARCHIVED
@@ -85,6 +86,22 @@ enum ExamStatus {
 enum ReportCardStatus {
   DRAFT
   PUBLISHED
+}
+
+enum CanteenPersonType {
+  STUDENT
+  TEACHER
+  STAFF
+}
+
+enum CanteenSupplierPaymentDirection {
+  WE_PAID_SUPPLIER
+  SUPPLIER_PAID_US
+}
+
+enum CanteenSalePaymentType {
+  CASH
+  CREDIT
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -157,6 +174,12 @@ model User {
   updatedFamilies           Family[]           @relation("FamilyUpdatedBy")
   familyChangeLogs          FamilyChangeLog[]
   enteredMarks              MarksEntry[]           @relation("MarksEnteredBy")
+  canteenAccounts           CanteenAccount[]       @relation("CanteenAccountUser")
+  canteenSalesRecorded      CanteenSale[]          @relation("CanteenSaleCreatedBy")
+  canteenAccountPayments    CanteenAccountPayment[] @relation("CanteenAccountPaymentCreatedBy")
+  canteenSupplierPayments   CanteenSupplierPayment[] @relation("CanteenSupplierPaymentCreatedBy")
+  canteenRestockPurchases   CanteenRestockPurchase[] @relation("CanteenRestockCreatedBy")
+  canteenAccountsCreated    CanteenAccount[]       @relation("CanteenAccountCreatedBy")
 
   @@index([username])
   @@index([email])
@@ -241,6 +264,12 @@ model Branch {
   academicYears    AcademicYear[]
   branchMembers    BranchMember[]
   adminInvitations AdminInvitation[]
+  canteenSuppliers         CanteenSupplier[]
+  canteenProductCategories CanteenProductCategory[]
+  canteenProducts          CanteenProduct[]
+  canteenAccounts          CanteenAccount[]
+  canteenSales             CanteenSale[]
+  canteenRestockPurchases  CanteenRestockPurchase[]
 
   createdById String?
   updatedById String?
@@ -688,6 +717,7 @@ model Student {
   examMarks         MarksEntry[]
   subjectResults    SubjectResult[]
   reportCards       ReportCard[]
+  canteenAccounts   CanteenAccount[]
 
   @@index([groupId])
   @@index([familyId])
@@ -1826,4 +1856,216 @@ model PaymentAuditLog {
   @@index([paymentId, createdAt])
   @@index([performedById, createdAt])
   @@map("payment_audit_logs")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    CANTEEN MANAGEMENT                           ║
+// ║  Branch-scoped ONLY — no academicYearId on any canteen table.   ║
+// ║  Not tied to fee/payment. Admin full control; canteen_staff    ║
+// ║  (BranchRole) = daily sales only.                               ║
+// ║  Credit (bakaya): branch students / teachers / staff ONLY —      ║
+// ║  must link Student or User; no ad-hoc name+phone accounts.      ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model CanteenSupplier {
+  id                    String   @id @default(uuid())
+  branchId              String
+  name                  String
+  contactNumber         String?
+  balanceOwedToSupplier Decimal  @default(0) @db.Decimal(12, 2) // we owe them
+  balanceSupplierOwesUs Decimal  @default(0) @db.Decimal(12, 2) // they owe us
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  createdById           String?
+  updatedById           String?
+
+  branch           Branch                    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  products         CanteenProduct[]
+  restockPurchases CanteenRestockPurchase[]
+  payments         CanteenSupplierPayment[]
+
+  @@unique([branchId, name])
+  @@unique([id, branchId])
+  @@index([branchId])
+  @@map("canteen_suppliers")
+}
+
+model CanteenSupplierPayment {
+  id          String                        @id @default(uuid())
+  supplierId  String
+  amount      Decimal                       @db.Decimal(12, 2)
+  direction   CanteenSupplierPaymentDirection
+  note        String?
+  paidAt      DateTime                      @default(now())
+  createdById String?
+
+  supplier  CanteenSupplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  createdBy User?           @relation("CanteenSupplierPaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([supplierId, paidAt])
+  @@map("canteen_supplier_payments")
+}
+
+model CanteenProductCategory {
+  id        String   @id @default(uuid())
+  branchId  String
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch   Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  products CanteenProduct[]
+
+  @@unique([branchId, name])
+  @@unique([id, branchId])
+  @@index([branchId])
+  @@map("canteen_product_categories")
+}
+
+model CanteenProduct {
+  id                String   @id @default(uuid())
+  branchId          String
+  categoryId        String
+  supplierId        String?
+  name              String
+  unitPrice         Decimal  @db.Decimal(12, 2) // selling price (PKR)
+  stockQuantity     Int      @default(0)
+  lowStockThreshold Int      @default(5)
+  isActive          Boolean  @default(true) // disable without deleting
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  createdById       String?
+  updatedById       String?
+
+  branch        Branch                 @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  category      CanteenProductCategory @relation(fields: [categoryId, branchId], references: [id, branchId], onDelete: Restrict)
+  supplier      CanteenSupplier?       @relation(fields: [supplierId, branchId], references: [id, branchId], onDelete: SetNull)
+  purchaseItems CanteenPurchaseItem[]
+  saleItems     CanteenSaleItem[]
+
+  @@unique([branchId, categoryId, name])
+  @@unique([id, branchId])
+  @@index([branchId])
+  @@index([categoryId])
+  @@index([supplierId])
+  @@map("canteen_products")
+}
+
+model CanteenRestockPurchase {
+  id           String   @id @default(uuid())
+  branchId     String
+  supplierId   String
+  purchaseDate DateTime @default(now())
+  totalCost    Decimal  @db.Decimal(12, 2)
+  note         String?
+  createdById  String?
+
+  supplier  CanteenSupplier       @relation(fields: [supplierId, branchId], references: [id, branchId], onDelete: Restrict)
+  branch    Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  items     CanteenPurchaseItem[]
+  createdBy User?                 @relation("CanteenRestockCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([branchId, purchaseDate])
+  @@index([supplierId])
+  @@map("canteen_restock_purchases")
+}
+
+model CanteenPurchaseItem {
+  id                String  @id @default(uuid())
+  restockPurchaseId String
+  productId         String
+  quantity          Int
+  unitCost          Decimal @db.Decimal(12, 2)
+
+  restockPurchase CanteenRestockPurchase @relation(fields: [restockPurchaseId], references: [id], onDelete: Cascade)
+  product         CanteenProduct         @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([productId])
+  @@index([restockPurchaseId])
+  @@map("canteen_purchase_items")
+}
+
+// Credit (bakaya) — MUST link a branch Student or branch staff User (no walk-in).
+// App layer: student.academicYear.branchId === branchId; user must be active BranchMember.
+model CanteenAccount {
+  id             String            @id @default(uuid())
+  branchId       String
+  personType     CanteenPersonType
+  studentId      String? // required when personType = STUDENT (DB check)
+  userId         String? // required when personType = TEACHER | STAFF (DB check)
+  displayName    String // snapshot from linked Student/User at account creation
+  displayPhone   String? // snapshot only — not used to create accounts
+  runningBalance Decimal           @default(0) @db.Decimal(12, 2)
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  createdById    String?
+
+  branch    Branch                  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  student   Student?                @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  user      User?                   @relation("CanteenAccountUser", fields: [userId], references: [id], onDelete: Restrict)
+  createdBy User?                   @relation("CanteenAccountCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  sales     CanteenSale[]
+  payments  CanteenAccountPayment[]
+
+  @@unique([branchId, studentId])
+  @@unique([branchId, userId])
+  @@unique([id, branchId])
+  @@index([branchId, isActive])
+  @@index([studentId])
+  @@index([userId])
+  @@map("canteen_accounts")
+}
+
+model CanteenAccountPayment {
+  id               String   @id @default(uuid())
+  canteenAccountId String
+  amountPaid       Decimal  @db.Decimal(12, 2)
+  paidAt           DateTime @default(now())
+  note             String?
+  createdById      String?
+
+  account   CanteenAccount @relation(fields: [canteenAccountId], references: [id], onDelete: Cascade)
+  createdBy User?          @relation("CanteenAccountPaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([canteenAccountId, paidAt])
+  @@map("canteen_account_payments")
+}
+
+model CanteenSale {
+  id               String                 @id @default(uuid())
+  branchId         String
+  canteenAccountId String? // required when paymentType = CREDIT (DB check); null for CASH
+  paymentType      CanteenSalePaymentType
+  totalAmount      Decimal                @db.Decimal(12, 2)
+  soldAt           DateTime               @default(now())
+  createdById      String?
+
+  branch    Branch            @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  account   CanteenAccount?   @relation(fields: [canteenAccountId, branchId], references: [id, branchId], onDelete: SetNull)
+  createdBy User?             @relation("CanteenSaleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  items     CanteenSaleItem[]
+
+  @@unique([id, branchId])
+  @@index([branchId, soldAt])
+  @@index([canteenAccountId])
+  @@map("canteen_sales")
+}
+
+model CanteenSaleItem {
+  id              String  @id @default(uuid())
+  saleId          String
+  branchId        String
+  productId       String
+  quantity        Int
+  unitPriceAtSale Decimal @db.Decimal(12, 2)
+
+  sale    CanteenSale    @relation(fields: [saleId, branchId], references: [id, branchId], onDelete: Cascade)
+  product CanteenProduct @relation(fields: [productId, branchId], references: [id, branchId], onDelete: Restrict)
+
+  @@index([productId])
+  @@index([saleId])
+  @@map("canteen_sale_items")
 }
