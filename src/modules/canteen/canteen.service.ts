@@ -16,6 +16,25 @@ function money(n: number) {
   return new Prisma.Decimal(n);
 }
 
+/** Net supplier balance from purchase total and payment ledger. */
+export function computeSupplierBalancesFromLedger(
+  totalPurchased: number,
+  payments: Array<{ direction: CanteenSupplierPaymentDirection; amount: Prisma.Decimal | number }>,
+) {
+  const wePaid = payments
+    .filter((p) => p.direction === CanteenSupplierPaymentDirection.WE_PAID_SUPPLIER)
+    .reduce((sum, p) => sum + Number(p.amount), 0);
+  const theyPaid = payments
+    .filter((p) => p.direction === CanteenSupplierPaymentDirection.SUPPLIER_PAID_US)
+    .reduce((sum, p) => sum + Number(p.amount), 0);
+
+  const netWeOwe = totalPurchased - wePaid + theyPaid;
+  if (netWeOwe >= 0) {
+    return { balanceOwedToSupplier: netWeOwe, balanceSupplierOwesUs: 0 };
+  }
+  return { balanceOwedToSupplier: 0, balanceSupplierOwesUs: -netWeOwe };
+}
+
 function dayRange(dateStr: string) {
   const start = new Date(`${dateStr}T00:00:00.000Z`);
   if (Number.isNaN(start.getTime())) httpError(400, 'Invalid date');
@@ -125,10 +144,70 @@ export async function updateCategory(
 // ─── Suppliers ────────────────────────────────────────────────────
 
 export async function listSuppliers(branchId: string) {
-  return prisma.canteenSupplier.findMany({
+  const suppliers = await prisma.canteenSupplier.findMany({
     where: { branchId },
     orderBy: { name: 'asc' },
   });
+  if (suppliers.length === 0) return [];
+
+  const supplierIds = suppliers.map((s) => s.id);
+  const [purchaseSums, payments] = await Promise.all([
+    prisma.canteenRestockPurchase.groupBy({
+      by: ['supplierId'],
+      where: { branchId, supplierId: { in: supplierIds } },
+      _sum: { totalCost: true },
+    }),
+    prisma.canteenSupplierPayment.findMany({
+      where: { supplierId: { in: supplierIds } },
+    }),
+  ]);
+
+  const purchasedBySupplier = new Map(
+    purchaseSums.map((p) => [p.supplierId, Number(p._sum.totalCost ?? 0)]),
+  );
+  const paymentsBySupplier = new Map<string, typeof payments>();
+  for (const payment of payments) {
+    const list = paymentsBySupplier.get(payment.supplierId) ?? [];
+    list.push(payment);
+    paymentsBySupplier.set(payment.supplierId, list);
+  }
+
+  const syncUpdates: Array<ReturnType<typeof prisma.canteenSupplier.update>> = [];
+
+  const result = suppliers.map((supplier) => {
+    const totalPurchased = purchasedBySupplier.get(supplier.id) ?? 0;
+    const supplierPayments = paymentsBySupplier.get(supplier.id) ?? [];
+    const balances = computeSupplierBalancesFromLedger(totalPurchased, supplierPayments);
+
+    const storedOwed = Number(supplier.balanceOwedToSupplier);
+    const storedOwesUs = Number(supplier.balanceSupplierOwesUs);
+    if (
+      Math.abs(storedOwed - balances.balanceOwedToSupplier) > 0.009
+      || Math.abs(storedOwesUs - balances.balanceSupplierOwesUs) > 0.009
+    ) {
+      syncUpdates.push(
+        prisma.canteenSupplier.update({
+          where: { id: supplier.id },
+          data: {
+            balanceOwedToSupplier: money(balances.balanceOwedToSupplier),
+            balanceSupplierOwesUs: money(balances.balanceSupplierOwesUs),
+          },
+        }),
+      );
+    }
+
+    return {
+      ...supplier,
+      balanceOwedToSupplier: money(balances.balanceOwedToSupplier),
+      balanceSupplierOwesUs: money(balances.balanceSupplierOwesUs),
+    };
+  });
+
+  if (syncUpdates.length > 0) {
+    await Promise.all(syncUpdates);
+  }
+
+  return result;
 }
 
 export async function getSupplier(branchId: string, id: string) {
@@ -160,13 +239,31 @@ export async function getSupplierDetail(branchId: string, supplierId: string) {
   const totalPaid = payments
     .filter((p) => p.direction === CanteenSupplierPaymentDirection.WE_PAID_SUPPLIER)
     .reduce((sum, p) => sum + Number(p.amount), 0);
+  const balances = computeSupplierBalancesFromLedger(totalPurchased, payments);
+
+  const storedOwed = Number(supplier.balanceOwedToSupplier);
+  const storedOwesUs = Number(supplier.balanceSupplierOwesUs);
+  let currentSupplier = supplier;
+  if (
+    Math.abs(storedOwed - balances.balanceOwedToSupplier) > 0.009
+    || Math.abs(storedOwesUs - balances.balanceSupplierOwesUs) > 0.009
+  ) {
+    currentSupplier = await prisma.canteenSupplier.update({
+      where: { id: supplierId },
+      data: {
+        balanceOwedToSupplier: money(balances.balanceOwedToSupplier),
+        balanceSupplierOwesUs: money(balances.balanceSupplierOwesUs),
+      },
+    });
+  }
+
   return {
-    supplier,
+    supplier: currentSupplier,
     stats: {
       totalPurchased,
       totalPaid,
-      remainingOwed: Number(supplier.balanceOwedToSupplier),
-      theyOweUs: Number(supplier.balanceSupplierOwesUs),
+      remainingOwed: balances.balanceOwedToSupplier,
+      theyOweUs: balances.balanceSupplierOwesUs,
       purchaseCount: purchases.length,
       paymentCount: payments.length,
     },
@@ -274,15 +371,29 @@ export async function logSupplierPayment(
 
     if (data.direction === CanteenSupplierPaymentDirection.WE_PAID_SUPPLIER) {
       const owed = Number(supplier.balanceOwedToSupplier);
+      const owesUs = Number(supplier.balanceSupplierOwesUs);
+      let remaining = data.amount;
+      const appliedToOwed = Math.min(owed, remaining);
+      remaining -= appliedToOwed;
       await tx.canteenSupplier.update({
         where: { id: supplierId },
-        data: { balanceOwedToSupplier: money(Math.max(0, owed - data.amount)) },
+        data: {
+          balanceOwedToSupplier: money(owed - appliedToOwed),
+          balanceSupplierOwesUs: money(owesUs + remaining),
+        },
       });
     } else {
       const owesUs = Number(supplier.balanceSupplierOwesUs);
+      const owed = Number(supplier.balanceOwedToSupplier);
+      let remaining = data.amount;
+      const appliedToOwesUs = Math.min(owesUs, remaining);
+      remaining -= appliedToOwesUs;
       await tx.canteenSupplier.update({
         where: { id: supplierId },
-        data: { balanceSupplierOwesUs: money(Math.max(0, owesUs - data.amount)) },
+        data: {
+          balanceSupplierOwesUs: money(owesUs - appliedToOwesUs),
+          balanceOwedToSupplier: money(owed + remaining),
+        },
       });
     }
 
@@ -793,6 +904,276 @@ export async function searchCreditPersons(
 // ─── Sales ────────────────────────────────────────────────────────
 
 type SaleItemInput = { productId: string; quantity: number };
+
+type PricedSaleItem = { productId: string; quantity: number; unitPrice: number };
+
+/** Allocate whole units to cash first (in line order), remainder to credit. */
+export function splitSaleItemsByCashAmount(
+  items: PricedSaleItem[],
+  cashAmount: number,
+): { cashItems: SaleItemInput[]; creditItems: SaleItemInput[] } {
+  let cashBudget = Math.round(cashAmount * 100) / 100;
+  const cashItems: SaleItemInput[] = [];
+  const creditItems: SaleItemInput[] = [];
+
+  const pushItem = (list: SaleItemInput[], productId: string, qty: number) => {
+    const existing = list.find((i) => i.productId === productId);
+    if (existing) existing.quantity += qty;
+    else list.push({ productId, quantity: qty });
+  };
+
+  for (const line of items) {
+    let remaining = line.quantity;
+    const unitPrice = line.unitPrice;
+
+    while (remaining > 0 && cashBudget >= unitPrice - 0.005) {
+      pushItem(cashItems, line.productId, 1);
+      cashBudget = Math.round((cashBudget - unitPrice) * 100) / 100;
+      remaining -= 1;
+    }
+    if (remaining > 0) {
+      pushItem(creditItems, line.productId, remaining);
+    }
+  }
+
+  return { cashItems, creditItems };
+}
+
+async function resolveCreditAccountId(
+  tx: Prisma.TransactionClient,
+  branchId: string,
+  creditAmount: number,
+  data: {
+    accountId?: string;
+    personType?: CanteenPersonType;
+    studentId?: string;
+    userId?: string;
+  },
+  createdById?: string,
+) {
+  if (creditAmount <= 0) return null;
+
+  if (data.accountId) {
+    const account = await tx.canteenAccount.findFirst({
+      where: { id: data.accountId, branchId, isActive: true },
+    });
+    if (!account) httpError(404, 'Credit account not found');
+    await tx.canteenAccount.update({
+      where: { id: account.id },
+      data: { runningBalance: { increment: money(creditAmount) } },
+    });
+    return account.id;
+  }
+
+  if (!data.personType) httpError(400, 'personType is required for credit portion');
+  const person = await assertBranchCreditPerson({
+    branchId,
+    personType: data.personType,
+    studentId: data.studentId,
+    userId: data.userId,
+  });
+
+  let account = await tx.canteenAccount.findFirst({
+    where: {
+      branchId,
+      OR: [
+        person.studentId ? { studentId: person.studentId } : {},
+        person.userId ? { userId: person.userId } : {},
+      ].filter((o) => Object.keys(o).length > 0),
+    },
+  });
+
+  if (!account) {
+    account = await tx.canteenAccount.create({
+      data: {
+        branchId,
+        personType: data.personType,
+        studentId: person.studentId,
+        userId: person.userId,
+        displayName: person.displayName,
+        displayPhone: person.displayPhone,
+        runningBalance: money(creditAmount),
+        createdById,
+      },
+    });
+  } else {
+    await tx.canteenAccount.update({
+      where: { id: account.id },
+      data: { runningBalance: { increment: money(creditAmount) } },
+    });
+  }
+
+  return account.id;
+}
+
+async function createSaleRecord(
+  tx: Prisma.TransactionClient,
+  branchId: string,
+  data: {
+    paymentType: CanteenSalePaymentType;
+    lineItems: { productId: string; quantity: number; unitPriceAtSale: Prisma.Decimal }[];
+    totalAmount: number;
+    canteenAccountId: string | null;
+  },
+  createdById?: string,
+) {
+  return tx.canteenSale.create({
+    data: {
+      branchId,
+      canteenAccountId: data.canteenAccountId,
+      paymentType: data.paymentType,
+      totalAmount: money(data.totalAmount),
+      createdById,
+      items: {
+        create: data.lineItems.map((li) => ({
+          branchId,
+          productId: li.productId,
+          quantity: li.quantity,
+          unitPriceAtSale: li.unitPriceAtSale,
+        })),
+      },
+    },
+    include: { items: { include: { product: true } }, account: true },
+  });
+}
+
+function lineItemsTotal(
+  lineItems: { quantity: number; unitPriceAtSale: Prisma.Decimal }[],
+) {
+  return lineItems.reduce((sum, li) => sum + Number(li.unitPriceAtSale) * li.quantity, 0);
+}
+
+function buildPricedLineItems(
+  items: SaleItemInput[],
+  productMap: Map<string, { id: string; name: string; unitPrice: Prisma.Decimal; stockBoxes: number; stockUnits: number; unitsPerBox: number | null }>,
+) {
+  const lineItems: { productId: string; quantity: number; unitPriceAtSale: Prisma.Decimal }[] = [];
+  for (const item of items) {
+    if (item.quantity <= 0) httpError(400, 'Quantity must be positive');
+    const product = productMap.get(item.productId)!;
+    const onHand = totalStockUnits(product.stockBoxes, product.stockUnits, product.unitsPerBox);
+    if (onHand < item.quantity) {
+      httpError(400, `Insufficient stock for ${product.name}`);
+    }
+    lineItems.push({
+      productId: item.productId,
+      quantity: item.quantity,
+      unitPriceAtSale: product.unitPrice,
+    });
+  }
+  return lineItems;
+}
+
+export async function createSaleWithPaymentSplit(
+  branchId: string,
+  data: {
+    items: SaleItemInput[];
+    cashAmount: number;
+    creditAmount: number;
+    accountId?: string;
+    personType?: CanteenPersonType;
+    studentId?: string;
+    userId?: string;
+  },
+  createdById?: string,
+) {
+  if (!data.items.length) httpError(400, 'At least one item is required');
+  if (data.cashAmount < 0 || data.creditAmount < 0) {
+    httpError(400, 'Cash and credit amounts must be zero or positive');
+  }
+  if (data.cashAmount === 0 && data.creditAmount === 0) {
+    httpError(400, 'Enter cash and/or credit amount');
+  }
+  if (data.creditAmount > 0 && !data.accountId && !data.personType) {
+    httpError(400, 'Credit account or person is required for credit portion');
+  }
+
+  const products = await prisma.canteenProduct.findMany({
+    where: {
+      branchId,
+      id: { in: data.items.map((i) => i.productId) },
+      isActive: true,
+    },
+  });
+  if (products.length !== data.items.length) {
+    httpError(400, 'One or more products are invalid or inactive');
+  }
+
+  const productMap = new Map(products.map((p) => [p.id, p]));
+  const allLineItems = buildPricedLineItems(data.items, productMap);
+  const itemsTotal = lineItemsTotal(allLineItems);
+  const paymentTotal = Math.round((data.cashAmount + data.creditAmount) * 100) / 100;
+
+  if (Math.abs(itemsTotal - paymentTotal) > 0.02) {
+    httpError(400, `Cash + credit (${paymentTotal}) must equal products total (${itemsTotal})`);
+  }
+
+  const pricedItems = allLineItems.map((li) => ({
+    productId: li.productId,
+    quantity: li.quantity,
+    unitPrice: Number(li.unitPriceAtSale),
+  }));
+  const { cashItems, creditItems } = splitSaleItemsByCashAmount(pricedItems, data.cashAmount);
+
+  const cashLineItems = cashItems.length
+    ? buildPricedLineItems(cashItems, productMap)
+    : [];
+  const creditLineItems = creditItems.length
+    ? buildPricedLineItems(creditItems, productMap)
+    : [];
+
+  const cashTotal = lineItemsTotal(cashLineItems);
+  const creditTotal = lineItemsTotal(creditLineItems);
+
+  if (Math.abs(cashTotal - data.cashAmount) > 0.02 || Math.abs(creditTotal - data.creditAmount) > 0.02) {
+    httpError(400, 'Could not split products between cash and credit — adjust amounts');
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const sales = [];
+
+    if (cashLineItems.length > 0) {
+      sales.push(await createSaleRecord(tx, branchId, {
+        paymentType: CanteenSalePaymentType.CASH,
+        lineItems: cashLineItems,
+        totalAmount: cashTotal,
+        canteenAccountId: null,
+      }, createdById));
+    }
+
+    if (creditLineItems.length > 0) {
+      const accountId = await resolveCreditAccountId(
+        tx,
+        branchId,
+        creditTotal,
+        data,
+        createdById,
+      );
+      sales.push(await createSaleRecord(tx, branchId, {
+        paymentType: CanteenSalePaymentType.CREDIT,
+        lineItems: creditLineItems,
+        totalAmount: creditTotal,
+        canteenAccountId: accountId,
+      }, createdById));
+    }
+
+    for (const item of data.items) {
+      const product = productMap.get(item.productId)!;
+      const next = applyStockDelta(
+        product.stockBoxes,
+        product.stockUnits,
+        -item.quantity,
+        product.unitsPerBox,
+      );
+      await tx.canteenProduct.update({
+        where: { id: item.productId },
+        data: next,
+      });
+    }
+
+    return sales;
+  });
+}
 
 export async function createSale(
   branchId: string,

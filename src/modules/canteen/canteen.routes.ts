@@ -68,7 +68,35 @@ router.get('/accounts/:id/sales', requireCanteenSales, asyncHandler(async (req, 
 
 router.post('/sales', requireCanteenSales, asyncHandler(async (req, res) => {
   const branchId = getCanteenBranchId(req);
-  const { paymentType, items, accountId, personType, studentId, userId } = req.body;
+  const {
+    paymentType,
+    items,
+    accountId,
+    personType,
+    studentId,
+    userId,
+    cashAmount,
+    creditAmount,
+  } = req.body;
+
+  if (cashAmount != null || creditAmount != null) {
+    const data = await canteenService.createSaleWithPaymentSplit(
+      branchId,
+      {
+        items: items || [],
+        cashAmount: Number(cashAmount) || 0,
+        creditAmount: Number(creditAmount) || 0,
+        accountId,
+        personType,
+        studentId,
+        userId,
+      },
+      getCanteenUserId(req),
+    );
+    res.status(201).json({ success: true, data });
+    return;
+  }
+
   if (!paymentType || !Object.values(CanteenSalePaymentType).includes(paymentType)) {
     res.status(400).json({ success: false, message: 'paymentType must be CASH or CREDIT' });
     return;
