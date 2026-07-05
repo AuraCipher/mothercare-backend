@@ -500,6 +500,16 @@ export async function createRestockPurchase(
 ) {
   if (!data.items.length) httpError(400, 'At least one line item is required');
 
+  for (const item of data.items) {
+    if (!item.productId?.trim()) httpError(400, 'Each line must have a product');
+    if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+      httpError(400, 'Quantity must be a positive whole number');
+    }
+    if (!Number.isFinite(item.unitCost) || item.unitCost < 0) {
+      httpError(400, 'Unit cost must be zero or positive');
+    }
+  }
+
   const supplier = await prisma.canteenSupplier.findFirst({
     where: { id: data.supplierId, branchId, isActive: true },
   });
