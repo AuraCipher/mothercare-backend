@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../../lib/prisma';
 
-type BranchRole = 'branch_admin' | 'sub_admin' | 'management' | 'teacher' | 'parent';
+type BranchRole = 'branch_admin' | 'sub_admin' | 'management' | 'teacher' | 'parent' | 'canteen_staff';
 
 /**
  * Middleware that checks if the authenticated user has one of the

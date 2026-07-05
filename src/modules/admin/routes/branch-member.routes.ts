@@ -23,7 +23,7 @@ router.post('/:branchId/members', asyncHandler(async (req: Request, res: Respons
     return;
   }
 
-  const validRoles = ['branch_admin', 'sub_admin', 'management', 'teacher', 'parent'];
+  const validRoles = ['branch_admin', 'sub_admin', 'management', 'teacher', 'parent', 'canteen_staff'];
   if (!validRoles.includes(role)) {
     res.status(400).json({ success: false, message: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
     return;

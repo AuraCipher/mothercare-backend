@@ -72,6 +72,7 @@ jest.mock('@prisma/client', () => ({
     management: 'management',
     teacher: 'teacher',
     parent: 'parent',
+    canteen_staff: 'canteen_staff',
   },
 
   AcademicYearStatus: {
@@ -106,5 +107,29 @@ jest.mock('@prisma/client', () => ({
   ReportCardStatus: {
     DRAFT: 'DRAFT',
     PUBLISHED: 'PUBLISHED',
+  },
+
+  CanteenPersonType: {
+    STUDENT: 'STUDENT',
+    TEACHER: 'TEACHER',
+    STAFF: 'STAFF',
+  },
+
+  CanteenSupplierPaymentDirection: {
+    WE_PAID_SUPPLIER: 'WE_PAID_SUPPLIER',
+    SUPPLIER_PAID_US: 'SUPPLIER_PAID_US',
+  },
+
+  CanteenSalePaymentType: {
+    CASH: 'CASH',
+    CREDIT: 'CREDIT',
+  },
+
+  Prisma: {
+    Decimal: class {
+      constructor(public value: number) {}
+      toString() { return String(this.value); }
+      [Symbol.toPrimitive]() { return this.value; }
+    },
   },
 }));
