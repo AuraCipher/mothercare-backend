@@ -4,7 +4,7 @@
   "description": "Mother Care School Node.js Backend with Authentication",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "nodemon --watch src --watch server.ts --ext ts --exec \"npx ts-node server.ts\"",
+    "dev": "prisma generate && nodemon --watch src --watch server.ts --ext ts --exec \"npx ts-node server.ts\"",
     "build": "tsc",
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
