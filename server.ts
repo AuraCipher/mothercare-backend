@@ -5,6 +5,7 @@ import env from './src/config/env';
 import { prisma } from './src/lib/prisma';
 import { runStartupChecks, printStartupBanner, setupGracefulShutdown } from './src/lib/startup';
 import logger from './src/lib/logger';
+import { startMessageWorker } from './src/queues/message.worker';
 
 const PORT = parseInt(env.PORT as any, 10) || 5000;
 const HOST = (env as any).HOST || '0.0.0.0';
@@ -29,6 +30,8 @@ async function main() {
 
     // ─── 3. Setup graceful shutdown ────────────────────────
     setupGracefulShutdown(prisma, server);
+
+    startMessageWorker();
 
     // ─── 4. Process info ─────────────────────────────────────
     if (env.APP_MODE === 'development') {

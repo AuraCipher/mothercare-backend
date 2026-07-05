@@ -1,7 +1,5 @@
 import { z } from 'zod';
 
-const phoneRegex = /^(\+92|0|92)[0-9]{10}$/;
-
 export const loginSchema = z.object({
   identifier: z.string().min(1, 'Username, email, or phone is required'),
   password: z.string().min(1, 'Password is required'),
@@ -17,20 +15,4 @@ export const changePasswordSchema = z.object({
 }).refine((data) => data.newPassword === data.confirmPassword, {
   message: 'Passwords do not match',
   path: ['confirmPassword'],
-});
-
-export const forgotPasswordSchema = z.object({
-  phone: z.string().regex(phoneRegex, 'Enter a valid phone number'),
-});
-
-export const verifyOtpSchema = z.object({
-  phone: z.string().regex(phoneRegex),
-  otp: z.string().length(6, 'OTP must be 6 digits').regex(/^\d+$/),
-});
-
-export const resetPasswordSchema = z.object({
-  resetToken: z.string().min(10),
-  newPassword: z.string().min(8)
-    .regex(/[A-Z]/, 'Must contain uppercase')
-    .regex(/[0-9]/, 'Must contain a number'),
 });

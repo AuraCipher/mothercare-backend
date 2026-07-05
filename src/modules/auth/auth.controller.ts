@@ -49,18 +49,6 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
   res.status(200).json(result);
 });
 
-export const forgotPassword = asyncHandler(async (_req: Request, res: Response) => {
-  res.status(501).json({ success: false, message: 'Not implemented' });
-});
-
-export const verifyOTP = asyncHandler(async (_req: Request, res: Response) => {
-  res.status(501).json({ success: false, message: 'Not implemented' });
-});
-
-export const resetPassword = asyncHandler(async (_req: Request, res: Response) => {
-  res.status(501).json({ success: false, message: 'Not implemented' });
-});
-
 export const logout = asyncHandler(async (req: Request, res: Response) => {
   // @ts-ignore: req.user is set by auth middleware
   const userId = req.user?.id;

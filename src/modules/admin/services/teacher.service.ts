@@ -540,6 +540,7 @@ class TeacherProfileService {
       username: profile.user.username || profile.user.name,
       password: tempPassword,
       name: profile.user.name,
+      recipientType: 'teacher',
     });
 
     // Update tracking fields
@@ -568,7 +569,16 @@ class TeacherProfileService {
       });
     } catch { /* best-effort */ }
 
-    return { sent: result.success, status };
+    return {
+      sent: result.success,
+      status,
+      channel: result.channel,
+      messageId: result.messageId,
+      errorCode: result.errorCode,
+      errorMessage: result.errorMessage,
+      retryable: result.retryable,
+      solvable: result.solvable,
+    };
   }
 }
 

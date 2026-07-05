@@ -1,6 +1,9 @@
 import logger from './logger';
 import env from '../config/env';
 import { testRedisConnection } from '../config/redis';
+import { closeRedisConnection, testTcpRedisConnection } from '../config/redis-tcp';
+import { closeMessageQueue } from '../queues/message.queue';
+import { stopMessageWorker } from '../queues/message.worker';
 import { prisma } from './prisma';
 
 type CheckResult = { name: string; status: 'ok' | 'fail'; detail?: string };
@@ -47,16 +50,28 @@ export async function runStartupChecks(): Promise<CheckResult[]> {
     });
   }
 
-  // ─── 3. Redis (Upstash) ──────────────────────
+  // ─── 3. Redis (Upstash REST — JWT blacklist) ─────────────
   logger.info('Checking Redis connection...');
   const redisOk = await testRedisConnection();
   if (redisOk) {
-    results.push({ name: 'Redis (Upstash)', status: 'ok' });
+    results.push({ name: 'Redis (Upstash REST)', status: 'ok' });
   } else {
     results.push({
-      name: 'Redis (Upstash)',
+      name: 'Redis (Upstash REST)',
       status: 'ok',
       detail: 'Not configured — non-critical, auth will still work',
+    });
+  }
+
+  // ─── 4. Redis TCP (BullMQ message queue) ─────────────────
+  const tcpRedisOk = await testTcpRedisConnection();
+  if (tcpRedisOk) {
+    results.push({ name: 'Redis (TCP / Queue)', status: 'ok' });
+  } else {
+    results.push({
+      name: 'Redis (TCP / Queue)',
+      status: 'ok',
+      detail: env.REDIS_URL ? 'Configured but unreachable — sends fall back to direct delivery' : 'REDIS_URL not set — queue disabled',
     });
   }
 
@@ -99,9 +114,16 @@ export function setupGracefulShutdown(prisma: { $disconnect: () => Promise<void>
   const shutdown = async (signal: string) => {
     logger.info(`Received ${signal}. Shutting down gracefully...`);
 
-    // Close HTTP server
     server.close(async () => {
       logger.info('HTTP server closed.');
+
+      try {
+        await stopMessageWorker();
+        await closeMessageQueue();
+        await closeRedisConnection();
+      } catch (e) {
+        logger.error('Error closing message queue / Redis', e);
+      }
 
       try {
         await prisma.$disconnect();

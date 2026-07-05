@@ -478,6 +478,7 @@ class StudentService {
       username: student.user.username || student.username || '—',
       password: tempPassword,
       name: student.name,
+      recipientType: 'student',
     });
 
     const status = result.success ? 'sent' : 'failed';
@@ -501,7 +502,7 @@ class StudentService {
         sentAt: now,
         status,
         to: whatsapp.slice(0, 6) + '****',
-        errorMsg: result.success ? null : result.messageStatus || 'Unknown error',
+        errorMsg: result.success ? null : result.errorMessage || result.messageStatus || 'Unknown error',
         sentById: userId,
       },
     });
@@ -520,7 +521,17 @@ class StudentService {
       });
     } catch { /* best-effort */ }
 
-    return { sent: result.success, status, to: whatsapp.slice(0, 6) + '****' };
+    return {
+      sent: result.success,
+      status,
+      to: whatsapp.slice(0, 6) + '****',
+      channel: result.channel,
+      messageId: result.messageId,
+      errorCode: result.errorCode,
+      errorMessage: result.errorMessage,
+      retryable: result.retryable,
+      solvable: result.solvable,
+    };
   }
 
   /**
@@ -542,8 +553,6 @@ class StudentService {
         if (reason.includes('no WhatsApp') || reason.includes('credentials')) skipped++;
         else failed++;
       }
-      // Small delay to avoid rate limits
-      await new Promise(resolve => setTimeout(resolve, 200));
     }
 
     return { sent, skipped, failed, results };

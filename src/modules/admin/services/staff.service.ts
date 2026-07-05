@@ -679,6 +679,7 @@ class StaffService {
       username: member.user.username || member.user.name,
       password: tempPassword,
       name: member.user.name,
+      recipientType: 'staff',
     });
 
     try {
@@ -698,7 +699,16 @@ class StaffService {
       });
     } catch { /* best-effort */ }
 
-    return { sent: result.success, status: result.success ? 'sent' : 'failed' };
+    return {
+      sent: result.success,
+      status: result.success ? 'sent' : 'failed',
+      channel: result.channel,
+      messageId: result.messageId,
+      errorCode: result.errorCode,
+      errorMessage: result.errorMessage,
+      retryable: result.retryable,
+      solvable: result.solvable,
+    };
   }
 }
 

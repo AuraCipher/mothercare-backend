@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { hashPassword, verifyPassword, generateOTP, hashOTP } from '../../lib/password';
+import { hashPassword, verifyPassword } from '../../lib/password';
 import { signToken, verifyToken } from '../../lib/jwt';
 import env from '../../config/env';
 import { z } from 'zod';

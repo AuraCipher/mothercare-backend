@@ -1,22 +1,16 @@
 import { Router } from 'express';
-import { login, getMe, changePassword, forgotPassword, verifyOTP, resetPassword, logout, refresh } from './auth.controller';
+import { login, getMe, changePassword, logout, refresh } from './auth.controller';
 import auth from '../../middleware/auth/auth.middleware';
 import { validate } from '../../middleware/validation/validate.middleware';
 import {
   loginSchema,
   changePasswordSchema,
-  forgotPasswordSchema,
-  verifyOtpSchema,
-  resetPasswordSchema,
 } from './auth.schema';
 
 const router = Router();
 
 // Public routes
 router.post('/login', validate(loginSchema), login);
-router.post('/forgot-password', validate(forgotPasswordSchema), forgotPassword);
-router.post('/verify-otp', validate(verifyOtpSchema), verifyOTP);
-router.post('/reset-password', validate(resetPasswordSchema), resetPassword);
 
 // Protected routes
 router.post('/refresh', auth, refresh);
