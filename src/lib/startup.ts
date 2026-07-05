@@ -26,6 +26,19 @@ export async function runStartupChecks(): Promise<CheckResult[]> {
     await prisma.$connect();
     await prisma.$queryRaw`SELECT 1`;
     results.push({ name: 'Database (PostgreSQL)', status: 'ok' });
+
+    // Idempotent seed — default grade scale for exam/report card grading
+    try {
+      const { seedDefaultGradeScale } = await import('../modules/admin/services/grade-scale.seed');
+      await seedDefaultGradeScale();
+      results.push({ name: 'Grade Scale Seed', status: 'ok' });
+    } catch (seedErr: any) {
+      results.push({
+        name: 'Grade Scale Seed',
+        status: 'ok',
+        detail: seedErr?.message || 'skipped',
+      });
+    }
   } catch (err: any) {
     results.push({
       name: 'Database (PostgreSQL)',
