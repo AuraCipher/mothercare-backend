@@ -149,6 +149,7 @@ model User {
   // Existing relations
   managementProfile   ManagementProfile?
   teacherProfile      TeacherProfile?
+  staffProfile        StaffProfile?
   parentProfile       ParentProfile?
   subjectsAsHod       Subject[]               @relation("SubjectHOD")
   sentMessages        Message[]               @relation("SentMessages")
@@ -589,6 +590,36 @@ model TeacherProfile {
   credentialStatus      String?   @default("none")
 
   @@map("teacher_profiles")
+}
+
+model StaffProfile {
+  id               String    @id @default(uuid())
+  userId           String    @unique
+  employeeId       String?   @unique
+  qualification    String?
+  specialization   String?
+  joiningDate      DateTime?
+  salary           Decimal?  @db.Decimal(12, 2)
+  phone            String?
+  emergencyContact String?
+  address          String?
+  dateOfBirth      DateTime?
+  gender           Gender?
+  bloodGroup       String?
+  fatherName       String?
+  cardId           String?
+  severeDisease    String?
+  experience       String?
+  bio              String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdById String?
+  updatedById String?
+
+  @@map("staff_profiles")
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
