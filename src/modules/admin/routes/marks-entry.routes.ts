@@ -10,18 +10,18 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
     fn(req, res, next).catch(next);
   };
 
-router.get('/exam-class-subjects/:id/marks-grid', asyncHandler(async (req: Request, res: Response) => {
+router.get('/structure/subjects/:linkId/marks-grid', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  await assertExamClassSubjectInScope(req.params.id, scope);
-  const grid = await marksEntryService.getMarksGrid(req.params.id);
+  await assertExamClassSubjectInScope(req.params.linkId, scope);
+  const grid = await marksEntryService.getMarksGrid(req.params.linkId);
   res.json({ success: true, data: grid });
 }));
 
-router.post('/exam-class-subjects/:id/marks', asyncHandler(async (req: Request, res: Response) => {
+router.post('/structure/subjects/:linkId/marks', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  await assertExamClassSubjectInScope(req.params.id, scope);
+  await assertExamClassSubjectInScope(req.params.linkId, scope);
 
   const { totalMarks, passingMarks, entries } = req.body;
 
@@ -50,22 +50,22 @@ router.post('/exam-class-subjects/:id/marks', asyncHandler(async (req: Request, 
     return;
   }
 
-  const result = await marksEntryService.saveMarks(req.params.id, { totalMarks, passingMarks, entries }, userId);
+  const result = await marksEntryService.saveMarks(req.params.linkId, { totalMarks, passingMarks, entries }, userId);
   res.json({ success: true, data: result });
 }));
 
-router.delete('/marks-entries/:id', asyncHandler(async (req: Request, res: Response) => {
+router.delete('/marks/:entryId', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
 
-  const entry = await marksEntryService.getEntryForScopeCheck(req.params.id);
+  const entry = await marksEntryService.getEntryForScopeCheck(req.params.entryId);
   if (!entry) {
     res.status(404).json({ success: false, message: 'Marks entry not found' });
     return;
   }
   await assertExamClassSubjectInScope(entry.examClassSubjectId, scope);
 
-  const result = await marksEntryService.deleteMarksEntry(req.params.id);
+  const result = await marksEntryService.deleteMarksEntry(req.params.entryId);
   res.json({ success: true, message: result.message });
 }));
 
