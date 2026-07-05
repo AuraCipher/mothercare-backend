@@ -20,7 +20,8 @@ describe('ExamStructureService', () => {
       prismaMock.group.findMany.mockResolvedValue(mockGroups as any);
       (prismaMock as any).$transaction.mockImplementation(async (cb: any) => cb(prismaMock));
       prismaMock.examClass.findUnique.mockResolvedValue(null); // no existing
-      prismaMock.examClass.create.mockResolvedValue({} as any);
+      prismaMock.examClass.create.mockResolvedValue({ id: 'new-ec' } as any);
+      prismaMock.examClassSubject.findUnique.mockResolvedValue(null);
       prismaMock.examClassSubject.create.mockResolvedValue({} as any);
       prismaMock.examClass.count.mockResolvedValue(2);
       prismaMock.examClassSubject.count.mockResolvedValue(3);
@@ -34,24 +35,28 @@ describe('ExamStructureService', () => {
       expect(result).toBeDefined();
     });
 
-    test('skips already-existing ExamClass rows', async () => {
+    test('syncs missing subjects on already-existing ExamClass rows', async () => {
       prismaMock.exam.findUnique.mockResolvedValue({ ...mockExam, examSession: mockSession } as any);
       prismaMock.group.findMany.mockResolvedValue(mockGroups as any);
       (prismaMock as any).$transaction.mockImplementation(async (cb: any) => cb(prismaMock));
-      // First group already exists, second doesn't
       prismaMock.examClass.findUnique
-        .mockResolvedValueOnce({ id: 'existing-ec' } as any) // g1 exists
-        .mockResolvedValueOnce(null); // g2 doesn't
-      prismaMock.examClass.create.mockResolvedValue({} as any);
+        .mockResolvedValueOnce({ id: 'existing-ec' } as any)
+        .mockResolvedValueOnce(null);
+      prismaMock.examClass.create.mockResolvedValue({ id: 'new-ec' } as any);
+      prismaMock.examClassSubject.findUnique
+        .mockResolvedValueOnce({ id: 'ecs-existing' } as any)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
       prismaMock.examClassSubject.create.mockResolvedValue({} as any);
       prismaMock.examClass.count.mockResolvedValue(2);
-      prismaMock.examClassSubject.count.mockResolvedValue(2);
+      prismaMock.examClassSubject.count.mockResolvedValue(4);
       prismaMock.examClass.findMany.mockResolvedValue([]);
 
       await examStructureService.generateStructure('exam-1', 'admin-id');
 
-      // Only 1 new ExamClass created (g2), 2 subjects under it
       expect(prismaMock.examClass.create).toHaveBeenCalledTimes(1);
+      // g1: 0 new subjects (1 exists), g2: 2 new subjects
       expect(prismaMock.examClassSubject.create).toHaveBeenCalledTimes(2);
     });
 
