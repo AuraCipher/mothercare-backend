@@ -98,6 +98,86 @@ class SubjectResultService {
     return result;
   }
 
+  async getClassResults(classId: string, examSessionId: string, scope: ScopeContext) {
+    await assertExamSessionInScope(examSessionId, scope);
+    await assertGroupInScope(classId, scope);
+
+    const group = await prisma.group.findUnique({
+      where: { id: classId },
+      select: { id: true, name: true, section: true },
+    });
+    if (!group) throw { status: 404, message: 'Class not found' };
+
+    const students = await prisma.student.findMany({
+      where: {
+        groupId: classId,
+        isActive: true,
+        academicYearId: scope.academicYearId,
+        academicYear: { branchId: scope.branchId },
+      },
+      select: { id: true, name: true, rollNumber: true },
+      orderBy: { rollNumber: 'asc' },
+    });
+
+    const subjectResults = await prisma.subjectResult.findMany({
+      where: {
+        examSessionId,
+        studentId: { in: students.map((s) => s.id) },
+      },
+      include: { subject: { select: { id: true, name: true, code: true } } },
+      orderBy: { subject: { name: 'asc' } },
+    });
+
+    const reportCards = await prisma.reportCard.findMany({
+      where: {
+        examSessionId,
+        studentId: { in: students.map((s) => s.id) },
+      },
+      select: {
+        studentId: true,
+        overallPercentage: true,
+        overallGrade: true,
+        classRank: true,
+        status: true,
+      },
+    });
+
+    const subjectMap = new Map<string, { id: string; name: string; code: string | null }>();
+    for (const r of subjectResults) {
+      subjectMap.set(r.subject.id, r.subject);
+    }
+    const subjects = Array.from(subjectMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+
+    const resultsByStudent = new Map<string, typeof subjectResults>();
+    for (const r of subjectResults) {
+      const list = resultsByStudent.get(r.studentId) ?? [];
+      list.push(r);
+      resultsByStudent.set(r.studentId, list);
+    }
+    const cardByStudent = new Map(reportCards.map((c) => [c.studentId, c]));
+
+    const rows = students.map((student) => ({
+      student,
+      subjectResults: (resultsByStudent.get(student.id) ?? []).map((r) => ({
+        subjectId: r.subjectId,
+        subject: r.subject,
+        percentage: r.percentage,
+        grade: r.grade,
+        subjectRank: r.subjectRank,
+      })),
+      reportCard: cardByStudent.get(student.id) ?? null,
+    }));
+
+    rows.sort((a, b) => {
+      const rankA = a.reportCard?.classRank ?? Number.MAX_SAFE_INTEGER;
+      const rankB = b.reportCard?.classRank ?? Number.MAX_SAFE_INTEGER;
+      if (rankA !== rankB) return rankA - rankB;
+      return (a.student.rollNumber ?? '').localeCompare(b.student.rollNumber ?? '');
+    });
+
+    return { class: group, subjects, students: rows };
+  }
+
   async computeForStudent(studentId: string, examSessionId: string, subjectId: string, scope: ScopeContext) {
     await assertStudentInScope(studentId, scope);
     await assertExamSessionInScope(examSessionId, scope);
