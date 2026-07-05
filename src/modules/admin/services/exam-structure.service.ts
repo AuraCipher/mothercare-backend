@@ -3,7 +3,11 @@ import { basePrisma } from '../../../lib/prisma';
 import { logAudit } from '../../../services/audit.service';
 
 class ExamStructureService {
-  async generateStructure(examId: string, createdById?: string) {
+  async generateStructure(
+    examId: string,
+    createdById?: string,
+    options?: { selections?: { classId: string; subjectIds: string[] }[] },
+  ) {
     // ── Verify exam exists ───────────────────────────────────────
     const exam = await prisma.exam.findUnique({
       where: { id: examId },
@@ -28,9 +32,18 @@ class ExamStructureService {
       throw { status: 400, message: 'No classes found for this academic year. Create classes first.' };
     }
 
+    const selectionMap = options?.selections
+      ? new Map(options.selections.map((s) => [s.classId, new Set(s.subjectIds)]))
+      : null;
+
     // ── Bulk-create / sync structure in a transaction ─────────
     await basePrisma.$transaction(async (tx) => {
       for (const group of groups) {
+        const allowedSubjects = selectionMap?.get(group.id);
+        if (selectionMap && (!allowedSubjects || allowedSubjects.size === 0)) {
+          continue;
+        }
+
         let examClass = await tx.examClass.findUnique({
           where: { examId_classId: { examId, classId: group.id } },
         });
@@ -48,6 +61,10 @@ class ExamStructureService {
         }
 
         for (const gs of group.groupSubjects) {
+          if (allowedSubjects && !allowedSubjects.has(gs.subject.id)) {
+            continue;
+          }
+
           const existingSubject = await tx.examClassSubject.findUnique({
             where: {
               examClassId_subjectId: {

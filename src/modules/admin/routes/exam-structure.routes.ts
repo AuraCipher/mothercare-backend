@@ -17,6 +17,7 @@ router.post('/exams/:examId/structure', asyncHandler(async (req: Request, res: R
   const structure = await examStructureService.generateStructure(
     req.params.examId,
     (req as any).user?.id,
+    req.body?.selections ? { selections: req.body.selections } : undefined,
   );
   res.status(201).json({ success: true, data: structure });
 }));
