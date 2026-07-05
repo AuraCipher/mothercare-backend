@@ -1872,6 +1872,7 @@ model CanteenSupplier {
   branchId              String
   name                  String
   contactNumber         String?
+  note                  String?
   balanceOwedToSupplier Decimal  @default(0) @db.Decimal(12, 2) // we owe them
   balanceSupplierOwesUs Decimal  @default(0) @db.Decimal(12, 2) // they owe us
   isActive              Boolean  @default(true)
