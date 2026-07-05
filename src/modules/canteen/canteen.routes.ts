@@ -46,7 +46,18 @@ router.get('/accounts', requireCanteenSales, asyncHandler(async (req, res) => {
 }));
 
 router.get('/accounts/:id', requireCanteenSales, asyncHandler(async (req, res) => {
+  const detail = req.query.detail === 'true';
+  if (detail) {
+    const data = await canteenService.getAccountDetail(getCanteenBranchId(req), req.params.id);
+    res.json({ success: true, data });
+    return;
+  }
   const data = await canteenService.getAccount(getCanteenBranchId(req), req.params.id);
+  res.json({ success: true, data });
+}));
+
+router.get('/accounts/:id/payments', requireCanteenSales, asyncHandler(async (req, res) => {
+  const data = await canteenService.listAccountPayments(getCanteenBranchId(req), req.params.id);
   res.json({ success: true, data });
 }));
 
@@ -117,15 +128,34 @@ router.get('/suppliers', asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 }));
 
+router.get('/suppliers/:id', asyncHandler(async (req, res) => {
+  const detail = req.query.detail === 'true';
+  if (detail) {
+    const data = await canteenService.getSupplierDetail(getCanteenBranchId(req), req.params.id);
+    res.json({ success: true, data });
+    return;
+  }
+  const data = await canteenService.getSupplier(getCanteenBranchId(req), req.params.id);
+  res.json({ success: true, data });
+}));
+
+router.get('/suppliers/:id/restock-purchases', asyncHandler(async (req, res) => {
+  const data = await canteenService.listSupplierRestockPurchases(
+    getCanteenBranchId(req),
+    req.params.id,
+  );
+  res.json({ success: true, data });
+}));
+
 router.post('/suppliers', asyncHandler(async (req, res) => {
-  const { name, contactNumber } = req.body;
+  const { name, contactNumber, note } = req.body;
   if (!name?.trim()) {
     res.status(400).json({ success: false, message: 'name is required' });
     return;
   }
   const data = await canteenService.createSupplier(
     getCanteenBranchId(req),
-    { name, contactNumber },
+    { name, contactNumber, note },
     getCanteenUserId(req),
   );
   res.status(201).json({ success: true, data });

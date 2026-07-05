@@ -131,9 +131,53 @@ export async function listSuppliers(branchId: string) {
   });
 }
 
+export async function getSupplier(branchId: string, id: string) {
+  const supplier = await prisma.canteenSupplier.findFirst({ where: { id, branchId } });
+  if (!supplier) httpError(404, 'Supplier not found');
+  return supplier;
+}
+
+export async function listSupplierRestockPurchases(branchId: string, supplierId: string) {
+  const supplier = await prisma.canteenSupplier.findFirst({ where: { id: supplierId, branchId } });
+  if (!supplier) httpError(404, 'Supplier not found');
+  return prisma.canteenRestockPurchase.findMany({
+    where: { branchId, supplierId },
+    include: {
+      items: { include: { product: true } },
+      createdBy: { select: { id: true, name: true } },
+    },
+    orderBy: { purchaseDate: 'desc' },
+  });
+}
+
+export async function getSupplierDetail(branchId: string, supplierId: string) {
+  const supplier = await getSupplier(branchId, supplierId);
+  const [purchases, payments] = await Promise.all([
+    listSupplierRestockPurchases(branchId, supplierId),
+    listSupplierPayments(branchId, supplierId),
+  ]);
+  const totalPurchased = purchases.reduce((sum, p) => sum + Number(p.totalCost), 0);
+  const totalPaid = payments
+    .filter((p) => p.direction === CanteenSupplierPaymentDirection.WE_PAID_SUPPLIER)
+    .reduce((sum, p) => sum + Number(p.amount), 0);
+  return {
+    supplier,
+    stats: {
+      totalPurchased,
+      totalPaid,
+      remainingOwed: Number(supplier.balanceOwedToSupplier),
+      theyOweUs: Number(supplier.balanceSupplierOwesUs),
+      purchaseCount: purchases.length,
+      paymentCount: payments.length,
+    },
+    purchases,
+    payments,
+  };
+}
+
 export async function createSupplier(
   branchId: string,
-  data: { name: string; contactNumber?: string },
+  data: { name: string; contactNumber?: string; note?: string },
   createdById?: string,
 ) {
   const trimmed = normalizeName(data.name);
@@ -147,6 +191,7 @@ export async function createSupplier(
         data: {
           isActive: true,
           contactNumber: data.contactNumber?.trim() || existing.contactNumber,
+          note: data.note?.trim() || existing.note,
         },
       });
     }
@@ -159,6 +204,7 @@ export async function createSupplier(
         branchId,
         name: trimmed,
         contactNumber: data.contactNumber?.trim() || null,
+        note: data.note?.trim() || null,
         createdById,
       },
     });
@@ -171,7 +217,7 @@ export async function createSupplier(
 export async function updateSupplier(
   branchId: string,
   id: string,
-  data: { name?: string; contactNumber?: string; isActive?: boolean },
+  data: { name?: string; contactNumber?: string; note?: string; isActive?: boolean },
 ) {
   const row = await prisma.canteenSupplier.findFirst({ where: { id, branchId } });
   if (!row) httpError(404, 'Supplier not found');
@@ -193,6 +239,7 @@ export async function updateSupplier(
       data: {
         ...(data.name !== undefined ? { name: normalizeName(data.name) } : {}),
         ...(data.contactNumber !== undefined ? { contactNumber: data.contactNumber?.trim() || null } : {}),
+        ...(data.note !== undefined ? { note: data.note?.trim() || null } : {}),
         ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
       },
     });
@@ -625,10 +672,45 @@ export async function listAccountSales(branchId: string, accountId: string) {
   const account = await prisma.canteenAccount.findFirst({ where: { id: accountId, branchId } });
   if (!account) httpError(404, 'Account not found');
   return prisma.canteenSale.findMany({
-    where: { branchId, canteenAccountId: accountId },
-    include: { items: { include: { product: true } } },
+    where: { branchId, canteenAccountId: accountId, paymentType: CanteenSalePaymentType.CREDIT },
+    include: {
+      items: { include: { product: true } },
+      createdBy: { select: { id: true, name: true } },
+    },
     orderBy: { soldAt: 'desc' },
   });
+}
+
+export async function listAccountPayments(branchId: string, accountId: string) {
+  const account = await prisma.canteenAccount.findFirst({ where: { id: accountId, branchId } });
+  if (!account) httpError(404, 'Account not found');
+  return prisma.canteenAccountPayment.findMany({
+    where: { canteenAccountId: accountId },
+    include: { createdBy: { select: { id: true, name: true } } },
+    orderBy: { paidAt: 'desc' },
+  });
+}
+
+export async function getAccountDetail(branchId: string, accountId: string) {
+  const account = await getAccount(branchId, accountId);
+  const [sales, payments] = await Promise.all([
+    listAccountSales(branchId, accountId),
+    listAccountPayments(branchId, accountId),
+  ]);
+  const totalOrdered = sales.reduce((sum, s) => sum + Number(s.totalAmount), 0);
+  const totalPaid = payments.reduce((sum, p) => sum + Number(p.amountPaid), 0);
+  return {
+    account,
+    stats: {
+      totalOrdered,
+      totalPaid,
+      remaining: Number(account.runningBalance),
+      orderCount: sales.length,
+      paymentCount: payments.length,
+    },
+    sales,
+    payments,
+  };
 }
 
 // ─── Credit person search (branch students / teachers / staff) ───
