@@ -123,17 +123,18 @@ describe('Canteen routes', () => {
 
   test('POST /admin/canteen/sales cash decrements stock', async () => {
     mockCanteenStaffMembership();
-    prismaMock.canteenProduct.findMany.mockResolvedValue([
-      {
-        id: 'p1',
-        branchId,
-        name: 'Chips',
-        unitPrice: { valueOf: () => 50 },
-        stockBoxes: 0,
-        stockUnits: 10,
-        isActive: true,
-      },
-    ] as any);
+    const product = {
+      id: 'p1',
+      branchId,
+      name: 'Chips',
+      unitPrice: { valueOf: () => 50 },
+      stockBoxes: 0,
+      stockUnits: 10,
+      unitsPerBox: 1,
+      isActive: true,
+    };
+    prismaMock.canteenProduct.findMany.mockResolvedValue([product] as any);
+    prismaMock.canteenProduct.findFirst.mockResolvedValue(product as any);
     prismaMock.canteenSale.create.mockResolvedValue({
       id: 's1',
       paymentType: 'CASH',
@@ -152,7 +153,12 @@ describe('Canteen routes', () => {
 
     expect(res.status).toBe(201);
     expect(prismaMock.canteenSale.create).toHaveBeenCalled();
-    expect(prismaMock.canteenProduct.update).toHaveBeenCalled();
+    expect(prismaMock.canteenProduct.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'p1' },
+        data: { stockBoxes: 8, stockUnits: 0 },
+      }),
+    );
   });
 
   test('GET /admin/canteen/summary returns daily totals', async () => {
