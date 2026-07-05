@@ -1,5 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { examSessionService } from '../services/exam-session.service';
+import { requireScope } from '../utils/scope-context';
+import { assertExamSessionInScope } from '../utils/exam-scope';
 
 const router = Router();
 
@@ -13,7 +15,9 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
 // List all exam sessions in an academic year
 // ═══════════════════════════════════════════════════════════════════
 router.get('/branches/:branchId/academic-years/:ayId/exam-sessions', asyncHandler(async (req: Request, res: Response) => {
-  const sessions = await examSessionService.findAll(req.params.ayId);
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const sessions = await examSessionService.findAll(scope.academicYearId);
   res.json({ success: true, data: sessions });
 }));
 
@@ -22,6 +26,8 @@ router.get('/branches/:branchId/academic-years/:ayId/exam-sessions', asyncHandle
 // Create a new exam session
 // ═══════════════════════════════════════════════════════════════════
 router.post('/branches/:branchId/academic-years/:ayId/exam-sessions', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
   const { name, startDate, endDate } = req.body;
 
   // Validation
@@ -43,7 +49,7 @@ router.post('/branches/:branchId/academic-years/:ayId/exam-sessions', asyncHandl
   }
 
   const session = await examSessionService.create(
-    req.params.ayId,
+    scope.academicYearId,
     { name, startDate: new Date(startDate), endDate: new Date(endDate) },
     (req as any).user?.id,
   );
@@ -56,6 +62,9 @@ router.post('/branches/:branchId/academic-years/:ayId/exam-sessions', asyncHandl
 // Get an exam session by ID
 // ═══════════════════════════════════════════════════════════════════
 router.get('/branches/:branchId/exam-sessions/:id', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  await assertExamSessionInScope(req.params.id, scope);
   const session = await examSessionService.findById(req.params.id);
   res.json({ success: true, data: session });
 }));
@@ -65,6 +74,9 @@ router.get('/branches/:branchId/exam-sessions/:id', asyncHandler(async (req: Req
 // Update an exam session
 // ═══════════════════════════════════════════════════════════════════
 router.patch('/branches/:branchId/exam-sessions/:id', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  await assertExamSessionInScope(req.params.id, scope);
   const { name, startDate, endDate } = req.body;
 
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
@@ -90,6 +102,9 @@ router.patch('/branches/:branchId/exam-sessions/:id', asyncHandler(async (req: R
 // Delete an exam session (blocked if exams or results exist)
 // ═══════════════════════════════════════════════════════════════════
 router.delete('/branches/:branchId/exam-sessions/:id', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  await assertExamSessionInScope(req.params.id, scope);
   const result = await examSessionService.delete(req.params.id);
   res.json({ success: true, message: result.message });
 }));
