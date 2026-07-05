@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../../lib/prisma';
 import { academicYearService } from '../services/academic-year.service';
 import { branchMemberService } from '../services/branch-member.service';
+import { staffService } from '../services/staff.service';
 
 const router = Router();
 
@@ -31,6 +32,18 @@ router.get('/branches', asyncHandler(async (req: Request, res: Response) => {
   }
   const memberships = await branchMemberService.listUserBranches(user.id);
   res.json({ success: true, data: memberships });
+}));
+
+// GET /me/permissions — Module access for active branch (staff RBAC)
+router.get('/permissions', asyncHandler(async (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const branchId = (req.query.branchId as string) || user.branchIds?.[0];
+  if (!branchId) {
+    res.status(400).json({ success: false, message: 'branchId is required' });
+    return;
+  }
+  const access = await staffService.resolveUserAccess(user.id, branchId, user.role);
+  res.json({ success: true, data: { branchId, ...access } });
 }));
 
 export default router;
