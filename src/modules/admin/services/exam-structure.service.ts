@@ -28,26 +28,36 @@ class ExamStructureService {
       throw { status: 400, message: 'No classes found for this academic year. Create classes first.' };
     }
 
-    // ── Bulk-create structure in a transaction ─────────────────
+    // ── Bulk-create / sync structure in a transaction ─────────
     await basePrisma.$transaction(async (tx) => {
       for (const group of groups) {
-        // Skip if ExamClass already exists for this exam+class combo
-        const existing = await tx.examClass.findUnique({
+        let examClass = await tx.examClass.findUnique({
           where: { examId_classId: { examId, classId: group.id } },
         });
-        if (existing) continue;
 
-        const examClass = await tx.examClass.create({
-          data: {
-            examId,
-            classId: group.id,
-            isActive: true,
-            createdById,
-            updatedById: createdById,
-          },
-        });
+        if (!examClass) {
+          examClass = await tx.examClass.create({
+            data: {
+              examId,
+              classId: group.id,
+              isActive: true,
+              createdById,
+              updatedById: createdById,
+            },
+          });
+        }
 
         for (const gs of group.groupSubjects) {
+          const existingSubject = await tx.examClassSubject.findUnique({
+            where: {
+              examClassId_subjectId: {
+                examClassId: examClass.id,
+                subjectId: gs.subject.id,
+              },
+            },
+          });
+          if (existingSubject) continue;
+
           await tx.examClassSubject.create({
             data: {
               examClassId: examClass.id,
