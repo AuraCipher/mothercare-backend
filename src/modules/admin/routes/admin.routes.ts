@@ -20,6 +20,7 @@ import examRoutes from './exam.routes';
 import examStructureRoutes from './exam-structure.routes';
 import marksEntryRoutes from './marks-entry.routes';
 import subjectResultRoutes from './subject-result.routes';
+import reportCardRoutes from './report-card.routes';
 import { requireScope } from '../utils/scope-context';
 
 const router = Router();
@@ -58,6 +59,7 @@ router.use(examRoutes); // Contains /exam-sessions/:sessionId/exams — Exam CRU
 router.use(examStructureRoutes); // Contains /exams/:id/structure — Exam class/subject structure
 router.use(marksEntryRoutes); // Contains /exam-class-subjects/:id/marks-grid, /exam-class-subjects/:id/marks — Marks entry
 router.use(subjectResultRoutes); // Contains /exam-sessions/:id/compute-results — SubjectResult computation
+router.use(reportCardRoutes); // Contains /exam-sessions/:id/compute-report-cards — ReportCard computation
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
