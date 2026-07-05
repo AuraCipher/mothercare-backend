@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { staffService } from '../services/staff.service';
 import { requireScope } from '../utils/scope-context';
+import { passwordSetLimiter } from '../../../middleware/security/rateLimiter';
 import type { ModulePermissionInput } from '../staff-permissions.constants';
 
 const router = Router();
@@ -113,6 +114,37 @@ router.post('/:userId/reactivate', asyncHandler(async (req, res) => {
   const ctx = await assertStaffAdmin(req, res);
   if (!ctx) return;
   const data = await staffService.reactivateStaff(ctx.branchId, req.params.userId);
+  res.json({ success: true, data });
+}));
+
+router.post('/:userId/set-password', passwordSetLimiter, asyncHandler(async (req, res) => {
+  const ctx = await assertStaffAdmin(req, res);
+  if (!ctx) return;
+  const { newPassword, adminPassword } = req.body;
+  if (!newPassword?.trim() || !adminPassword?.trim()) {
+    res.status(400).json({ success: false, message: 'newPassword and adminPassword are required' });
+    return;
+  }
+  const result = await staffService.setPassword(
+    ctx.branchId,
+    req.params.userId,
+    newPassword,
+    (req as any).user.id,
+    adminPassword,
+    req.ip,
+  );
+  res.json({ success: true, message: result.message });
+}));
+
+router.post('/:userId/send-credentials', asyncHandler(async (req, res) => {
+  const ctx = await assertStaffAdmin(req, res);
+  if (!ctx) return;
+  const data = await staffService.sendCredentials(
+    ctx.branchId,
+    req.params.userId,
+    (req as any).user.id,
+    req.ip,
+  );
   res.json({ success: true, data });
 }));
 

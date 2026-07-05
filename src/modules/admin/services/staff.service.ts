@@ -406,6 +406,122 @@ class StaffService {
 
     return { isRestricted: true as const, isFullAdmin: false, permissions };
   }
+
+  async setPassword(
+    branchId: string,
+    userId: string,
+    newPassword: string,
+    adminId: string,
+    adminPassword: string,
+    ipAddress?: string,
+  ) {
+    const bc = await import('bcryptjs');
+    const member = await prisma.branchMember.findUnique({
+      where: { branchId_userId: { branchId, userId } },
+      include: { user: { select: { id: true, username: true, name: true } } },
+    });
+    if (!member) throw { status: 404, message: 'Staff member not found' };
+
+    const admin = await prisma.user.findUnique({ where: { id: adminId } });
+    if (!admin) throw { status: 404, message: 'Admin user not found' };
+
+    const isMatch = await bc.compare(adminPassword, admin.passwordHash);
+    if (!isMatch) throw { status: 403, message: 'Admin password is incorrect' };
+
+    const recentChanges = await prisma.auditLog.findMany({
+      where: { entity: 'StaffMember', entityId: member.id, action: 'password_reset' },
+      orderBy: { createdAt: 'desc' },
+      take: 3,
+      select: { newValue: true },
+    });
+    for (const entry of recentChanges) {
+      const prevHash = (entry.newValue as any)?.passwordHash;
+      if (prevHash && typeof prevHash === 'string') {
+        const isReused = await bc.compare(newPassword, prevHash);
+        if (isReused) {
+          throw { status: 409, message: 'This password was used recently. Please choose a different one.' };
+        }
+      }
+    }
+
+    const newHash = await bc.hash(newPassword, 12);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: newHash },
+    });
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId: adminId,
+          action: 'password_reset',
+          entity: 'StaffMember',
+          entityId: member.id,
+          newValue: {
+            username: member.user.username || member.user.name,
+            passwordHash: newHash,
+          },
+          ipAddress,
+        },
+      });
+    } catch { /* best-effort */ }
+
+    return { message: 'Password updated successfully' };
+  }
+
+  async sendCredentials(
+    branchId: string,
+    staffUserId: string,
+    adminId: string,
+    ipAddress?: string,
+  ) {
+    const bc = await import('bcryptjs');
+    const member = await prisma.branchMember.findUnique({
+      where: { branchId_userId: { branchId, userId: staffUserId } },
+      include: {
+        user: { select: { id: true, name: true, username: true, phone: true } },
+      },
+    });
+    if (!member) throw { status: 404, message: 'Staff member not found' };
+
+    const phone = member.user.phone?.trim();
+    if (!phone) throw { status: 400, message: 'No phone number on file. Add a phone number first.' };
+
+    const { generatePassword } = await import('../../../utils/username');
+    const tempPassword = generatePassword();
+    const hash = await bc.hash(tempPassword, 12);
+    await prisma.user.update({
+      where: { id: staffUserId },
+      data: { passwordHash: hash },
+    });
+
+    const notificationService = (await import('../../../services/notification.service')).default;
+    const result = await notificationService.sendCredential({
+      to: phone,
+      username: member.user.username || member.user.name,
+      password: tempPassword,
+      name: member.user.name,
+    });
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          userId: adminId,
+          action: 'credential_sent',
+          entity: 'StaffMember',
+          entityId: member.id,
+          newValue: {
+            sent: result.success,
+            status: result.success ? 'sent' : 'failed',
+            to: phone.slice(0, 6) + '****',
+          },
+          ipAddress,
+        },
+      });
+    } catch { /* best-effort */ }
+
+    return { sent: result.success, status: result.success ? 'sent' : 'failed' };
+  }
 }
 
 export const staffService = new StaffService();
