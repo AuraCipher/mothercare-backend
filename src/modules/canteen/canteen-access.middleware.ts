@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../../lib/prisma';
+import { staffService } from '../admin/services/staff.service';
 
 export type CanteenAccessLevel = 'admin' | 'sales';
 
@@ -57,6 +58,23 @@ export async function requireCanteenBranch(
         success: false,
         message: 'You are not an active member of this branch',
       });
+    }
+
+    const access = await staffService.resolveUserAccess(user.id, branchId, user.role);
+    if (access.isRestricted) {
+      const canteen = access.permissions.find((p) => p.module === 'CANTEEN');
+      if (!canteen?.canRead) {
+        return res.status(403).json({
+          success: false,
+          message: 'No canteen module access for this branch',
+        });
+      }
+      const level: CanteenAccessLevel =
+        canteen.canUpdate || canteen.canDelete ? 'admin' : 'sales';
+      (req as any).canteenBranchId = branchId;
+      (req as any).canteenAccessLevel = level;
+      (req as any).branchMember = membership;
+      return next();
     }
 
     if (ADMIN_BRANCH_ROLES.has(membership.role)) {
