@@ -940,7 +940,7 @@ export function splitSaleItemsByCashAmount(
 }
 
 async function resolveCreditAccountId(
-  tx: Prisma.TransactionClient,
+  tx: any,
   branchId: string,
   creditAmount: number,
   data: {
@@ -1007,7 +1007,7 @@ async function resolveCreditAccountId(
 }
 
 async function createSaleRecord(
-  tx: Prisma.TransactionClient,
+  tx: any,
   branchId: string,
   data: {
     paymentType: CanteenSalePaymentType;
