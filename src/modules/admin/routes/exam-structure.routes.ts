@@ -10,29 +10,29 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
     fn(req, res, next).catch(next);
   };
 
-router.post('/exams/:id/structure', asyncHandler(async (req: Request, res: Response) => {
+router.post('/exams/:examId/structure', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  await assertExamInScope(req.params.id, scope);
+  await assertExamInScope(req.params.examId, scope);
   const structure = await examStructureService.generateStructure(
-    req.params.id,
+    req.params.examId,
     (req as any).user?.id,
   );
   res.status(201).json({ success: true, data: structure });
 }));
 
-router.get('/exams/:id/structure', asyncHandler(async (req: Request, res: Response) => {
+router.get('/exams/:examId/structure', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  await assertExamInScope(req.params.id, scope);
-  const structure = await examStructureService.getStructure(req.params.id);
+  await assertExamInScope(req.params.examId, scope);
+  const structure = await examStructureService.getStructure(req.params.examId);
   res.json({ success: true, data: structure });
 }));
 
-router.patch('/exam-classes/:id', asyncHandler(async (req: Request, res: Response) => {
+router.patch('/structure/classes/:linkId', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  await assertExamClassInScope(req.params.id, scope);
+  await assertExamClassInScope(req.params.linkId, scope);
   const { isActive } = req.body;
 
   if (typeof isActive !== 'boolean') {
@@ -40,14 +40,14 @@ router.patch('/exam-classes/:id', asyncHandler(async (req: Request, res: Respons
     return;
   }
 
-  const result = await examStructureService.toggleClass(req.params.id, isActive);
+  const result = await examStructureService.toggleClass(req.params.linkId, isActive);
   res.json({ success: true, data: result });
 }));
 
-router.patch('/exam-class-subjects/:id', asyncHandler(async (req: Request, res: Response) => {
+router.patch('/structure/subjects/:linkId', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  await assertExamClassSubjectInScope(req.params.id, scope);
+  await assertExamClassSubjectInScope(req.params.linkId, scope);
   const { isActive } = req.body;
 
   if (typeof isActive !== 'boolean') {
@@ -55,7 +55,7 @@ router.patch('/exam-class-subjects/:id', asyncHandler(async (req: Request, res: 
     return;
   }
 
-  const result = await examStructureService.toggleSubject(req.params.id, isActive);
+  const result = await examStructureService.toggleSubject(req.params.linkId, isActive);
   res.json({ success: true, data: result });
 }));
 

@@ -10,11 +10,7 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
     fn(req, res, next).catch(next);
   };
 
-// ═══════════════════════════════════════════════════════════════════
-// GET /admin/exam-sessions/:sessionId/exam-types
-// List exam types in a session
-// ═══════════════════════════════════════════════════════════════════
-router.get('/exam-sessions/:sessionId/exam-types', asyncHandler(async (req: Request, res: Response) => {
+router.get('/sessions/:sessionId/types', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
   await assertExamSessionInScope(req.params.sessionId, scope);
@@ -22,17 +18,12 @@ router.get('/exam-sessions/:sessionId/exam-types', asyncHandler(async (req: Requ
   res.json({ success: true, data: types });
 }));
 
-// ═══════════════════════════════════════════════════════════════════
-// POST /admin/exam-sessions/:sessionId/exam-types
-// Create an exam type within a session
-// ═══════════════════════════════════════════════════════════════════
-router.post('/exam-sessions/:sessionId/exam-types', asyncHandler(async (req: Request, res: Response) => {
+router.post('/sessions/:sessionId/types', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
   await assertExamSessionInScope(req.params.sessionId, scope);
   const { name, defaultWeight } = req.body;
 
-  // Validation
   if (!name || typeof name !== 'string' || !name.trim()) {
     res.status(400).json({ success: false, message: 'Exam type name is required' });
     return;
@@ -55,11 +46,7 @@ router.post('/exam-sessions/:sessionId/exam-types', asyncHandler(async (req: Req
   res.status(201).json({ success: true, data: type });
 }));
 
-// ═══════════════════════════════════════════════════════════════════
-// PATCH /admin/exam-sessions/:sessionId/exam-types/:id
-// Update an exam type
-// ═══════════════════════════════════════════════════════════════════
-router.patch('/exam-sessions/:sessionId/exam-types/:id', asyncHandler(async (req: Request, res: Response) => {
+router.patch('/sessions/:sessionId/types/:typeId', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
   await assertExamSessionInScope(req.params.sessionId, scope);
@@ -78,19 +65,15 @@ router.patch('/exam-sessions/:sessionId/exam-types/:id', asyncHandler(async (req
     }
   }
 
-  const type = await examTypeService.update(req.params.id, { name, defaultWeight });
+  const type = await examTypeService.update(req.params.typeId, { name, defaultWeight });
   res.json({ success: true, data: type });
 }));
 
-// ═══════════════════════════════════════════════════════════════════
-// DELETE /admin/exam-sessions/:sessionId/exam-types/:id
-// Delete an exam type (blocked if referenced by exams)
-// ═══════════════════════════════════════════════════════════════════
-router.delete('/exam-sessions/:sessionId/exam-types/:id', asyncHandler(async (req: Request, res: Response) => {
+router.delete('/sessions/:sessionId/types/:typeId', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
   await assertExamSessionInScope(req.params.sessionId, scope);
-  const result = await examTypeService.delete(req.params.id);
+  const result = await examTypeService.delete(req.params.typeId);
   res.json({ success: true, message: result.message });
 }));
 
