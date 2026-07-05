@@ -5,7 +5,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
-import { assertBranchCreditPerson } from './canteen-credit-rules';
+import { assertBranchCreditPerson, searchBranchTeachers } from './canteen-credit-rules';
 import { applyStockDelta, normalizeStock, totalStockUnits } from './canteen-stock';
 
 function httpError(status: number, message: string): never {
@@ -875,19 +875,7 @@ export async function searchCreditPersons(
   }
 
   if (type === CanteenPersonType.TEACHER) {
-    const members = await prisma.branchMember.findMany({
-      where: { branchId, isActive: true, role: 'teacher' },
-      include: {
-        user: {
-          select: { id: true, name: true, phone: true, role: true, status: true },
-        },
-      },
-      take: 50,
-    });
-    return members
-      .filter((m) => m.user?.status === 'active' && m.user.role === 'teacher')
-      .filter((m) => !term || m.user!.name.toLowerCase().includes(term.toLowerCase()))
-      .map((m) => ({ id: m.user!.id, name: m.user!.name, phone: m.user!.phone }));
+    return searchBranchTeachers(branchId, term);
   }
 
   const members = await prisma.branchMember.findMany({
