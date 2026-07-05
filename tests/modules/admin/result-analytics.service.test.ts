@@ -1,4 +1,4 @@
-import { isPassingResult, PASSING_MIN_PERCENT } from '../../../src/modules/admin/services/result-analytics.service';
+import { isPassingResult, PASSING_MIN_PERCENT, tallyPassFail } from '../../../src/modules/admin/services/result-analytics.service';
 
 describe('result-analytics.service', () => {
   describe('isPassingResult', () => {
@@ -20,5 +20,28 @@ describe('result-analytics.service', () => {
 
   it('uses 40% passing threshold constant', () => {
     expect(PASSING_MIN_PERCENT).toBe(40);
+  });
+
+  describe('tallyPassFail', () => {
+    it('counts subject-level pass and fail rows', () => {
+      const items = [
+        { percentage: 85, grade: 'A' },
+        { percentage: 35, grade: 'D' },
+        { percentage: 50, grade: 'C' },
+        { percentage: 60, grade: 'F' },
+      ];
+      expect(tallyPassFail(items)).toEqual({ passed: 2, failed: 2, total: 4 });
+    });
+
+    it('includes failures that report-card overall grades would hide', () => {
+      const subjectRows = [
+        { percentage: 12, grade: 'F' },
+        { percentage: 90, grade: 'A' },
+        { percentage: 88, grade: 'A' },
+      ];
+      const reportCardOverall = [{ percentage: 63.3, grade: 'B' }];
+      expect(tallyPassFail(subjectRows).failed).toBe(1);
+      expect(tallyPassFail(reportCardOverall).failed).toBe(0);
+    });
   });
 });

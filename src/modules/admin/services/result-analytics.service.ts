@@ -35,7 +35,7 @@ function classLabel(name: string, section: string | null) {
   return section ? `${name} — ${section}` : name;
 }
 
-function tallyPassFail(items: { percentage: number; grade: string }[]) {
+export function tallyPassFail(items: { percentage: number; grade: string }[]) {
   let passed = 0;
   let failed = 0;
   for (const item of items) {
@@ -43,6 +43,11 @@ function tallyPassFail(items: { percentage: number; grade: string }[]) {
     else failed += 1;
   }
   return { passed, failed, total: items.length };
+}
+
+/** Pass/fail metrics always use subject results — report-card overall grades average away subject failures. */
+function toPassFailItems(results: { percentage: number; grade: string }[]) {
+  return results.map((r) => ({ percentage: r.percentage, grade: r.grade }));
 }
 
 class ResultAnalyticsService {
@@ -100,39 +105,21 @@ class ResultAnalyticsService {
         })
       : [];
 
-    const reportCards = sessionIds.length > 0 && !subjectId
-      ? await prisma.reportCard.findMany({
+    const reportCardCount = sessionIds.length > 0 && !subjectId
+      ? await prisma.reportCard.count({
           where: {
             examSessionId: { in: sessionIds },
             student: studentWhere,
           },
-          select: {
-            overallPercentage: true,
-            overallGrade: true,
-            examSessionId: true,
-            studentId: true,
-            student: { select: { groupId: true, group: { select: { id: true, name: true, section: true } } } },
-          },
         })
-      : [];
+      : 0;
 
     const gradeMap = new Map<string, number>();
-    const bumpGrade = (grade: string) => gradeMap.set(grade, (gradeMap.get(grade) ?? 0) + 1);
-
-    let passFailSource: { percentage: number; grade: string }[];
-
-    if (subjectId || subjectResults.length > 0 && reportCards.length === 0) {
-      passFailSource = subjectResults.map((r) => ({ percentage: r.percentage, grade: r.grade }));
-      for (const r of subjectResults) bumpGrade(r.grade);
-    } else if (reportCards.length > 0) {
-      passFailSource = reportCards.map((r) => ({
-        percentage: r.overallPercentage,
-        grade: r.overallGrade,
-      }));
-      for (const r of reportCards) bumpGrade(r.overallGrade);
-    } else {
-      passFailSource = [];
+    for (const r of subjectResults) {
+      gradeMap.set(r.grade, (gradeMap.get(r.grade) ?? 0) + 1);
     }
+
+    const passFailSource = toPassFailItems(subjectResults);
 
     const { passed, failed, total: passFailTotal } = tallyPassFail(passFailSource);
     const passRate = pct(passed, passFailTotal);
@@ -169,19 +156,9 @@ class ResultAnalyticsService {
         subjectId,
       );
 
-      let items: { percentage: number; grade: string }[];
-      if (subjectId) {
-        items = subjectResults
-          .filter((r) => r.examSessionId === session.id)
-          .map((r) => ({ percentage: r.percentage, grade: r.grade }));
-      } else {
-        const cards = reportCards.filter((r) => r.examSessionId === session.id);
-        items = cards.length > 0
-          ? cards.map((r) => ({ percentage: r.overallPercentage, grade: r.overallGrade }))
-          : subjectResults
-              .filter((r) => r.examSessionId === session.id)
-              .map((r) => ({ percentage: r.percentage, grade: r.grade }));
-      }
+      const items = toPassFailItems(
+        subjectResults.filter((r) => r.examSessionId === session.id),
+      );
 
       const t = tallyPassFail(items);
       const avg = items.length > 0
@@ -258,19 +235,9 @@ class ResultAnalyticsService {
         const gExamIds = examIds;
         const gMarks = await this.getMarksProgress(gExamIds, group.id, subjectId);
 
-        let items: { percentage: number; grade: string }[];
-        if (subjectId) {
-          items = subjectResults
-            .filter((r) => r.student.groupId === group.id)
-            .map((r) => ({ percentage: r.percentage, grade: r.grade }));
-        } else {
-          const cards = reportCards.filter((r) => r.student.groupId === group.id);
-          items = cards.length > 0
-            ? cards.map((r) => ({ percentage: r.overallPercentage, grade: r.overallGrade }))
-            : subjectResults
-                .filter((r) => r.student.groupId === group.id)
-                .map((r) => ({ percentage: r.percentage, grade: r.grade }));
-        }
+        const items = toPassFailItems(
+          subjectResults.filter((r) => r.student.groupId === group.id),
+        );
 
         const t = tallyPassFail(items);
         const avg = items.length > 0
@@ -304,7 +271,7 @@ class ResultAnalyticsService {
         marksFilled: marksProgress.filled,
         marksPercent: marksProgress.percent,
         resultCount: subjectResults.length,
-        reportCardCount: reportCards.length,
+        reportCardCount,
         passed,
         failed,
         passFailTotal,
