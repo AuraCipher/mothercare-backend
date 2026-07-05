@@ -109,7 +109,8 @@ describe('CanteenService', () => {
           id: 'p1',
           name: 'Chips',
           unitPrice: { valueOf: () => 50 },
-          stockQuantity: 1,
+          stockBoxes: 0,
+          stockUnits: 1,
           isActive: true,
         },
       ] as any);

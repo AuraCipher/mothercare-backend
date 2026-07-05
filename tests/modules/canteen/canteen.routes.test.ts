@@ -53,7 +53,7 @@ describe('Canteen routes', () => {
   test('canteen_staff can list products', async () => {
     mockCanteenStaffMembership();
     prismaMock.canteenProduct.findMany.mockResolvedValue([
-      { id: 'p1', name: 'Chips', unitPrice: 50, stockQuantity: 10, isActive: true },
+      { id: 'p1', name: 'Chips', unitPrice: 50, stockBoxes: 0, stockUnits: 10, isActive: true },
     ] as any);
     const res = await request(app)
       .get(`/admin/canteen/products?branchId=${branchId}`)
@@ -129,7 +129,8 @@ describe('Canteen routes', () => {
         branchId,
         name: 'Chips',
         unitPrice: { valueOf: () => 50 },
-        stockQuantity: 10,
+        stockBoxes: 0,
+        stockUnits: 10,
         isActive: true,
       },
     ] as any);
