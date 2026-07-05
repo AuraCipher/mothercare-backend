@@ -15,12 +15,7 @@ import attendanceRoutes from './attendance.routes';
 import studentRoutes from './student.routes';
 import feeRoutes from './fee.routes';
 import examSessionRoutes from './exam-session.routes';
-import examTypeRoutes from './exam-type.routes';
-import examRoutes from './exam.routes';
-import examStructureRoutes from './exam-structure.routes';
-import marksEntryRoutes from './marks-entry.routes';
-import subjectResultRoutes from './subject-result.routes';
-import reportCardRoutes from './report-card.routes';
+import resultRoutes from './result.routes';
 import { requireScope } from '../utils/scope-context';
 
 const router = Router();
@@ -53,13 +48,8 @@ router.use(timetableRoutes); // Contains /branches/:branchId/academic-years/:ayI
 router.use(attendanceRoutes); // Contains /attendance, /attendance/batch
 router.use(feeRoutes); // Contains /fee-heads, /fee-structures, /student-fees, /payments, /families, /fees/*
 router.use(studentRoutes); // Contains /students, /students/:id, /students/:id/emergency-contact, etc.
-router.use(examSessionRoutes); // Contains /exam-sessions — ExamSession CRUD
-router.use(examTypeRoutes); // Contains /exam-sessions/:sessionId/exam-types — ExamType tag manager
-router.use(examRoutes); // Contains /exam-sessions/:sessionId/exams — Exam CRUD
-router.use(examStructureRoutes); // Contains /exams/:id/structure — Exam class/subject structure
-router.use(marksEntryRoutes); // Contains /exam-class-subjects/:id/marks-grid, /exam-class-subjects/:id/marks — Marks entry
-router.use(subjectResultRoutes); // Contains /exam-sessions/:id/compute-results — SubjectResult computation
-router.use(reportCardRoutes); // Contains /exam-sessions/:id/compute-report-cards — ReportCard computation
+router.use(examSessionRoutes); // /exam-sessions — ExamSession CRUD
+router.use('/result', resultRoutes); // /result/* — Result & Grade workflow
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
