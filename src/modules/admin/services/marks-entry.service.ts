@@ -201,6 +201,13 @@ class MarksEntryService {
     return this.getMarksGrid(examClassSubjectId);
   }
 
+  async getEntryForScopeCheck(id: string) {
+    return prisma.marksEntry.findUnique({
+      where: { id },
+      select: { examClassSubjectId: true },
+    });
+  }
+
   async deleteMarksEntry(id: string) {
     const entry = await prisma.marksEntry.findUnique({
       where: { id },
