@@ -268,6 +268,8 @@ export async function createProduct(
     supplierId?: string;
     name: string;
     unitPrice: number;
+    boxPrice?: number;
+    unitsPerBox?: number;
     stockQuantity?: number;
     lowStockThreshold?: number;
   },
@@ -286,6 +288,11 @@ export async function createProduct(
 
   const trimmed = normalizeName(data.name);
   if (!trimmed) httpError(400, 'name is required');
+  if (data.unitPrice < 0) httpError(400, 'unitPrice must be zero or positive');
+  if (data.boxPrice != null && data.boxPrice < 0) httpError(400, 'boxPrice must be zero or positive');
+  if (data.unitsPerBox != null && data.unitsPerBox < 1) {
+    httpError(400, 'unitsPerBox must be at least 1');
+  }
 
   const existing = await prisma.canteenProduct.findFirst({
     where: { branchId, categoryId: data.categoryId, name: trimmed },
@@ -297,6 +304,8 @@ export async function createProduct(
         data: {
           isActive: true,
           unitPrice: money(data.unitPrice),
+          ...(data.boxPrice != null ? { boxPrice: money(data.boxPrice) } : {}),
+          ...(data.unitsPerBox != null ? { unitsPerBox: data.unitsPerBox } : {}),
           lowStockThreshold: data.lowStockThreshold ?? existing.lowStockThreshold,
           supplierId: data.supplierId || null,
         },
@@ -314,6 +323,8 @@ export async function createProduct(
         supplierId: data.supplierId || null,
         name: trimmed,
         unitPrice: money(data.unitPrice),
+        boxPrice: data.boxPrice != null ? money(data.boxPrice) : null,
+        unitsPerBox: data.unitsPerBox ?? null,
         stockQuantity: data.stockQuantity ?? 0,
         lowStockThreshold: data.lowStockThreshold ?? 5,
         createdById,
@@ -334,6 +345,8 @@ export async function updateProduct(
     supplierId?: string | null;
     name?: string;
     unitPrice?: number;
+    boxPrice?: number | null;
+    unitsPerBox?: number | null;
     lowStockThreshold?: number;
     isActive?: boolean;
   },
@@ -379,6 +392,8 @@ export async function updateProduct(
         ...(data.supplierId !== undefined ? { supplierId: data.supplierId } : {}),
         ...(data.name !== undefined ? { name: normalizeName(data.name) } : {}),
         ...(data.unitPrice !== undefined ? { unitPrice: money(data.unitPrice) } : {}),
+        ...(data.boxPrice !== undefined ? { boxPrice: data.boxPrice == null ? null : money(data.boxPrice) } : {}),
+        ...(data.unitsPerBox !== undefined ? { unitsPerBox: data.unitsPerBox } : {}),
         ...(data.lowStockThreshold !== undefined ? { lowStockThreshold: data.lowStockThreshold } : {}),
         ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
       },

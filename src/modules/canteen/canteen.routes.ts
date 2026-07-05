@@ -168,14 +168,14 @@ router.post('/suppliers/:id/payments', asyncHandler(async (req, res) => {
 }));
 
 router.post('/products', asyncHandler(async (req, res) => {
-  const { categoryId, supplierId, name, unitPrice, stockQuantity, lowStockThreshold } = req.body;
+  const { categoryId, supplierId, name, unitPrice, boxPrice, unitsPerBox, stockQuantity, lowStockThreshold } = req.body;
   if (!categoryId || !name?.trim() || unitPrice == null) {
     res.status(400).json({ success: false, message: 'categoryId, name, and unitPrice are required' });
     return;
   }
   const data = await canteenService.createProduct(
     getCanteenBranchId(req),
-    { categoryId, supplierId, name, unitPrice, stockQuantity, lowStockThreshold },
+    { categoryId, supplierId, name, unitPrice, boxPrice, unitsPerBox, stockQuantity, lowStockThreshold },
     getCanteenUserId(req),
   );
   res.status(201).json({ success: true, data });
