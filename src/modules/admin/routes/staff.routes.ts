@@ -37,7 +37,12 @@ router.get('/', asyncHandler(async (req, res) => {
 router.post('/', asyncHandler(async (req, res) => {
   const ctx = await assertStaffAdmin(req, res);
   if (!ctx) return;
-  const { name, username, password, email, phone, permissions } = req.body;
+  const {
+    name, username, password, email, phone, permissions,
+    employeeId, qualification, specialization, joiningDate, salary,
+    emergencyContact, address, dateOfBirth, gender, bloodGroup,
+    fatherName, cardId, severeDisease, experience, bio, profilePhotoId,
+  } = req.body;
   if (!name?.trim() || !username?.trim()) {
     res.status(400).json({ success: false, message: 'Name and username are required' });
     return;
@@ -55,6 +60,22 @@ router.post('/', asyncHandler(async (req, res) => {
       email,
       phone,
       permissions: permissions as ModulePermissionInput[],
+      employeeId,
+      qualification,
+      specialization,
+      joiningDate,
+      salary: salary != null && salary !== '' ? Number(salary) : undefined,
+      emergencyContact,
+      address,
+      dateOfBirth,
+      gender,
+      bloodGroup,
+      fatherName,
+      cardId,
+      severeDisease,
+      experience,
+      bio,
+      profilePhotoId,
     },
     (req as any).user?.id,
   );
@@ -94,12 +115,7 @@ router.get('/:userId', asyncHandler(async (req, res) => {
 router.patch('/:userId', asyncHandler(async (req, res) => {
   const ctx = await assertStaffAdmin(req, res);
   if (!ctx) return;
-  const { name, email, phone } = req.body;
-  const data = await staffService.updateStaffProfile(ctx.branchId, req.params.userId, {
-    name,
-    email,
-    phone,
-  });
+  const data = await staffService.updateStaffProfile(ctx.branchId, req.params.userId, req.body);
   res.json({ success: true, data });
 }));
 
