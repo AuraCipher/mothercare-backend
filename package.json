@@ -10,6 +10,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "npx ts-node prisma/seed.ts",
+    "prisma:seed:result": "npx ts-node prisma/seed-result-analytics.ts",
     "prisma:studio": "prisma studio",
     "setup": "bash scripts/setup.sh",
     "backup": "bash scripts/backup.sh",

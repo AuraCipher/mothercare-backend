@@ -1,4 +1,4 @@
-import { isPassingResult, PASSING_MIN_PERCENT } from '../../src/modules/admin/services/result-analytics.service';
+import { isPassingResult, PASSING_MIN_PERCENT } from '../../../src/modules/admin/services/result-analytics.service';
 
 describe('result-analytics.service', () => {
   describe('isPassingResult', () => {
