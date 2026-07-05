@@ -38,6 +38,96 @@ class ExamSessionService {
     return session;
   }
 
+  async getSummary(sessionId: string) {
+    const session = await prisma.examSession.findUnique({
+      where: { id: sessionId },
+      select: {
+        id: true,
+        name: true,
+        startDate: true,
+        endDate: true,
+        academicYearId: true,
+        _count: { select: { examTypes: true, exams: true, subjectResults: true, reportCards: true } },
+      },
+    });
+    if (!session) throw { status: 404, message: 'Exam session not found' };
+
+    const exams = await prisma.exam.findMany({
+      where: { examSessionId: sessionId },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        startDate: true,
+        endDate: true,
+        examClasses: {
+          where: { isActive: true },
+          select: {
+            id: true,
+            classId: true,
+            subjects: {
+              where: { isActive: true },
+              select: {
+                id: true,
+                _count: { select: { marksEntries: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { startDate: 'desc' },
+    });
+
+    let totalSubjectSlots = 0;
+    let filledSubjectSlots = 0;
+
+    const examSummaries = exams.map((exam) => {
+      let examTotal = 0;
+      let examFilled = 0;
+      for (const ec of exam.examClasses) {
+        for (const sub of ec.subjects) {
+          examTotal++;
+          if (sub._count.marksEntries > 0) examFilled++;
+        }
+      }
+      totalSubjectSlots += examTotal;
+      filledSubjectSlots += examFilled;
+      const percent = examTotal > 0 ? Math.round((examFilled / examTotal) * 100) : 0;
+      return {
+        id: exam.id,
+        name: exam.name,
+        status: exam.status,
+        startDate: exam.startDate,
+        endDate: exam.endDate,
+        classCount: exam.examClasses.length,
+        marksProgress: { total: examTotal, filled: examFilled, percent },
+      };
+    });
+
+    const marksPercent = totalSubjectSlots > 0
+      ? Math.round((filledSubjectSlots / totalSubjectSlots) * 100)
+      : 0;
+
+    return {
+      session: {
+        id: session.id,
+        name: session.name,
+        startDate: session.startDate,
+        endDate: session.endDate,
+      },
+      typeCount: session._count.examTypes,
+      examCount: session._count.exams,
+      subjectResultCount: session._count.subjectResults,
+      reportCardCount: session._count.reportCards,
+      marksProgress: {
+        total: totalSubjectSlots,
+        filled: filledSubjectSlots,
+        percent: marksPercent,
+      },
+      exams: examSummaries,
+    };
+  }
+
   async create(academicYearId: string, data: CreateExamSessionInput, createdById?: string) {
     const session = await prisma.examSession.create({
       data: {
