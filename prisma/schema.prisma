@@ -45,6 +45,17 @@ enum BranchRole {
   canteen_staff // Canteen — daily sales only (assigned by admin)
 }
 
+// Module access for branch staff (RBAC)
+enum StaffModule {
+  STUDENTS
+  OPERATIONS
+  TIMETABLE
+  ATTENDANCE
+  FEES
+  RESULT
+  CANTEEN
+}
+
 // Academic Year lifecycle: BUILD_STAGE → ACTIVE → ARCHIVED
 enum AcademicYearStatus {
   BUILD_STAGE // Year being set up — only admins see it
@@ -396,9 +407,29 @@ model BranchMember {
   createdById String?
   updatedById String?
 
+  modulePermissions StaffModulePermission[]
+
   @@unique([branchId, userId])
   @@index([userId])
   @@map("branch_members")
+}
+
+model StaffModulePermission {
+  id             String      @id @default(uuid())
+  branchMemberId String
+  module         StaffModule
+  canCreate      Boolean     @default(false)
+  canRead        Boolean     @default(true)
+  canUpdate      Boolean     @default(false)
+  canDelete      Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  branchMember BranchMember @relation(fields: [branchMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([branchMemberId, module])
+  @@index([branchMemberId])
+  @@map("staff_module_permissions")
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
