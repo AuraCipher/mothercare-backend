@@ -28,7 +28,7 @@ describe('Report card routes', () => {
   test('POST compute-report-cards requires scope', async () => {
     (prismaMock.academicYear.findFirst as jest.Mock).mockResolvedValue(null);
     const res = await request(app)
-      .post('/admin/exam-sessions/sess1/compute-report-cards')
+      .post('/admin/result/sessions/sess1/compute-report-cards')
       .set(adminToken);
     expect(res.status).toBe(400);
   });
@@ -41,7 +41,7 @@ describe('Report card routes', () => {
     (prismaMock.student.findMany as jest.Mock).mockResolvedValue([]);
 
     const res = await request(app)
-      .post(`/admin/exam-sessions/sess1/compute-report-cards?${SCOPE_QS}`)
+      .post(`/admin/result/sessions/sess1/compute-report-cards?${SCOPE_QS}`)
       .set(adminToken);
 
     expect(res.status).toBe(200);
@@ -50,14 +50,21 @@ describe('Report card routes', () => {
 
   test('GET report-card requires scope', async () => {
     const res = await request(app)
-      .get('/admin/students/s1/exam-sessions/sess1/report-card')
+      .get('/admin/result/students/s1/sessions/sess1/report-card')
       .set(adminToken);
     expect(res.status).toBe(400);
   });
 
   test('POST publish requires scope', async () => {
     const res = await request(app)
-      .post('/admin/report-cards/rc1/publish')
+      .post('/admin/result/report-cards/rc1/publish')
+      .set(adminToken);
+    expect(res.status).toBe(400);
+  });
+
+  test('GET class report-cards requires scope', async () => {
+    const res = await request(app)
+      .get('/admin/result/sessions/sess1/classes/class1/report-cards')
       .set(adminToken);
     expect(res.status).toBe(400);
   });

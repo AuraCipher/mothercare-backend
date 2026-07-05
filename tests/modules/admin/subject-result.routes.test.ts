@@ -3,10 +3,6 @@ jest.mock('bcryptjs', () => ({
   compare: jest.fn().mockResolvedValue(true),
 }));
 
-jest.mock('../../../src/services/audit.service', () => ({
-  logAudit: jest.fn().mockResolvedValue(undefined),
-}));
-
 import { prismaMock } from '../../mocks/prisma';
 import request from 'supertest';
 import app from '../../../src/app';
@@ -28,7 +24,7 @@ describe('Subject result routes — scope + compute', () => {
   test('POST compute-results requires academic year scope', async () => {
     (prismaMock.academicYear.findFirst as jest.Mock).mockResolvedValue(null);
     const res = await request(app)
-      .post('/admin/exam-sessions/sess1/compute-results')
+      .post('/admin/result/sessions/sess1/compute-results')
       .set(adminToken);
     expect(res.status).toBe(400);
   });
@@ -41,7 +37,7 @@ describe('Subject result routes — scope + compute', () => {
     (prismaMock.examClassSubject.findMany as jest.Mock).mockResolvedValue([]);
 
     const res = await request(app)
-      .post(`/admin/exam-sessions/sess1/compute-results?${SCOPE_QS}`)
+      .post(`/admin/result/sessions/sess1/compute-results?${SCOPE_QS}`)
       .set(adminToken);
 
     expect(res.status).toBe(200);
@@ -53,15 +49,22 @@ describe('Subject result routes — scope + compute', () => {
     (prismaMock.examSession.findFirst as jest.Mock).mockResolvedValue(null);
 
     const res = await request(app)
-      .post(`/admin/exam-sessions/sess1/classes/class1/subjects/sub1/compute?${SCOPE_QS}`)
+      .post(`/admin/result/sessions/sess1/classes/class1/subjects/sub1/compute?${SCOPE_QS}`)
       .set(adminToken);
 
     expect(res.status).toBe(404);
   });
 
-  test('GET student result requires scope', async () => {
+  test('GET student subject result requires scope', async () => {
     const res = await request(app)
-      .get('/admin/students/s1/exam-sessions/sess1/subjects/sub1/result')
+      .get('/admin/result/students/s1/sessions/sess1/subjects/sub1')
+      .set(adminToken);
+    expect(res.status).toBe(400);
+  });
+
+  test('GET class results requires scope', async () => {
+    const res = await request(app)
+      .get('/admin/result/sessions/sess1/classes/class1/results')
       .set(adminToken);
     expect(res.status).toBe(400);
   });
@@ -75,7 +78,7 @@ describe('Marks entry routes — scope', () => {
 
   test('GET marks-grid requires scope', async () => {
     const res = await request(app)
-      .get('/admin/exam-class-subjects/ecs1/marks-grid')
+      .get('/admin/result/structure/subjects/ecs1/marks-grid')
       .set(adminToken);
     expect(res.status).toBe(400);
   });
@@ -99,7 +102,7 @@ describe('Marks entry routes — scope', () => {
     (prismaMock.student.findMany as jest.Mock).mockResolvedValue([]);
 
     const res = await request(app)
-      .get(`/admin/exam-class-subjects/ecs1/marks-grid?${SCOPE_QS}`)
+      .get(`/admin/result/structure/subjects/ecs1/marks-grid?${SCOPE_QS}`)
       .set(adminToken);
 
     expect(res.status).toBe(200);
