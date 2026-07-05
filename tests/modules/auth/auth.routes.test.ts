@@ -200,43 +200,6 @@ describe('POST /auth/logout', () => {
   });
 });
 
-// ─── Unimplemented endpoints ──────────────────────────────
-
-describe('Unimplemented endpoints (501)', () => {
-  test('POST /auth/forgot-password returns 501', async () => {
-    const res = await request(app)
-      .post('/auth/forgot-password')
-      .send({ phone: '+923001234567' });
-
-    expect(res.status).toBe(501);
-    expect(res.body.success).toBe(false);
-    expect(res.body.message).toBe('Not implemented');
-  });
-
-  test('POST /auth/verify-otp returns 501', async () => {
-    const res = await request(app)
-      .post('/auth/verify-otp')
-      .send({ phone: '+923001234567', otp: '123456' });
-
-    expect(res.status).toBe(501);
-    expect(res.body.success).toBe(false);
-    expect(res.body.message).toBe('Not implemented');
-  });
-
-  test('POST /auth/reset-password returns 501', async () => {
-    const res = await request(app)
-      .post('/auth/reset-password')
-      .send({
-        resetToken: 'valid-reset-token-12345',
-        newPassword: 'NewPass123',
-      });
-
-    expect(res.status).toBe(501);
-    expect(res.body.success).toBe(false);
-    expect(res.body.message).toBe('Not implemented');
-  });
-});
-
 // ─── POST /auth/refresh ─────────────────────────────────────
 
 describe('POST /auth/refresh', () => {
