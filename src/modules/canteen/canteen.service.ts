@@ -6,6 +6,7 @@ import {
 } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { assertBranchCreditPerson } from './canteen-credit-rules';
+import { applyStockDelta, normalizeStock, totalStockUnits } from './canteen-stock';
 
 function httpError(status: number, message: string): never {
   throw { status, message };
@@ -270,7 +271,8 @@ export async function createProduct(
     unitPrice: number;
     boxPrice?: number;
     unitsPerBox?: number;
-    stockQuantity?: number;
+    stockBoxes?: number;
+    stockUnits?: number;
     lowStockThreshold?: number;
   },
   createdById?: string,
@@ -316,6 +318,11 @@ export async function createProduct(
   }
 
   try {
+    const opening = normalizeStock(
+      data.stockBoxes ?? 0,
+      data.stockUnits ?? 0,
+      data.unitsPerBox,
+    );
     return await prisma.canteenProduct.create({
       data: {
         branchId,
@@ -325,7 +332,8 @@ export async function createProduct(
         unitPrice: money(data.unitPrice),
         boxPrice: data.boxPrice != null ? money(data.boxPrice) : null,
         unitsPerBox: data.unitsPerBox ?? null,
-        stockQuantity: data.stockQuantity ?? 0,
+        stockBoxes: opening.stockBoxes,
+        stockUnits: opening.stockUnits,
         lowStockThreshold: data.lowStockThreshold ?? 5,
         createdById,
       },
@@ -348,11 +356,29 @@ export async function updateProduct(
     boxPrice?: number | null;
     unitsPerBox?: number | null;
     lowStockThreshold?: number;
+    stockBoxes?: number;
+    stockUnits?: number;
     isActive?: boolean;
   },
 ) {
   const product = await prisma.canteenProduct.findFirst({ where: { id, branchId } });
   if (!product) httpError(404, 'Product not found');
+
+  let stockPatch: { stockBoxes: number; stockUnits: number } | undefined;
+  if (data.stockBoxes !== undefined || data.stockUnits !== undefined) {
+    try {
+      stockPatch = normalizeStock(
+        data.stockBoxes ?? product.stockBoxes,
+        data.stockUnits ?? product.stockUnits,
+        data.unitsPerBox ?? product.unitsPerBox,
+      );
+    } catch (err: any) {
+      if (err?.status) throw err;
+      throw err;
+    }
+  } else if (data.unitsPerBox !== undefined && data.unitsPerBox !== product.unitsPerBox) {
+    stockPatch = normalizeStock(product.stockBoxes, product.stockUnits, data.unitsPerBox);
+  }
 
   if (data.categoryId) {
     const category = await prisma.canteenProductCategory.findFirst({
@@ -395,6 +421,7 @@ export async function updateProduct(
         ...(data.boxPrice !== undefined ? { boxPrice: data.boxPrice == null ? null : money(data.boxPrice) } : {}),
         ...(data.unitsPerBox !== undefined ? { unitsPerBox: data.unitsPerBox } : {}),
         ...(data.lowStockThreshold !== undefined ? { lowStockThreshold: data.lowStockThreshold } : {}),
+        ...(stockPatch ? { stockBoxes: stockPatch.stockBoxes, stockUnits: stockPatch.stockUnits } : {}),
         ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
       },
       include: { category: true, supplier: true },
@@ -459,9 +486,18 @@ export async function createRestockPurchase(
     });
 
     for (const item of data.items) {
+      const product = await tx.canteenProduct.findFirst({ where: { id: item.productId, branchId } });
+      if (!product) httpError(400, 'Product not found in this branch');
+      let next: { stockBoxes: number; stockUnits: number };
+      try {
+        next = applyStockDelta(product.stockBoxes, product.stockUnits, item.quantity, product.unitsPerBox);
+      } catch (err: any) {
+        if (err?.status) throw err;
+        throw err;
+      }
       await tx.canteenProduct.update({
         where: { id: item.productId },
-        data: { stockQuantity: { increment: item.quantity } },
+        data: next,
       });
     }
 
@@ -698,7 +734,8 @@ export async function createSale(
   for (const item of data.items) {
     if (item.quantity <= 0) httpError(400, 'Quantity must be positive');
     const product = productMap.get(item.productId)!;
-    if (product.stockQuantity < item.quantity) {
+    const onHand = totalStockUnits(product.stockBoxes, product.stockUnits, product.unitsPerBox);
+    if (onHand < item.quantity) {
       httpError(400, `Insufficient stock for ${product.name}`);
     }
     const unitPrice = product.unitPrice;
@@ -784,9 +821,16 @@ export async function createSale(
     });
 
     for (const item of data.items) {
+      const product = productMap.get(item.productId)!;
+      const next = applyStockDelta(
+        product.stockBoxes,
+        product.stockUnits,
+        -item.quantity,
+        product.unitsPerBox,
+      );
       await tx.canteenProduct.update({
         where: { id: item.productId },
-        data: { stockQuantity: { decrement: item.quantity } },
+        data: next,
       });
     }
 
