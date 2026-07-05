@@ -16,7 +16,9 @@ import studentRoutes from './student.routes';
 import feeRoutes from './fee.routes';
 import examSessionRoutes from './exam-session.routes';
 import resultRoutes from './result.routes';
+import staffRoutes from './staff.routes';
 import { requireScope } from '../utils/scope-context';
+import { staffPermissionMiddleware } from '../../../middleware/auth/staff-permission.middleware';
 
 const router = Router();
 const meRouter = Router();
@@ -27,6 +29,9 @@ router.use(roleMiddleware(['super_admin', 'management']));
 
 // Branch scope enforcement on all admin routes
 router.use(branchScopeMiddleware);
+
+// Module RBAC for restricted staff (after branch scope)
+router.use(staffPermissionMiddleware);
 
 // ═══════════════════════════════════════════════════════════════════
 // Phase 02: Branch + Academic Year System Routes
@@ -50,6 +55,7 @@ router.use(feeRoutes); // Contains /fee-heads, /fee-structures, /student-fees, /
 router.use(studentRoutes); // Contains /students, /students/:id, /students/:id/emergency-contact, etc.
 router.use(examSessionRoutes); // /exam-sessions — ExamSession CRUD
 router.use('/result', resultRoutes); // /result/* — Result & Grade workflow
+router.use('/staff', staffRoutes); // Staff RBAC — create staff + module permissions
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
