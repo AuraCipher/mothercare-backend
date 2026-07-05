@@ -36,7 +36,17 @@ router.get('/credit-persons', requireCanteenSales, asyncHandler(async (req, res)
     res.status(400).json({ success: false, message: 'type must be STUDENT, TEACHER, or STAFF' });
     return;
   }
-  const data = await canteenService.searchCreditPersons(branchId, type, req.query.q as string);
+  const data = await canteenService.searchCreditPersons(
+    branchId,
+    type,
+    req.query.q as string,
+    req.query.groupId as string | undefined,
+  );
+  res.json({ success: true, data });
+}));
+
+router.get('/credit-classes', requireCanteenSales, asyncHandler(async (req, res) => {
+  const data = await canteenService.listCreditStudentClasses(getCanteenBranchId(req));
   res.json({ success: true, data });
 }));
 
@@ -77,6 +87,7 @@ router.post('/sales', requireCanteenSales, asyncHandler(async (req, res) => {
     userId,
     cashAmount,
     creditAmount,
+    creditAllocations,
   } = req.body;
 
   if (cashAmount != null || creditAmount != null) {
@@ -90,6 +101,7 @@ router.post('/sales', requireCanteenSales, asyncHandler(async (req, res) => {
         personType,
         studentId,
         userId,
+        creditAllocations: Array.isArray(creditAllocations) ? creditAllocations : undefined,
       },
       getCanteenUserId(req),
     );

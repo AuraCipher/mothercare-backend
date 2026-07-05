@@ -840,6 +840,7 @@ export async function searchCreditPersons(
   branchId: string,
   type: CanteenPersonType,
   q?: string,
+  groupId?: string,
 ) {
   const term = q?.trim();
 
@@ -851,6 +852,7 @@ export async function searchCreditPersons(
         academicYearId: ayId,
         isActive: true,
         status: 'ACTIVE',
+        ...(groupId ? { groupId } : {}),
         ...(term
           ? {
               OR: [
@@ -860,8 +862,14 @@ export async function searchCreditPersons(
             }
           : {}),
       },
-      select: { id: true, name: true, rollNumber: true, phone: true },
-      take: 30,
+      select: {
+        id: true,
+        name: true,
+        rollNumber: true,
+        phone: true,
+        group: { select: { name: true, section: true } },
+      },
+      take: 50,
       orderBy: { name: 'asc' },
     });
   }
@@ -901,6 +909,16 @@ export async function searchCreditPersons(
     .map((m) => ({ id: m.user!.id, name: m.user!.name, phone: m.user!.phone }));
 }
 
+export async function listCreditStudentClasses(branchId: string) {
+  const ayId = await activeAcademicYearId(branchId);
+  if (!ayId) return [];
+  return prisma.group.findMany({
+    where: { academicYearId: ayId, isActive: true },
+    select: { id: true, name: true, section: true, displayOrder: true },
+    orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
+  });
+}
+
 // ─── Sales ────────────────────────────────────────────────────────
 
 type SaleItemInput = { productId: string; quantity: number };
@@ -912,31 +930,59 @@ export function splitSaleItemsByCashAmount(
   items: PricedSaleItem[],
   cashAmount: number,
 ): { cashItems: SaleItemInput[]; creditItems: SaleItemInput[] } {
-  let cashBudget = Math.round(cashAmount * 100) / 100;
-  const cashItems: SaleItemInput[] = [];
-  const creditItems: SaleItemInput[] = [];
+  const { taken, remainder } = splitPricedItemsByAmount(items, cashAmount);
+  return { cashItems: taken, creditItems: pricedItemsToSaleInputs(remainder) };
+}
 
-  const pushItem = (list: SaleItemInput[], productId: string, qty: number) => {
-    const existing = list.find((i) => i.productId === productId);
+function pricedItemsToSaleInputs(items: PricedSaleItem[]): SaleItemInput[] {
+  const out: SaleItemInput[] = [];
+  for (const line of items) {
+    const existing = out.find((i) => i.productId === line.productId);
+    if (existing) existing.quantity += line.quantity;
+    else out.push({ productId: line.productId, quantity: line.quantity });
+  }
+  return out;
+}
+
+/** Take units worth up to `amount` from the front of the list; return taken + leftover pool. */
+export function splitPricedItemsByAmount(
+  items: PricedSaleItem[],
+  amount: number,
+): { taken: SaleItemInput[]; remainder: PricedSaleItem[] } {
+  let budget = Math.round(amount * 100) / 100;
+  const taken: SaleItemInput[] = [];
+  const remainder: PricedSaleItem[] = [];
+
+  const pushTaken = (productId: string, qty: number) => {
+    const existing = taken.find((i) => i.productId === productId);
     if (existing) existing.quantity += qty;
-    else list.push({ productId, quantity: qty });
+    else taken.push({ productId, quantity: qty });
   };
 
   for (const line of items) {
-    let remaining = line.quantity;
-    const unitPrice = line.unitPrice;
-
-    while (remaining > 0 && cashBudget >= unitPrice - 0.005) {
-      pushItem(cashItems, line.productId, 1);
-      cashBudget = Math.round((cashBudget - unitPrice) * 100) / 100;
-      remaining -= 1;
+    let qtyLeft = line.quantity;
+    while (qtyLeft > 0 && budget >= line.unitPrice - 0.005) {
+      pushTaken(line.productId, 1);
+      budget = Math.round((budget - line.unitPrice) * 100) / 100;
+      qtyLeft -= 1;
     }
-    if (remaining > 0) {
-      pushItem(creditItems, line.productId, remaining);
+    if (qtyLeft > 0) {
+      remainder.push({ productId: line.productId, quantity: qtyLeft, unitPrice: line.unitPrice });
     }
   }
 
-  return { cashItems, creditItems };
+  return { taken, remainder };
+}
+
+function pricedItemsFromSaleInputs(
+  items: SaleItemInput[],
+  productMap: Map<string, { unitPrice: Prisma.Decimal }>,
+): PricedSaleItem[] {
+  return items.map((item) => ({
+    productId: item.productId,
+    quantity: item.quantity,
+    unitPrice: Number(productMap.get(item.productId)!.unitPrice),
+  }));
 }
 
 async function resolveCreditAccountId(
@@ -1064,6 +1110,14 @@ function buildPricedLineItems(
   return lineItems;
 }
 
+type CreditAllocationInput = {
+  personType: CanteenPersonType;
+  amount: number;
+  studentId?: string;
+  userId?: string;
+  accountId?: string;
+};
+
 export async function createSaleWithPaymentSplit(
   branchId: string,
   data: {
@@ -1074,6 +1128,7 @@ export async function createSaleWithPaymentSplit(
     personType?: CanteenPersonType;
     studentId?: string;
     userId?: string;
+    creditAllocations?: CreditAllocationInput[];
   },
   createdById?: string,
 ) {
@@ -1084,8 +1139,17 @@ export async function createSaleWithPaymentSplit(
   if (data.cashAmount === 0 && data.creditAmount === 0) {
     httpError(400, 'Enter cash and/or credit amount');
   }
-  if (data.creditAmount > 0 && !data.accountId && !data.personType) {
-    httpError(400, 'Credit account or person is required for credit portion');
+
+  const allocations = data.creditAllocations?.filter((a) => a.amount > 0) ?? [];
+  if (data.creditAmount > 0) {
+    if (allocations.length > 0) {
+      const allocTotal = allocations.reduce((sum, a) => sum + a.amount, 0);
+      if (Math.abs(allocTotal - data.creditAmount) > 0.02) {
+        httpError(400, `Credit allocations (${allocTotal}) must equal total credit (${data.creditAmount})`);
+      }
+    } else if (!data.accountId && !data.personType) {
+      httpError(400, 'Credit allocations or account/person is required for credit portion');
+    }
   }
 
   const products = await prisma.canteenProduct.findMany({
@@ -1142,19 +1206,52 @@ export async function createSaleWithPaymentSplit(
     }
 
     if (creditLineItems.length > 0) {
-      const accountId = await resolveCreditAccountId(
-        tx,
-        branchId,
-        creditTotal,
-        data,
-        createdById,
-      );
-      sales.push(await createSaleRecord(tx, branchId, {
-        paymentType: CanteenSalePaymentType.CREDIT,
-        lineItems: creditLineItems,
-        totalAmount: creditTotal,
-        canteenAccountId: accountId,
-      }, createdById));
+      let creditPool = pricedItemsFromSaleInputs(creditItems, productMap);
+
+      if (allocations.length > 0) {
+        for (const allocation of allocations) {
+          const { taken, remainder } = splitPricedItemsByAmount(creditPool, allocation.amount);
+          if (taken.length === 0) {
+            httpError(400, 'Could not split products for a credit allocation — adjust amounts');
+          }
+          const takenLineItems = buildPricedLineItems(taken, productMap);
+          const takenTotal = lineItemsTotal(takenLineItems);
+          if (Math.abs(takenTotal - allocation.amount) > 0.02) {
+            httpError(400, 'Could not match a credit allocation to product units — adjust amounts');
+          }
+          const accountId = await resolveCreditAccountId(
+            tx,
+            branchId,
+            takenTotal,
+            allocation,
+            createdById,
+          );
+          sales.push(await createSaleRecord(tx, branchId, {
+            paymentType: CanteenSalePaymentType.CREDIT,
+            lineItems: takenLineItems,
+            totalAmount: takenTotal,
+            canteenAccountId: accountId,
+          }, createdById));
+          creditPool = remainder;
+        }
+        if (creditPool.length > 0) {
+          httpError(400, 'Credit allocations did not cover all credit items');
+        }
+      } else {
+        const accountId = await resolveCreditAccountId(
+          tx,
+          branchId,
+          creditTotal,
+          data,
+          createdById,
+        );
+        sales.push(await createSaleRecord(tx, branchId, {
+          paymentType: CanteenSalePaymentType.CREDIT,
+          lineItems: creditLineItems,
+          totalAmount: creditTotal,
+          canteenAccountId: accountId,
+        }, createdById));
+      }
     }
 
     for (const item of data.items) {
