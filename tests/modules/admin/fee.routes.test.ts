@@ -74,18 +74,24 @@ describe('PUT /admin/fee-heads/:id', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('GET /admin/fee-structures', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({ id: 'ay1', branchId: 'b1' });
+  });
+
   test('returns structures', async () => {
     prismaMock.feeStructure.findMany.mockResolvedValue([
       { id: 'fs1', groupId: 'g1', feeHeadId: 'fh1', amount: 500000, effectiveFrom: new Date(), effectiveTo: null, academicYearId: 'ay1', createdAt: new Date(), updatedAt: new Date(), feeHead: { name: 'Tuition' }, group: { name: 'Class 1', section: null } },
     ] as any);
-    const res = await request(app).get('/admin/fee-structures').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/fee-structures?academicYearId=ay1&branchId=b1').set('Authorization', adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
   });
 
   test('filters by academicYearId query param', async () => {
+    (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({ id: 'ay-old', branchId: 'b1' });
     prismaMock.feeStructure.findMany.mockResolvedValue([] as any);
-    await request(app).get('/admin/fee-structures?academicYearId=ay-old').set('Authorization', adminToken);
+    await request(app).get('/admin/fee-structures?academicYearId=ay-old&branchId=b1').set('Authorization', adminToken);
     expect(prismaMock.feeStructure.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ academicYearId: 'ay-old' }),
     }));
@@ -205,6 +211,9 @@ describe('POST /admin/student-fees/generate', () => {
       { id: 's1', groupId: 'g1', customFeeAmount: 600000 },
     ] as any);
     prismaMock.feeStructure.findMany.mockResolvedValue([] as any);
+    prismaMock.group.findMany.mockResolvedValue([
+      { id: 'g1', displayOrder: 1, name: 'Class 1', section: null },
+    ] as any);
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
     prismaMock.studentFee.create.mockResolvedValue({} as any);
 
@@ -232,23 +241,20 @@ describe('GET /admin/fees/students-list', () => {
     parents: [],
   };
 
-  const feeRow = (student: any, fee: any) => ({
-    id: fee.id,
-    netAmount: fee.netAmount,
-    paidAmount: fee.paidAmount ?? 0,
-    status: fee.status,
-    payments: fee.payments || [],
-    extraItems: fee.extraItems || [],
-    student,
-  });
-
-  const mockMonthlyList = (records: any[], total?: number) => {
-    prismaMock.studentFee.count.mockResolvedValue(total ?? records.length);
-    prismaMock.studentFee.findMany.mockResolvedValue(records);
+  const mockMonthlyList = (students: any[], total?: number) => {
+    prismaMock.student.count.mockResolvedValue(total ?? students.length);
+    prismaMock.student.findMany.mockResolvedValue(students);
   };
 
-  test('monthly view only returns students with a generated fee for that month', async () => {
-    mockMonthlyList([feeRow(studentWithFee, { id: 'sf1', netAmount: 500000, paidAmount: 0, status: 'UNPAID' })]);
+  const studentRow = (student: any, fee?: any) => ({
+    ...student,
+    studentFees: fee
+      ? [{ id: fee.id, netAmount: fee.netAmount, paidAmount: fee.paidAmount ?? 0, status: fee.status, payments: fee.payments || [], extraItems: fee.extraItems || [] }]
+      : [],
+  });
+
+  test('monthly view returns roster students with generated fee attached', async () => {
+    mockMonthlyList([studentRow(studentWithFee, { id: 'sf1', netAmount: 500000, paidAmount: 0, status: 'UNPAID' })]);
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
@@ -261,26 +267,29 @@ describe('GET /admin/fees/students-list', () => {
     expect(res.body.pagination.limit).toBe(100);
   });
 
-  test('monthly view excludes ungenerated students even when customFeeAmount is set', async () => {
-    mockMonthlyList([]);
+  test('monthly view includes students with customFeeAmount but no generated record', async () => {
+    mockMonthlyList([studentRow(studentWithoutFee)]);
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
       .set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveLength(0);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].status).toBe('UNPAID');
+    expect(res.body.data[0].fee).toBeNull();
   });
 
-  test('monthly view excludes students with feeOverrides but no generated record', async () => {
-    mockMonthlyList([]);
+  test('monthly view estimates from feeOverrides when no generated record', async () => {
+    mockMonthlyList([studentRow({ ...studentWithoutFee, customFeeAmount: null, feeOverrides: { fh1: 400000 } })]);
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
       .set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveLength(0);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].netAmount).toBe(400000);
   });
 
   test('full AY view still returns students without generated fees', async () => {
@@ -324,17 +333,15 @@ describe('GET /admin/fees/students-list', () => {
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay-old')
       .set('Authorization', adminToken);
 
-    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        student: expect.objectContaining({ academicYearId: 'ay-old' }),
-      }),
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ academicYearId: 'ay-old' }),
     }));
   });
 
-  test('monthly view every returned row has a non-null fee object', async () => {
+  test('monthly view every returned row with generated fee has fee object', async () => {
     mockMonthlyList([
-      feeRow(studentWithFee, { id: 'sf1', netAmount: 500000, paidAmount: 0, status: 'UNPAID' }),
-      feeRow({ ...studentWithFee, id: 's3', name: 'Bilal' }, { id: 'sf3', netAmount: 600000, paidAmount: 100000, status: 'PARTIAL' }),
+      studentRow(studentWithFee, { id: 'sf1', netAmount: 500000, paidAmount: 0, status: 'UNPAID' }),
+      studentRow({ ...studentWithFee, id: 's3', name: 'Bilal' }, { id: 'sf3', netAmount: 600000, paidAmount: 100000, status: 'PARTIAL' }),
     ]);
 
     const res = await request(app)
@@ -350,7 +357,7 @@ describe('GET /admin/fees/students-list', () => {
   });
 
   test('monthly view uses generated fee netAmount even when customFeeAmount differs', async () => {
-    mockMonthlyList([feeRow(
+    mockMonthlyList([studentRow(
       { ...studentWithFee, customFeeAmount: 999999 },
       { id: 'sf1', netAmount: 500000, paidAmount: 0, status: 'UNPAID' },
     )]);
@@ -365,30 +372,35 @@ describe('GET /admin/fees/students-list', () => {
     expect(res.body.data[0].fee.netAmount).toBe(500000);
   });
 
-  test('monthly view excludes plain student with no fee and no overrides', async () => {
-    mockMonthlyList([]);
+  test('monthly view includes plain student with no fee as NO_FEE', async () => {
+    mockMonthlyList([studentRow({ ...studentWithFee, id: 's-plain', customFeeAmount: null, feeOverrides: null })]);
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
       .set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveLength(0);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].status).toBe('NO_FEE');
   });
 
-  test('monthly view scopes fee query to month, year, and academicYearId', async () => {
+  test('monthly view scopes studentFees nested query to month, year, and academicYearId', async () => {
     mockMonthlyList([]);
 
     await request(app)
       .get('/admin/fees/students-list?month=7&year=2026&period=monthly&academicYearId=ay1')
       .set('Authorization', adminToken);
 
-    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ month: 7, year: 2026, academicYearId: 'ay1' }),
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({
+        studentFees: expect.objectContaining({
+          where: expect.objectContaining({ month: 7, year: 2026, academicYearId: 'ay1' }),
+        }),
+      }),
     }));
   });
 
-  test('monthly view with groupId filter still excludes ungenerated students in that group', async () => {
+  test('monthly view with groupId filter scopes student query', async () => {
     mockMonthlyList([]);
 
     const res = await request(app)
@@ -397,15 +409,13 @@ describe('GET /admin/fees/students-list', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(0);
-    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        student: expect.objectContaining({ groupId: 'g2' }),
-      }),
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ groupId: 'g2' }),
     }));
   });
 
   test('monthly view includes PAID generated fees', async () => {
-    mockMonthlyList([feeRow(studentWithFee, {
+    mockMonthlyList([studentRow(studentWithFee, {
       id: 'sf1', netAmount: 500000, paidAmount: 500000, status: 'PAID',
       payments: [{ id: 'p1', amount: 500000 }],
     })]);
@@ -438,10 +448,8 @@ describe('GET /admin/fees/students-list', () => {
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1&roll=42')
       .set('Authorization', adminToken);
 
-    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        student: expect.objectContaining({ rollNumber: '42' }),
-      }),
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ rollNumber: '42' }),
     }));
   });
 
@@ -452,15 +460,13 @@ describe('GET /admin/fees/students-list', () => {
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1&fatherSearch=Ali')
       .set('Authorization', adminToken);
 
-    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        student: expect.objectContaining({
-          AND: expect.arrayContaining([
-            expect.objectContaining({
-              parents: expect.objectContaining({ some: expect.any(Object) }),
-            }),
-          ]),
-        }),
+        AND: expect.arrayContaining([
+          expect.objectContaining({
+            parents: expect.objectContaining({ some: expect.any(Object) }),
+          }),
+        ]),
       }),
     }));
   });
@@ -474,7 +480,7 @@ describe('GET /admin/fees/students-list', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.pagination).toEqual({ page: 2, limit: 100, total: 250, totalPages: 3 });
-    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
       skip: 100,
       take: 100,
     }));
