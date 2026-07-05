@@ -6,7 +6,7 @@ import {
 } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { assertBranchCreditPerson, searchBranchTeachers } from './canteen-credit-rules';
-import { applyStockDelta, normalizeStock, totalStockUnits } from './canteen-stock';
+import { applyStockDelta, aggregateSaleItemQuantities, normalizeStock, totalStockUnits } from './canteen-stock';
 
 function httpError(status: number, message: string): never {
   throw { status, message };
@@ -1040,6 +1040,35 @@ async function resolveCreditAccountId(
   return account.id;
 }
 
+async function applySaleStockDeltas(
+  tx: any,
+  branchId: string,
+  items: SaleItemInput[],
+) {
+  for (const item of aggregateSaleItemQuantities(items)) {
+    const product = await tx.canteenProduct.findFirst({
+      where: { id: item.productId, branchId, isActive: true },
+    });
+    if (!product) httpError(400, 'Product not found in this branch');
+    let next: { stockBoxes: number; stockUnits: number };
+    try {
+      next = applyStockDelta(
+        product.stockBoxes,
+        product.stockUnits,
+        -item.quantity,
+        product.unitsPerBox,
+      );
+    } catch (err: any) {
+      if (err?.status) throw err;
+      throw err;
+    }
+    await tx.canteenProduct.update({
+      where: { id: item.productId },
+      data: next,
+    });
+  }
+}
+
 async function createSaleRecord(
   tx: any,
   branchId: string,
@@ -1060,7 +1089,6 @@ async function createSaleRecord(
       createdById,
       items: {
         create: data.lineItems.map((li) => ({
-          branchId,
           productId: li.productId,
           quantity: li.quantity,
           unitPriceAtSale: li.unitPriceAtSale,
@@ -1140,14 +1168,15 @@ export async function createSaleWithPaymentSplit(
     }
   }
 
+  const productIds = [...new Set(data.items.map((i) => i.productId))];
   const products = await prisma.canteenProduct.findMany({
     where: {
       branchId,
-      id: { in: data.items.map((i) => i.productId) },
+      id: { in: productIds },
       isActive: true,
     },
   });
-  if (products.length !== data.items.length) {
+  if (products.length !== productIds.length) {
     httpError(400, 'One or more products are invalid or inactive');
   }
 
@@ -1242,19 +1271,7 @@ export async function createSaleWithPaymentSplit(
       }
     }
 
-    for (const item of data.items) {
-      const product = productMap.get(item.productId)!;
-      const next = applyStockDelta(
-        product.stockBoxes,
-        product.stockUnits,
-        -item.quantity,
-        product.unitsPerBox,
-      );
-      await tx.canteenProduct.update({
-        where: { id: item.productId },
-        data: next,
-      });
-    }
+    await applySaleStockDeltas(tx, branchId, data.items);
 
     return sales;
   });
@@ -1274,14 +1291,15 @@ export async function createSale(
 ) {
   if (!data.items.length) httpError(400, 'At least one item is required');
 
+  const productIds = [...new Set(data.items.map((i) => i.productId))];
   const products = await prisma.canteenProduct.findMany({
     where: {
       branchId,
-      id: { in: data.items.map((i) => i.productId) },
+      id: { in: productIds },
       isActive: true,
     },
   });
-  if (products.length !== data.items.length) {
+  if (products.length !== productIds.length) {
     httpError(400, 'One or more products are invalid or inactive');
   }
 
@@ -1368,7 +1386,6 @@ export async function createSale(
         createdById,
         items: {
           create: lineItems.map((li) => ({
-            branchId,
             productId: li.productId,
             quantity: li.quantity,
             unitPriceAtSale: li.unitPriceAtSale,
@@ -1378,19 +1395,7 @@ export async function createSale(
       include: { items: { include: { product: true } }, account: true },
     });
 
-    for (const item of data.items) {
-      const product = productMap.get(item.productId)!;
-      const next = applyStockDelta(
-        product.stockBoxes,
-        product.stockUnits,
-        -item.quantity,
-        product.unitsPerBox,
-      );
-      await tx.canteenProduct.update({
-        where: { id: item.productId },
-        data: next,
-      });
-    }
+    await applySaleStockDeltas(tx, branchId, data.items);
 
     return sale;
   });

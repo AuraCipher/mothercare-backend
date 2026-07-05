@@ -8,90 +8,99 @@ const STAFF_BRANCH_ROLES = new Set([
   'canteen_staff',
 ]);
 
-async function activeBranchAcademicYearId(branchId: string) {
-  const ay = await prisma.academicYear.findFirst({
-    where: { branchId, status: 'ACTIVE' },
-    select: { id: true },
-    orderBy: { createdAt: 'desc' },
-  });
-  return ay?.id ?? null;
-}
-
-/** Teachers in a branch: branch members OR assigned in the active academic year. */
+/** Active teachers linked to a branch via branch_members (not academic year). */
 export async function isTeacherInBranch(branchId: string, userId: string) {
-  const user = await prisma.user.findFirst({
-    where: { id: userId, role: 'teacher', status: 'active' },
-    select: { id: true },
-  });
-  if (!user) return false;
-
-  const member = await prisma.branchMember.findFirst({
-    where: { branchId, userId, isActive: true },
-    select: { id: true },
-  });
-  if (member) return true;
-
-  const ayId = await activeBranchAcademicYearId(branchId);
-  if (!ayId) return false;
-
-  const assigned = await prisma.teacherAssignment.findFirst({
+  const membership = await prisma.branchMember.findFirst({
     where: {
-      teacherId: userId,
-      academicYearId: ayId,
-      group: { academicYear: { branchId } },
+      branchId,
+      userId,
+      isActive: true,
+      user: { role: 'teacher', status: 'active' },
     },
     select: { id: true },
   });
-  return !!assigned;
+  return !!membership;
+}
+
+async function upsertTeacherBranchMember(branchId: string, userId: string) {
+  const existing = await prisma.branchMember.findUnique({
+    where: { branchId_userId: { branchId, userId } },
+  });
+  if (existing) {
+    if (!existing.isActive || existing.role !== 'teacher') {
+      await prisma.branchMember.update({
+        where: { id: existing.id },
+        data: { isActive: true, role: 'teacher' },
+      });
+    }
+    return;
+  }
+  await prisma.branchMember.create({
+    data: { branchId, userId, role: 'teacher', isActive: true },
+  });
+}
+
+/**
+ * Ensure teachers are linked to a branch via branch_members (not academic year).
+ * - Teachers with any class assignment in this branch (any year) → linked here
+ * - Teachers with no branch link anywhere → linked here if this branch has teacher activity
+ */
+export async function syncTeachersForBranch(branchId: string) {
+  const assigned = await prisma.user.findMany({
+    where: {
+      role: 'teacher',
+      status: 'active',
+      teacherAssignments: {
+        some: { group: { academicYear: { branchId } } },
+      },
+    },
+    select: { id: true },
+  });
+
+  for (const { id } of assigned) {
+    await upsertTeacherBranchMember(branchId, id);
+  }
+
+  const branchHasTeacherActivity = assigned.length > 0
+    || !!(await prisma.teacherAssignment.findFirst({
+      where: { group: { academicYear: { branchId } } },
+      select: { id: true },
+    }));
+
+  if (!branchHasTeacherActivity) return { linkedFromAssignments: assigned.length, linkedOrphans: 0 };
+
+  const orphans = await prisma.user.findMany({
+    where: {
+      role: 'teacher',
+      status: 'active',
+      teacherProfile: { isNot: null },
+      branchMembers: { none: { isActive: true } },
+    },
+    select: { id: true },
+  });
+
+  for (const { id } of orphans) {
+    await upsertTeacherBranchMember(branchId, id);
+  }
+
+  return { linkedFromAssignments: assigned.length, linkedOrphans: orphans.length };
 }
 
 export async function searchBranchTeachers(branchId: string, term?: string) {
-  const q = term?.trim();
-  const nameFilter = q
-    ? { name: { contains: q, mode: 'insensitive' as const } }
-    : {};
+  await syncTeachersForBranch(branchId);
 
-  const memberTeachers = await prisma.user.findMany({
+  const q = term?.trim();
+  return prisma.user.findMany({
     where: {
       role: 'teacher',
       status: 'active',
       branchMembers: { some: { branchId, isActive: true } },
-      ...nameFilter,
+      ...(q ? { name: { contains: q, mode: 'insensitive' } } : {}),
     },
     select: { id: true, name: true, phone: true },
     orderBy: { name: 'asc' },
-    take: 100,
+    take: 50,
   });
-
-  const ayId = await activeBranchAcademicYearId(branchId);
-  let assignedTeachers: typeof memberTeachers = [];
-  if (ayId) {
-    assignedTeachers = await prisma.user.findMany({
-      where: {
-        role: 'teacher',
-        status: 'active',
-        teacherAssignments: {
-          some: {
-            academicYearId: ayId,
-            group: { academicYear: { branchId } },
-          },
-        },
-        ...nameFilter,
-      },
-      select: { id: true, name: true, phone: true },
-      orderBy: { name: 'asc' },
-      take: 100,
-    });
-  }
-
-  const byId = new Map(memberTeachers.map((t) => [t.id, t]));
-  for (const teacher of assignedTeachers) {
-    if (!byId.has(teacher.id)) byId.set(teacher.id, teacher);
-  }
-
-  return Array.from(byId.values())
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .slice(0, 50);
 }
 
 /**
@@ -134,22 +143,25 @@ export async function assertBranchCreditPerson(params: {
     if (!userId || studentId) {
       throw { status: 400, message: 'Credit for a teacher requires userId only' };
     }
-    const inBranch = await isTeacherInBranch(branchId, userId);
-    if (!inBranch) {
-      throw { status: 400, message: 'Teacher not found in this branch' };
-    }
-    const user = await prisma.user.findFirst({
-      where: { id: userId, role: 'teacher', status: 'active' },
-      select: { id: true, name: true, phone: true },
+    const membership = await prisma.branchMember.findFirst({
+      where: {
+        branchId,
+        userId,
+        isActive: true,
+        user: { role: 'teacher', status: 'active' },
+      },
+      include: {
+        user: { select: { id: true, name: true, phone: true } },
+      },
     });
-    if (!user) {
+    if (!membership?.user) {
       throw { status: 400, message: 'Teacher not found in this branch' };
     }
     return {
-      displayName: user.name,
-      displayPhone: user.phone ?? null,
+      displayName: membership.user.name,
+      displayPhone: membership.user.phone ?? null,
       studentId: null as string | null,
-      userId: user.id,
+      userId: membership.user.id,
     };
   }
 
