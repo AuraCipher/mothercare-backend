@@ -13,30 +13,40 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
     fn(req, res, next).catch(next);
   };
 
-// POST /admin/exam-sessions/:id/compute-report-cards
-router.post('/exam-sessions/:id/compute-report-cards', asyncHandler(async (req: Request, res: Response) => {
+router.post('/sessions/:sessionId/compute-report-cards', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  await assertExamSessionInScope(req.params.id, scope);
-  const result = await reportCardService.computeForSession(req.params.id, scope);
+  await assertExamSessionInScope(req.params.sessionId, scope);
+  const result = await reportCardService.computeForSession(req.params.sessionId, scope);
   res.json({ success: true, data: result });
 }));
 
-// POST /admin/exam-sessions/:id/classes/:classId/compute-report-cards
-router.post('/exam-sessions/:id/classes/:classId/compute-report-cards', asyncHandler(async (req: Request, res: Response) => {
+router.post('/sessions/:sessionId/classes/:classId/compute-report-cards', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  await assertExamSessionInScope(req.params.id, scope);
+  await assertExamSessionInScope(req.params.sessionId, scope);
   await assertGroupInScope(req.params.classId, scope);
   const results = await reportCardService.computeForClass(
     req.params.classId,
-    req.params.id,
+    req.params.sessionId,
     scope,
   );
   res.json({ success: true, data: results });
 }));
 
-// POST /admin/report-cards/:id/publish
+router.get('/sessions/:sessionId/classes/:classId/report-cards', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  await assertExamSessionInScope(req.params.sessionId, scope);
+  await assertGroupInScope(req.params.classId, scope);
+  const cards = await reportCardService.getClassReportCards(
+    req.params.classId,
+    req.params.sessionId,
+    scope,
+  );
+  res.json({ success: true, data: cards });
+}));
+
 router.post('/report-cards/:id/publish', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
@@ -44,8 +54,7 @@ router.post('/report-cards/:id/publish', asyncHandler(async (req: Request, res: 
   res.json({ success: true, data: card });
 }));
 
-// GET /admin/students/:id/exam-sessions/:sessionId/report-card
-router.get('/students/:studentId/exam-sessions/:sessionId/report-card', asyncHandler(async (req: Request, res: Response) => {
+router.get('/students/:studentId/sessions/:sessionId/report-card', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
   const card = await reportCardService.getReportCard(

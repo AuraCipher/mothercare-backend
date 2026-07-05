@@ -51,6 +51,43 @@ class ReportCardService {
     return { ...card, subjectResults };
   }
 
+  async getClassReportCards(classId: string, examSessionId: string, scope: ScopeContext) {
+    await assertExamSessionInScope(examSessionId, scope);
+    await assertGroupInScope(classId, scope);
+
+    const students = await prisma.student.findMany({
+      where: {
+        groupId: classId,
+        isActive: true,
+        academicYearId: scope.academicYearId,
+        academicYear: { branchId: scope.branchId },
+      },
+      select: { id: true, name: true, rollNumber: true },
+      orderBy: { rollNumber: 'asc' },
+    });
+
+    if (students.length === 0) return [];
+
+    const cards = await prisma.reportCard.findMany({
+      where: {
+        examSessionId,
+        studentId: { in: students.map((s) => s.id) },
+      },
+      include: {
+        student: { select: { id: true, name: true, rollNumber: true } },
+      },
+    });
+
+    cards.sort((a, b) => {
+      const rankA = a.classRank ?? Number.MAX_SAFE_INTEGER;
+      const rankB = b.classRank ?? Number.MAX_SAFE_INTEGER;
+      if (rankA !== rankB) return rankA - rankB;
+      return (a.student.rollNumber ?? '').localeCompare(b.student.rollNumber ?? '');
+    });
+
+    return cards;
+  }
+
   async computeForStudent(studentId: string, examSessionId: string, scope: ScopeContext) {
     await assertStudentInScope(studentId, scope);
     await assertExamSessionInScope(examSessionId, scope);
