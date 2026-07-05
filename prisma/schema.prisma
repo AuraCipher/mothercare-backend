@@ -1933,8 +1933,9 @@ model CanteenProduct {
   unitPrice         Decimal  @db.Decimal(12, 2) // selling price per unit (PKR)
   boxPrice          Decimal? @db.Decimal(12, 2) // selling price per box (PKR)
   unitsPerBox       Int?     // units contained in one box
-  stockQuantity     Int      @default(0)
-  lowStockThreshold Int      @default(5)
+  stockBoxes        Int      @default(0)
+  stockUnits        Int      @default(0) // loose units (0 .. unitsPerBox-1 when boxed)
+  lowStockThreshold Int      @default(5) // alert when total units fall to or below
   isActive          Boolean  @default(true) // disable without deleting
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
