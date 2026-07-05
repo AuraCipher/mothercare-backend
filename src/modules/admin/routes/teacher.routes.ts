@@ -32,15 +32,16 @@ router.post('/teachers', asyncHandler(async (req: Request, res: Response) => {
   res.status(201).json({ success: true, data: profile });
 }));
 
-// TC-012: GET /admin/teachers — List teachers with search & filter
+// TC-012: GET /admin/teachers — List teachers (branch-scoped when branchId provided)
 router.get('/teachers', asyncHandler(async (req: Request, res: Response) => {
-  const { search, qualification, page, limit } = req.query;
+  const { search, qualification, page, limit, branchId } = req.query;
 
   const result = await teacherProfileService.findAll({
     search: search as string,
     qualification: qualification as string,
     page: page ? parseInt(page as string, 10) : 1,
     limit: limit ? parseInt(limit as string, 10) : 20,
+    branchId: branchId as string | undefined,
   });
 
   res.json({ success: true, ...result });

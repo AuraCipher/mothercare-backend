@@ -1,5 +1,6 @@
 import { prisma } from '../../../lib/prisma';
 import { storage } from '../../upload/storage.service';
+import { syncTeachersForBranch } from '../../canteen/canteen-credit-rules';
 
 // ═══════════════════════════════════════════════════════════════════
 // TYPES
@@ -149,25 +150,32 @@ class TeacherProfileService {
       },
     });
 
-    // Add teacher as BranchMember so branch-scoped stats work
-    if (data.branchId) {
-      try {
-        const existing = await prisma.branchMember.findUnique({
-          where: { branchId_userId: { branchId: data.branchId, userId } },
+    // Add teacher as BranchMember — branch-scoped, not tied to academic year
+    if (!data.branchId?.trim()) {
+      throw { status: 400, message: 'branchId is required to create a teacher' };
+    }
+    try {
+      const existing = await prisma.branchMember.findUnique({
+        where: { branchId_userId: { branchId: data.branchId, userId } },
+      });
+      if (!existing) {
+        await prisma.branchMember.create({
+          data: {
+            branchId: data.branchId,
+            userId,
+            role: 'teacher',
+            isActive: true,
+          },
         });
-        if (!existing) {
-          await prisma.branchMember.create({
-            data: {
-              branchId: data.branchId,
-              userId,
-              role: 'teacher',
-              isActive: true,
-            },
-          });
-        }
-      } catch (err: any) {
-        console.warn('[Teacher] Failed to create BranchMember:', err.message);
+      } else if (!existing.isActive) {
+        await prisma.branchMember.update({
+          where: { id: existing.id },
+          data: { isActive: true, role: 'teacher' },
+        });
       }
+    } catch (err: any) {
+      console.warn('[Teacher] Failed to create BranchMember:', err.message);
+      throw { status: 500, message: 'Failed to link teacher to branch' };
     }
 
     // Set profile photo if provided (and delete old one if exists)
@@ -194,26 +202,53 @@ class TeacherProfileService {
     return profile;
   }
 
-  // TC-002: List all teachers with search + filter
-  async findAll(params: { search?: string; qualification?: string; page?: number; limit?: number }) {
-    const { search, qualification, page = 1, limit = 20 } = params;
+  /** Link teachers to branch via branch_members (from assignments + unlinked profiles). */
+  async syncBranchMemberships(branchId: string) {
+    return syncTeachersForBranch(branchId);
+  }
+
+  // TC-002: List teachers in branch (branch-scoped, not academic-year-scoped)
+  async findAll(params: {
+    search?: string;
+    qualification?: string;
+    page?: number;
+    limit?: number;
+    branchId?: string;
+  }) {
+    const { search, qualification, page = 1, limit = 20, branchId } = params;
+    if (branchId) {
+      await this.syncBranchMemberships(branchId);
+    }
     const skip = (page - 1) * limit;
 
-    const where: any = {
-      user: { role: 'teacher' },
-    };
-
-    // Search by teacher name or employeeId
-    if (search) {
-      where.OR = [
-        { user: { name: { contains: search, mode: 'insensitive' } } },
-        { employeeId: { contains: search, mode: 'insensitive' } },
-      ];
+    const userFilter: Record<string, unknown> = { role: 'teacher' };
+    if (branchId) {
+      userFilter.branchMembers = { some: { branchId, isActive: true } };
     }
 
-    // Filter by qualification
+    let where: Record<string, unknown> = { user: userFilter };
+
+    if (search) {
+      where = {
+        AND: [
+          { user: userFilter },
+          {
+            OR: [
+              { user: { ...userFilter, name: { contains: search, mode: 'insensitive' } } },
+              { employeeId: { contains: search, mode: 'insensitive' } },
+            ],
+          },
+        ],
+      };
+    }
+
     if (qualification) {
-      where.qualification = { contains: qualification, mode: 'insensitive' };
+      where = {
+        AND: [
+          where,
+          { qualification: { contains: qualification, mode: 'insensitive' } },
+        ],
+      };
     }
 
     const [profiles, total] = await Promise.all([
