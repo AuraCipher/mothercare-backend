@@ -1,6 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../../lib/prisma';
 import { requireScope } from '../utils/scope-context';
+import {
+  assertStudentsInBranchAy,
+  assertStudentsInScope,
+  assertTeachersInScope,
+  validateAttendanceDate,
+} from '../utils/attendance-scope';
 
 const router = Router();
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
@@ -61,40 +67,30 @@ router.get('/attendance', asyncHandler(async (req: Request, res: Response) => {
 
 // POST /attendance/batch — Save attendance for multiple students
 router.post('/attendance/batch', asyncHandler(async (req: Request, res: Response) => {
-  const { date, groupId, academicYearId, records } = req.body;
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+
+  const { date, groupId, records } = req.body;
   if (!date || !groupId || !records || !Array.isArray(records)) {
     res.status(400).json({ success: false, message: 'date, groupId, and records[] are required' });
     return;
   }
 
-  if (!academicYearId) {
-    const activeAy = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } });
-    if (!activeAy) { res.status(400).json({ success: false, message: 'No active academic year' }); return; }
-    req.body.academicYearId = activeAy.id;
+  const dateObj = new Date(date as string);
+  const dateErr = await validateAttendanceDate(scope.academicYearId, dateObj);
+  if (dateErr) {
+    res.status(400).json({ success: false, message: dateErr });
+    return;
+  }
+
+  const studentIds = records.map((r: { studentId?: string }) => r.studentId).filter(Boolean) as string[];
+  const scopeErr = await assertStudentsInScope(studentIds, groupId, scope);
+  if (scopeErr) {
+    res.status(400).json({ success: false, message: scopeErr });
+    return;
   }
 
   const userId = (req as any).user?.id;
-  const dateObj = new Date(date as string);
-  // Block future dates
-  const checkDate = new Date(); checkDate.setHours(23, 59, 59, 999);
-  if (dateObj > checkDate) {
-    res.status(400).json({ success: false, message: 'Cannot mark attendance for future dates' });
-    return;
-  }
-  // Block dates outside academic year
-  const ayWithCalendar = await prisma.academicYear.findUnique({
-    where: { id: req.body.academicYearId },
-    select: { calendar: { select: { startDate: true, endDate: true } } },
-  });
-  if (ayWithCalendar?.calendar) {
-    const ayStart = new Date(ayWithCalendar.calendar.startDate);
-    const ayEnd = new Date(ayWithCalendar.calendar.endDate);
-    ayEnd.setHours(23, 59, 59, 999);
-    if (dateObj < ayStart || dateObj > ayEnd) {
-      res.status(400).json({ success: false, message: 'Date is outside the academic year range' });
-      return;
-    }
-  }
   let saved = 0;
 
   for (const record of records) {
@@ -104,7 +100,7 @@ router.post('/attendance/batch', asyncHandler(async (req: Request, res: Response
       update: { status: record.status, markedById: userId, note: record.note || null },
       create: {
         studentId: record.studentId,
-        academicYearId: req.body.academicYearId,
+        academicYearId: scope.academicYearId,
         date: dateObj,
         status: record.status,
         note: record.note || null,
@@ -206,41 +202,32 @@ router.get('/attendance/teachers', asyncHandler(async (req: Request, res: Respon
 
 // POST /attendance/teachers/batch — Save teacher attendance
 router.post('/attendance/teachers/batch', asyncHandler(async (req: Request, res: Response) => {
-  const { date, academicYearId, records } = req.body;
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+
+  const { date, records } = req.body;
   if (!date || !records || !Array.isArray(records)) {
     res.status(400).json({ success: false, message: 'date and records[] are required' });
     return;
   }
 
-  if (!academicYearId) {
-    const activeAy = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } });
-    if (!activeAy) { res.status(400).json({ success: false, message: 'No active academic year' }); return; }
-    req.body.academicYearId = activeAy.id;
+  const dateObj = new Date(date as string);
+  const dateErr = await validateAttendanceDate(scope.academicYearId, dateObj);
+  if (dateErr) {
+    res.status(400).json({ success: false, message: dateErr });
+    return;
+  }
+
+  const teacherIds = records.map((r: { teacherId?: string }) => r.teacherId).filter(Boolean) as string[];
+  const scopeErr = await assertTeachersInScope(teacherIds, scope);
+  if (scopeErr) {
+    res.status(400).json({ success: false, message: scopeErr });
+    return;
   }
 
   const userId = (req as any).user?.id;
-  const dateObj = new Date(date as string);
-  const checkDate = new Date(); checkDate.setHours(23, 59, 59, 999);
-  if (dateObj > checkDate) {
-    res.status(400).json({ success: false, message: 'Cannot mark attendance for future dates' });
-    return;
-  }
-  // Block dates outside academic year
-  const ayWithCalendarTA = await prisma.academicYear.findUnique({
-    where: { id: req.body.academicYearId },
-    select: { calendar: { select: { startDate: true, endDate: true } } },
-  });
-  if (ayWithCalendarTA?.calendar) {
-    const ayStart = new Date(ayWithCalendarTA.calendar.startDate);
-    const ayEnd = new Date(ayWithCalendarTA.calendar.endDate);
-    ayEnd.setHours(23, 59, 59, 999);
-    if (dateObj < ayStart || dateObj > ayEnd) {
-      res.status(400).json({ success: false, message: 'Date is outside the academic year range' });
-      return;
-    }
-  }
-
   let saved = 0;
+
   for (const record of records) {
     if (!record.teacherId || !record.status) continue;
     await prisma.teacherAttendance.upsert({
@@ -248,7 +235,7 @@ router.post('/attendance/teachers/batch', asyncHandler(async (req: Request, res:
       update: { status: record.status, markedById: userId, note: record.note || null },
       create: {
         teacherId: record.teacherId,
-        academicYearId: req.body.academicYearId,
+        academicYearId: scope.academicYearId,
         date: dateObj,
         status: record.status,
         note: record.note || null,
@@ -263,13 +250,25 @@ router.post('/attendance/teachers/batch', asyncHandler(async (req: Request, res:
 
 // POST /attendance/notify — Queue attendance notifications for parents
 router.post('/attendance/notify', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+
   const { date, records } = req.body;
   if (!date || !records || !Array.isArray(records)) {
     res.status(400).json({ success: false, message: 'date and records[] required' });
     return;
   }
+
+  const studentIds = records.map((r: { studentId?: string }) => r.studentId).filter(Boolean) as string[];
+  const scopeErr = await assertStudentsInBranchAy(studentIds, scope);
+  if (scopeErr) {
+    res.status(400).json({ success: false, message: scopeErr });
+    return;
+  }
+
   const dateObj = new Date(date as string);
   let queued = 0;
+
   for (const r of records) {
     if (!r.studentId || !r.status) continue;
     const labels: Record<string, string> = { absent: 'was absent', late: 'arrived late', leave: 'is on leave' };
@@ -283,6 +282,7 @@ router.post('/attendance/notify', asyncHandler(async (req: Request, res: Respons
     });
     queued++;
   }
+
   res.json({ success: true, data: { queued, message: 'Notifications queued. Will be sent via chat app.' } });
 }));
 

@@ -108,22 +108,52 @@ describe('GET /admin/attendance — Student attendance', () => {
 });
 
 describe('POST /admin/attendance/batch — Save attendance', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockScope();
+    (prismaMock.group.findFirst as jest.Mock).mockResolvedValue({ id: 'g1' });
+    (prismaMock.student.findMany as jest.Mock).mockResolvedValue([{ id: 's1' }]);
+    (prismaMock.academicYear.findUnique as jest.Mock).mockImplementation(async (args: any) => {
+      if (args?.select?.calendar) {
+        return { calendar: { startDate: new Date('2020-01-01'), endDate: new Date('2099-12-31') } };
+      }
+      return { id: 'ay1', branchId: 'b1' };
+    });
+  });
 
   test('saves attendance for multiple students', async () => {
     (prismaMock.attendance.upsert as jest.Mock).mockResolvedValue({});
     const res = await request(app)
       .post('/admin/attendance/batch')
-      .set(managementToken)
-      .send({ date: '2026-06-24', groupId: 'g1', academicYearId: 'ay1', records: [{ studentId: 's1', status: 'present' }] });
+      .set(adminToken)
+      .send({ date: '2026-06-24', groupId: 'g1', academicYearId: 'ay1', branchId: 'b1', records: [{ studentId: 's1', status: 'present' }] });
     expect(res.status).toBe(200);
     expect(prismaMock.attendance.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  test('returns 400 without scope', async () => {
+    (prismaMock.academicYear.findFirst as jest.Mock).mockResolvedValue(null);
+    const res = await request(app)
+      .post('/admin/attendance/batch')
+      .set(adminToken)
+      .send({ date: '2026-06-24', groupId: 'g1', records: [{ studentId: 's1', status: 'present' }] });
+    expect(res.status).toBe(400);
+  });
+
+  test('rejects students outside scoped group', async () => {
+    (prismaMock.student.findMany as jest.Mock).mockResolvedValue([]);
+    const res = await request(app)
+      .post('/admin/attendance/batch')
+      .set(adminToken)
+      .send({ date: '2026-06-24', groupId: 'g1', academicYearId: 'ay1', branchId: 'b1', records: [{ studentId: 's1', status: 'present' }] });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/not in the selected group/i);
   });
 
   test('returns 400 without groupId', async () => {
     const res = await request(app)
       .post('/admin/attendance/batch')
-      .set(managementToken)
+      .set(adminToken)
       .send({ date: '2026-06-24', records: [] });
     expect(res.status).toBe(400);
   });
@@ -131,7 +161,7 @@ describe('POST /admin/attendance/batch — Save attendance', () => {
   test('returns 400 without date', async () => {
     const res = await request(app)
       .post('/admin/attendance/batch')
-      .set(managementToken)
+      .set(adminToken)
       .send({ groupId: 'g1', records: [] });
     expect(res.status).toBe(400);
   });
@@ -139,18 +169,17 @@ describe('POST /admin/attendance/batch — Save attendance', () => {
   test('returns 400 for future dates', async () => {
     const res = await request(app)
       .post('/admin/attendance/batch')
-      .set(managementToken)
+      .set(adminToken)
       .send({ date: '2099-01-01', groupId: 'g1', academicYearId: 'ay1', records: [{ studentId: 's1', status: 'present' }] });
     expect(res.status).toBe(400);
   });
 
   test('sets markedById from authenticated user', async () => {
     (prismaMock.attendance.upsert as jest.Mock).mockResolvedValue({});
-    (prismaMock.academicYear.findFirst as jest.Mock).mockResolvedValue({ id: 'ay1' });
     await request(app)
       .post('/admin/attendance/batch')
       .set(adminToken)
-      .send({ date: '2026-06-24', groupId: 'g1', records: [{ studentId: 's1', status: 'present' }] });
+      .send({ date: '2026-06-24', groupId: 'g1', academicYearId: 'ay1', branchId: 'b1', records: [{ studentId: 's1', status: 'present' }] });
     const call = (prismaMock.attendance.upsert as jest.Mock).mock.calls[0][0];
     expect(call.create.markedById).toBe('admin-1');
   });
@@ -159,8 +188,8 @@ describe('POST /admin/attendance/batch — Save attendance', () => {
     (prismaMock.attendance.upsert as jest.Mock).mockResolvedValue({});
     await request(app)
       .post('/admin/attendance/batch')
-      .set(managementToken)
-      .send({ date: '2026-06-24', groupId: 'g1', academicYearId: 'ay1', records: [{ studentId: 's1', status: 'present' }] });
+      .set(adminToken)
+      .send({ date: '2026-06-24', groupId: 'g1', academicYearId: 'ay1', branchId: 'b1', records: [{ studentId: 's1', status: 'present' }] });
     expect(prismaMock.attendance.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ where: { studentId_date: { studentId: 's1', date: expect.any(Date) } } })
     );
@@ -206,22 +235,42 @@ describe('GET /admin/attendance/teachers — Teacher attendance', () => {
 });
 
 describe('POST /admin/attendance/teachers/batch — Save teacher attendance', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockScope();
+    (prismaMock.user.findMany as jest.Mock).mockResolvedValue([{ id: 't1' }]);
+    (prismaMock.academicYear.findUnique as jest.Mock).mockImplementation(async (args: any) => {
+      if (args?.select?.calendar) {
+        return { calendar: { startDate: new Date('2020-01-01'), endDate: new Date('2099-12-31') } };
+      }
+      return { id: 'ay1', branchId: 'b1' };
+    });
+  });
 
   test('saves teacher attendance', async () => {
     (prismaMock.teacherAttendance.upsert as jest.Mock).mockResolvedValue({});
     const res = await request(app)
       .post('/admin/attendance/teachers/batch')
-      .set(managementToken)
-      .send({ date: '2026-06-24', academicYearId: 'ay1', records: [{ teacherId: 't1', status: 'present' }] });
+      .set(adminToken)
+      .send({ date: '2026-06-24', academicYearId: 'ay1', branchId: 'b1', records: [{ teacherId: 't1', status: 'present' }] });
     expect(res.status).toBe(200);
     expect(prismaMock.teacherAttendance.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  test('rejects teachers outside scoped branch', async () => {
+    (prismaMock.user.findMany as jest.Mock).mockResolvedValue([]);
+    const res = await request(app)
+      .post('/admin/attendance/teachers/batch')
+      .set(adminToken)
+      .send({ date: '2026-06-24', academicYearId: 'ay1', branchId: 'b1', records: [{ teacherId: 't1', status: 'present' }] });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/not active in the selected branch/i);
   });
 
   test('returns 400 without records', async () => {
     const res = await request(app)
       .post('/admin/attendance/teachers/batch')
-      .set(managementToken)
+      .set(adminToken)
       .send({ date: '2026-06-24' });
     expect(res.status).toBe(400);
   });
@@ -229,7 +278,7 @@ describe('POST /admin/attendance/teachers/batch — Save teacher attendance', ()
   test('returns 400 without date', async () => {
     const res = await request(app)
       .post('/admin/attendance/teachers/batch')
-      .set(managementToken)
+      .set(adminToken)
       .send({ records: [] });
     expect(res.status).toBe(400);
   });
