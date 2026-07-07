@@ -72,11 +72,36 @@ function computeFeeAmountAndBreakdown(
   return { totalAmount, breakdown };
 }
 
+/** Keep only latest active structure per (groupId, feeHeadId). */
+function dedupeStructuresByGroupHead<T extends { groupId: string; feeHeadId: string; effectiveFrom: Date; createdAt?: Date }>(rows: T[]): T[] {
+  const latest = new Map<string, T>();
+  for (const row of rows) {
+    const key = `${row.groupId}:${row.feeHeadId}`;
+    const prev = latest.get(key);
+    if (!prev) {
+      latest.set(key, row);
+      continue;
+    }
+    const rowEf = row.effectiveFrom.getTime();
+    const prevEf = prev.effectiveFrom.getTime();
+    if (rowEf > prevEf) {
+      latest.set(key, row);
+      continue;
+    }
+    if (rowEf === prevEf) {
+      const rowCreated = row.createdAt?.getTime() ?? 0;
+      const prevCreated = prev.createdAt?.getTime() ?? 0;
+      if (rowCreated > prevCreated) latest.set(key, row);
+    }
+  }
+  return [...latest.values()];
+}
+
 /** Copy fee structures from the nearest lower class that already has them. */
 async function provisionMissingFeeStructures(
   ayId: string,
   targetGroupIds: string[],
-  existingStructures: { id: string; groupId: string; feeHeadId: string; amount: number; effectiveFrom: Date; feeHead: { name: string; category: string } }[],
+  existingStructures: { id: string; groupId: string; feeHeadId: string; amount: number; effectiveFrom: Date; createdAt?: Date; feeHead: { name: string; category: string } }[],
 ): Promise<{ structures: typeof existingStructures; groupsProvisioned: string[]; structuresCopied: number }> {
   const groupsWithStructures = new Set(existingStructures.map(s => s.groupId));
   const needsProvision = targetGroupIds.filter(id => !groupsWithStructures.has(id));
@@ -779,12 +804,13 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     },
     include: { feeHead: { select: { name: true, category: true } } },
   });
+  const dedupedBaseStructures = dedupeStructuresByGroupHead(structures);
 
   const targetGroupIds = hasGroupFilter
     ? (groupIds as string[])
     : [...new Set(students.map(s => s.groupId).filter(Boolean))] as string[];
-  const provisioned = await provisionMissingFeeStructures(ayId, targetGroupIds, structures);
-  const activeStructures = provisioned.structures;
+  const provisioned = await provisionMissingFeeStructures(ayId, targetGroupIds, dedupedBaseStructures);
+  const activeStructures = dedupeStructuresByGroupHead(provisioned.structures);
 
   // For ONE_TIME fee: check if this head was already charged by
   // examining the feeHeadBreakdown of the student's existing fees.
@@ -964,11 +990,12 @@ router.post('/student-fees/recalculate', asyncHandler(async (req: Request, res: 
     // Filter structures effective for this student's group at this month
     const monthStart = new Date(sf.year, sf.month - 1, 1);
     const monthEnd = new Date(sf.year, sf.month, 0);
-    const effectiveStructures = allStructures.filter(s =>
+    const effectiveStructuresRaw = allStructures.filter(s =>
       s.groupId === student.groupId
       && s.effectiveFrom <= monthEnd
       && (!s.effectiveTo || s.effectiveTo > monthEnd)
     );
+    const effectiveStructures = dedupeStructuresByGroupHead(effectiveStructuresRaw);
 
     const baseAmount = effectiveStructures.reduce((sum, s) => sum + s.amount, 0);
 
