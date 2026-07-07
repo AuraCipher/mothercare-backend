@@ -3453,4 +3453,181 @@ router.get('/fees/carry-forward/sources/:studentId', asyncHandler(async (req: Re
   res.json({ success: true, data });
 }));
 
+function toStockUnits(stockBundles: number, stockUnits: number, unitsPerBundle: number | null): number {
+  const upb = unitsPerBundle && unitsPerBundle > 0 ? unitsPerBundle : 0;
+  return upb > 0 ? (stockBundles * upb) + stockUnits : stockUnits;
+}
+
+function fromStockUnits(totalUnits: number, unitsPerBundle: number | null): { stockBundles: number; stockUnits: number } {
+  const upb = unitsPerBundle && unitsPerBundle > 0 ? unitsPerBundle : 0;
+  if (upb === 0) return { stockBundles: 0, stockUnits: totalUnits };
+  return {
+    stockBundles: Math.floor(totalUnits / upb),
+    stockUnits: totalUnits % upb,
+  };
+}
+
+// GET /admin/fees/stationary/catalog — category-grouped active branch products
+router.get('/fees/stationary/catalog', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const products = await prisma.stationaryProduct.findMany({
+    where: { branchId: scope.branchId, isActive: true, category: { isActive: true } },
+    include: { category: true },
+    orderBy: [{ category: { name: 'asc' } }, { name: 'asc' }],
+  });
+  const grouped = products.reduce((acc: Record<string, any>, p) => {
+    const key = p.categoryId;
+    if (!acc[key]) acc[key] = { categoryId: p.categoryId, categoryName: p.category.name, products: [] };
+    acc[key].products.push({
+      id: p.id,
+      name: p.name,
+      unitPricePaise: p.unitPrice,
+      bundlePricePaise: p.bundlePrice,
+      unitsPerBundle: p.unitsPerBundle,
+      stockBundles: p.stockBundles,
+      stockUnits: p.stockUnits,
+      availableUnits: toStockUnits(p.stockBundles, p.stockUnits, p.unitsPerBundle),
+    });
+    return acc;
+  }, {});
+  res.json({ success: true, data: Object.values(grouped) });
+}));
+
+// POST /admin/fees/stationary/assign — assign products to student month fee
+router.post('/fees/stationary/assign', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { studentId, studentFeeId, items, familyId, note } = req.body || {};
+  if (!studentId || !studentFeeId || !Array.isArray(items) || items.length === 0) {
+    res.status(400).json({ success: false, message: 'studentId, studentFeeId and items[] are required' });
+    return;
+  }
+
+  const fee = await prisma.studentFee.findUnique({
+    where: { id: studentFeeId },
+    include: { student: { select: { id: true, familyId: true, academicYearId: true } } },
+  });
+  if (!fee || fee.studentId !== studentId) {
+    res.status(400).json({ success: false, message: 'studentFeeId must belong to the selected student' });
+    return;
+  }
+  if (fee.student.academicYearId !== scope.academicYearId) {
+    res.status(400).json({ success: false, message: 'studentFeeId is outside selected academic year' });
+    return;
+  }
+  const ay = await prisma.academicYear.findUnique({ where: { id: fee.academicYearId }, select: { branchId: true } });
+  if (!ay || ay.branchId !== scope.branchId) {
+    res.status(403).json({ success: false, message: 'Branch isolation check failed' });
+    return;
+  }
+  if (familyId && fee.student.familyId !== familyId) {
+    res.status(400).json({ success: false, message: 'Selected student does not belong to this family' });
+    return;
+  }
+
+  const cleaned = items.map((it: any) => ({
+    productId: String(it.productId || ''),
+    quantity: Number(it.quantity || 0),
+  }));
+  if (cleaned.some((it: any) => !it.productId || it.quantity <= 0)) {
+    res.status(400).json({ success: false, message: 'Every item must include productId and quantity > 0' });
+    return;
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const productIds = [...new Set(cleaned.map((i: any) => i.productId))];
+    const products = await tx.stationaryProduct.findMany({
+      where: { id: { in: productIds }, branchId: scope.branchId, isActive: true },
+      include: { category: true },
+    });
+    if (products.length !== productIds.length) {
+      throw { status: 400, message: 'One or more products are invalid for this branch' };
+    }
+    const byId = new Map(products.map((p) => [p.id, p]));
+
+    for (const it of cleaned) {
+      const p = byId.get(it.productId)!;
+      const available = toStockUnits(p.stockBundles, p.stockUnits, p.unitsPerBundle);
+      if (available < it.quantity) {
+        throw { status: 400, message: `Insufficient stock for ${p.name}` };
+      }
+    }
+
+    const record = await tx.studentStationaryRecord.create({
+      data: {
+        branchId: scope.branchId,
+        studentId,
+        studentFeeId,
+        academicYearId: fee.academicYearId,
+        note: note || null,
+        createdById: (req as any).user?.id,
+      },
+    });
+
+    const createdItems: any[] = [];
+    for (const it of cleaned) {
+      const p = byId.get(it.productId)!;
+      const lineTotal = p.unitPrice * it.quantity;
+      const item = await tx.studentStationaryRecordItem.create({
+        data: {
+          recordId: record.id,
+          productId: p.id,
+          productName: p.name,
+          categoryName: p.category.name,
+          quantity: it.quantity,
+          unitPrice: p.unitPrice,
+          lineTotal,
+        },
+      });
+      createdItems.push(item);
+
+      await tx.feeExtraItem.create({
+        data: {
+          studentFeeId,
+          name: `${p.name} x${it.quantity}`,
+          amount: lineTotal,
+          sourceType: 'STATIONARY',
+          metadata: { productId: p.id, quantity: it.quantity, unitPricePaise: p.unitPrice },
+          stationaryRecordItemId: item.id,
+        },
+      });
+
+      const currentUnits = toStockUnits(p.stockBundles, p.stockUnits, p.unitsPerBundle);
+      const next = fromStockUnits(currentUnits - it.quantity, p.unitsPerBundle);
+      await tx.stationaryProduct.update({
+        where: { id: p.id },
+        data: { stockBundles: next.stockBundles, stockUnits: next.stockUnits },
+      });
+      await tx.stationaryStockMovement.create({
+        data: {
+          branchId: scope.branchId,
+          productId: p.id,
+          movementType: 'STUDENT_ASSIGNED',
+          quantityUnits: -it.quantity,
+          unitPriceSnapshot: p.unitPrice,
+          studentRecordItemId: item.id,
+          createdById: (req as any).user?.id,
+          note: `Assigned to student ${studentId}`,
+        },
+      });
+    }
+
+    const extraSum = await tx.feeExtraItem.aggregate({
+      where: { studentFeeId },
+      _sum: { amount: true },
+    });
+    const totalDue = fee.netAmount + (extraSum._sum.amount || 0);
+    const status = computeFeeStatus(fee.paidAmount, totalDue);
+    await tx.studentFee.update({
+      where: { id: studentFeeId },
+      data: { status, extraCharges: extraSum._sum.amount || 0 },
+    });
+
+    return { record, items: createdItems };
+  });
+
+  res.status(201).json({ success: true, data: result });
+}));
+
 export default router;

@@ -18,6 +18,7 @@ import examSessionRoutes from './exam-session.routes';
 import resultRoutes from './result.routes';
 import staffRoutes from './staff.routes';
 import tenureRoutes from './tenure.routes';
+import stationaryRoutes from './stationary.routes';
 import { requireScope } from '../utils/scope-context';
 import { staffPermissionMiddleware } from '../../../middleware/auth/staff-permission.middleware';
 
@@ -58,6 +59,7 @@ router.use(examSessionRoutes); // /exam-sessions — ExamSession CRUD
 router.use('/result', resultRoutes); // /result/* — Result & Grade workflow
 router.use('/staff', staffRoutes); // Staff RBAC — create staff + module permissions
 router.use(tenureRoutes); // Tenure history — join/leave/rejoin, class movements
+router.use(stationaryRoutes); // Stationary module (products, inventory, suppliers, sales records)
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)

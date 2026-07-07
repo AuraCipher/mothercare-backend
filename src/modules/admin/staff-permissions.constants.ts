@@ -10,6 +10,7 @@ export const STAFF_MODULE_KEYS = [
   'FEES',
   'RESULT',
   'CANTEEN',
+  'STATIONARY',
 ] as const satisfies readonly StaffModule[];
 
 export type StaffModuleKey = (typeof STAFF_MODULE_KEYS)[number];
@@ -44,6 +45,7 @@ export const API_PATH_MODULE_RULES: Array<{ prefix: string; module: StaffModuleK
   { prefix: '/admin/result', module: 'RESULT' },
   { prefix: '/admin/exam-sessions', module: 'RESULT' },
   { prefix: '/admin/canteen', module: 'CANTEEN' },
+  { prefix: '/admin/stationary', module: 'STATIONARY' },
 ];
 
 export function httpMethodToAction(method: string): CrudAction {
