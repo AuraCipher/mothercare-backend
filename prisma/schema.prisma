@@ -122,6 +122,11 @@ enum StationaryStockMovementType {
   STUDENT_ASSIGNED
 }
 
+enum StationarySupplierPaymentDirection {
+  WE_PAID_SUPPLIER
+  SUPPLIER_PAID_US
+}
+
 enum BatchPromotionRunPhase {
   DRAFT
   SNAPSHOT_DONE
@@ -231,6 +236,8 @@ model User {
   canteenAccountsCreated    CanteenAccount[]       @relation("CanteenAccountCreatedBy")
   stationaryStockMovements  StationaryStockMovement[] @relation("StationaryStockMovementCreatedBy")
   stationaryRecordsCreated  StudentStationaryRecord[] @relation("StudentStationaryRecordCreatedBy")
+  stationarySupplierPayments StationarySupplierPayment[] @relation("StationarySupplierPaymentCreatedBy")
+  stationaryRestockPurchases StationaryRestockPurchase[] @relation("StationaryRestockCreatedBy")
 
   @@index([username])
   @@index([email])
@@ -328,6 +335,7 @@ model Branch {
   stationaryProducts       StationaryProduct[]
   stationaryStockMovements StationaryStockMovement[]
   studentStationaryRecords StudentStationaryRecord[]
+  stationaryRestockPurchases StationaryRestockPurchase[]
 
   createdById String?
   updatedById String?
@@ -2384,17 +2392,37 @@ model StationarySupplier {
   name          String
   contactNumber String?
   note          String?
+  balanceOwedToSupplier Decimal  @default(0) @db.Decimal(12, 2)
+  balanceSupplierOwesUs Decimal  @default(0) @db.Decimal(12, 2)
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   branch   Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
   products StationaryProduct[]
+  restockPurchases StationaryRestockPurchase[]
+  payments StationarySupplierPayment[]
 
   @@unique([branchId, name])
   @@unique([id, branchId])
   @@index([branchId])
   @@map("stationary_suppliers")
+}
+
+model StationarySupplierPayment {
+  id          String                            @id @default(uuid())
+  supplierId  String
+  amount      Decimal                           @db.Decimal(12, 2)
+  direction   StationarySupplierPaymentDirection
+  note        String?
+  paidAt      DateTime                          @default(now())
+  createdById String?
+
+  supplier  StationarySupplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  createdBy User?              @relation("StationarySupplierPaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([supplierId, paidAt])
+  @@map("stationary_supplier_payments")
 }
 
 model StationaryProduct {
@@ -2418,6 +2446,7 @@ model StationaryProduct {
   supplier       StationarySupplier?       @relation(fields: [supplierId, branchId], references: [id, branchId], onDelete: SetNull)
   stockMovements StationaryStockMovement[]
   recordItems    StudentStationaryRecordItem[]
+  purchaseItems  StationaryPurchaseItem[]
 
   @@unique([branchId, categoryId, name])
   @@unique([id, branchId])
@@ -2425,6 +2454,40 @@ model StationaryProduct {
   @@index([categoryId])
   @@index([supplierId])
   @@map("stationary_products")
+}
+
+model StationaryRestockPurchase {
+  id           String   @id @default(uuid())
+  branchId     String
+  supplierId   String
+  purchaseDate DateTime @default(now())
+  totalCost    Decimal  @db.Decimal(12, 2)
+  note         String?
+  createdById  String?
+
+  supplier  StationarySupplier @relation(fields: [supplierId, branchId], references: [id, branchId], onDelete: Restrict)
+  branch    Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  items     StationaryPurchaseItem[]
+  createdBy User?              @relation("StationaryRestockCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([branchId, purchaseDate])
+  @@index([supplierId])
+  @@map("stationary_restock_purchases")
+}
+
+model StationaryPurchaseItem {
+  id                String  @id @default(uuid())
+  restockPurchaseId String
+  productId         String
+  quantity          Int
+  unitCost          Decimal @db.Decimal(12, 2)
+
+  restockPurchase StationaryRestockPurchase @relation(fields: [restockPurchaseId], references: [id], onDelete: Cascade)
+  product         StationaryProduct         @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([productId])
+  @@index([restockPurchaseId])
+  @@map("stationary_purchase_items")
 }
 
 model StationaryStockMovement {
