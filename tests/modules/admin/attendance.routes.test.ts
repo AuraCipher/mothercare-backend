@@ -239,6 +239,11 @@ describe('POST /admin/attendance/teachers/batch — Save teacher attendance', ()
     jest.clearAllMocks();
     mockScope();
     (prismaMock.user.findMany as jest.Mock).mockResolvedValue([{ id: 't1' }]);
+    (prismaMock.branchMember.findUnique as jest.Mock).mockResolvedValue({
+      id: 'bm1',
+      isActive: true,
+      tenures: [{ joinedAt: new Date('2020-01-01'), leftAt: null }],
+    });
     (prismaMock.academicYear.findUnique as jest.Mock).mockImplementation(async (args: any) => {
       if (args?.select?.calendar) {
         return { calendar: { startDate: new Date('2020-01-01'), endDate: new Date('2099-12-31') } };

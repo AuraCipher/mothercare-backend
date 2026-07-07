@@ -82,6 +82,30 @@ router.post('/', asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data });
 }));
 
+router.post('/workers', asyncHandler(async (req, res) => {
+  const ctx = await assertStaffAdmin(req, res);
+  if (!ctx) return;
+  const { name, username, phone, employeeId, joiningDate, salary, address } = req.body;
+  if (!name?.trim()) {
+    res.status(400).json({ success: false, message: 'Name is required' });
+    return;
+  }
+  const data = await staffService.createWorker(
+    ctx.branchId,
+    {
+      name,
+      username,
+      phone,
+      employeeId,
+      joiningDate,
+      salary: salary != null && salary !== '' ? Number(salary) : undefined,
+      address,
+    },
+    (req as any).user?.id,
+  );
+  res.status(201).json({ success: true, data });
+}));
+
 router.get('/:userId/permissions', asyncHandler(async (req, res) => {
   const ctx = await assertStaffAdmin(req, res);
   if (!ctx) return;

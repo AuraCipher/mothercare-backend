@@ -4,9 +4,12 @@ import { requireScope } from '../utils/scope-context';
 import {
   assertStudentsInBranchAy,
   assertStudentsInScope,
-  assertTeachersInScope,
   validateAttendanceDate,
 } from '../utils/attendance-scope';
+import {
+  assertStaffInScopeWithTenure,
+  assertTeachersInScopeWithTenure,
+} from '../utils/employee-attendance';
 
 const router = Router();
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
@@ -219,7 +222,9 @@ router.post('/attendance/teachers/batch', asyncHandler(async (req: Request, res:
   }
 
   const teacherIds = records.map((r: { teacherId?: string }) => r.teacherId).filter(Boolean) as string[];
-  const scopeErr = await assertTeachersInScope(teacherIds, scope);
+  const scopeErr = await assertTeachersInScopeWithTenure(
+    teacherIds, scope.branchId, scope.academicYearId, dateObj,
+  );
   if (scopeErr) {
     res.status(400).json({ success: false, message: scopeErr });
     return;
@@ -235,6 +240,112 @@ router.post('/attendance/teachers/batch', asyncHandler(async (req: Request, res:
       update: { status: record.status, markedById: userId, note: record.note || null },
       create: {
         teacherId: record.teacherId,
+        academicYearId: scope.academicYearId,
+        date: dateObj,
+        status: record.status,
+        note: record.note || null,
+        markedById: userId,
+      },
+    });
+    saved++;
+  }
+
+  res.json({ success: true, data: { saved, total: records.length } });
+}));
+
+// ═══════════════════════════════════════════════════════════════════
+// STAFF ATTENDANCE (workers, cleaners, management, canteen)
+// ═══════════════════════════════════════════════════════════════════
+
+router.get('/attendance/staff', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { academicYearId, branchId } = scope;
+  const { date, from, to } = req.query;
+
+  let dateFilter: any = {};
+  if (from && to) {
+    dateFilter = { gte: new Date(from as string), lte: new Date(to as string) };
+  } else if (date) {
+    dateFilter = { equals: new Date(date as string) };
+  }
+
+  const attendanceWhere: any = { academicYearId };
+  if (Object.keys(dateFilter).length) attendanceWhere.date = dateFilter;
+
+  const payrollRoles = ['management', 'canteen_staff', 'worker'] as const;
+  const staff = await prisma.user.findMany({
+    where: {
+      status: 'active',
+      branchMembers: {
+        some: { branchId, isActive: true, role: { in: [...payrollRoles] } },
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+      staffProfile: { select: { employeeId: true } },
+      branchMembers: { where: { branchId }, select: { role: true } },
+      staffAttendances: {
+        where: attendanceWhere,
+        select: { date: true, status: true, note: true },
+        orderBy: { date: 'asc' },
+      },
+    },
+    orderBy: { name: 'asc' },
+  });
+
+  const data = staff.map((s) => ({
+    id: s.id,
+    name: s.name,
+    employeeId: s.staffProfile?.employeeId ?? null,
+    branchRole: s.branchMembers[0]?.role ?? 'management',
+    attendances: s.staffAttendances.map((a) => ({
+      date: a.date,
+      status: a.status,
+      note: a.note,
+    })),
+  }));
+
+  res.json({ success: true, data, total: data.length });
+}));
+
+router.post('/attendance/staff/batch', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+
+  const { date, records } = req.body;
+  if (!date || !records || !Array.isArray(records)) {
+    res.status(400).json({ success: false, message: 'date and records[] are required' });
+    return;
+  }
+
+  const dateObj = new Date(date as string);
+  const dateErr = await validateAttendanceDate(scope.academicYearId, dateObj);
+  if (dateErr) {
+    res.status(400).json({ success: false, message: dateErr });
+    return;
+  }
+
+  const staffIds = records.map((r: { staffUserId?: string }) => r.staffUserId).filter(Boolean) as string[];
+  const scopeErr = await assertStaffInScopeWithTenure(
+    staffIds, scope.branchId, scope.academicYearId, dateObj,
+  );
+  if (scopeErr) {
+    res.status(400).json({ success: false, message: scopeErr });
+    return;
+  }
+
+  const userId = (req as any).user?.id;
+  let saved = 0;
+
+  for (const record of records) {
+    if (!record.staffUserId || !record.status) continue;
+    await prisma.staffAttendance.upsert({
+      where: { staffUserId_date: { staffUserId: record.staffUserId, date: dateObj } },
+      update: { status: record.status, markedById: userId, note: record.note || null },
+      create: {
+        staffUserId: record.staffUserId,
         academicYearId: scope.academicYearId,
         date: dateObj,
         status: record.status,

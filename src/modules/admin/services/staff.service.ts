@@ -161,10 +161,11 @@ class StaffService {
   ): Promise<StaffMemberRow[]> {
     const where: any = {
       branchId,
-      role: { in: ['management', 'canteen_staff'] },
+      role: { in: ['management', 'canteen_staff', 'worker'] },
       OR: [
         { modulePermissions: { some: {} } },
         { role: 'canteen_staff' },
+        { role: 'worker' },
       ],
     };
 
@@ -228,7 +229,7 @@ class StaffService {
       },
     });
     if (!member) throw { status: 404, message: 'Staff member not found in this branch' };
-    if (!['management', 'canteen_staff'].includes(member.role)) {
+    if (!['management', 'canteen_staff', 'worker'].includes(member.role)) {
       throw { status: 404, message: 'Staff member not found in this branch' };
     }
 
@@ -487,6 +488,87 @@ class StaffService {
         name: user.name,
         username: user.username,
         permissions: saved.map((p) => this.mapPermissionRow(p)),
+      };
+    });
+  }
+
+  /** Worker (cleaner, guard, etc.) — payroll + attendance, optional login, no module permissions. */
+  async createWorker(
+    branchId: string,
+    data: {
+      name: string;
+      username?: string;
+      phone?: string;
+    } & StaffProfileFields,
+    createdById?: string,
+  ) {
+    const baseUsername = (data.username?.trim()
+      || `worker_${data.name.trim().toLowerCase().replace(/\s+/g, '_').slice(0, 20)}_${Date.now().toString(36).slice(-4)}`);
+
+    let username = baseUsername;
+    let suffix = 1;
+    while (await prisma.user.findFirst({ where: { username } })) {
+      username = `${baseUsername}_${suffix++}`;
+    }
+
+    if (data.employeeId?.trim()) {
+      const clash = await prisma.staffProfile.findFirst({
+        where: { employeeId: data.employeeId.trim() },
+      });
+      if (clash) throw { status: 409, message: `Employee ID "${data.employeeId}" is already in use` };
+    }
+
+    const password = `tmp_${Math.random().toString(36).slice(2, 10)}`;
+    const passwordHash = await hashPassword(password);
+    const profilePhone = data.phone?.trim() || null;
+
+    return prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          name: data.name.trim(),
+          username,
+          phone: profilePhone,
+          passwordHash,
+          role: 'management',
+          status: 'active',
+        },
+      });
+
+      const member = await tx.branchMember.create({
+        data: {
+          branchId,
+          userId: user.id,
+          role: 'worker',
+          assignedById: createdById,
+        },
+      });
+
+      await tx.staffProfile.create({
+        data: {
+          userId: user.id,
+          phone: profilePhone,
+          employeeId: data.employeeId?.trim() || null,
+          joiningDate: data.joiningDate ? new Date(data.joiningDate) : new Date(),
+          salary: data.salary ?? null,
+          address: data.address?.trim() || null,
+        },
+      });
+
+      await tx.branchTenure.create({
+        data: {
+          branchMemberId: member.id,
+          sequence: 1,
+          joinedAt: data.joiningDate ? new Date(data.joiningDate) : new Date(),
+          createdById,
+        },
+      });
+
+      return {
+        userId: user.id,
+        branchMemberId: member.id,
+        name: user.name,
+        username: user.username,
+        branchRole: 'worker',
       };
     });
   }

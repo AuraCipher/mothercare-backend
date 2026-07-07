@@ -43,6 +43,7 @@ enum BranchRole {
   teacher // Teaching staff
   parent // Parent representative
   canteen_staff // Canteen — daily sales only (assigned by admin)
+  worker // Cleaners, guards, etc. — payroll + attendance, optional login
 }
 
 // Module access for branch staff (RBAC)
@@ -55,6 +56,7 @@ enum StaffModule {
   RESULT
   CANTEEN
   STATIONARY
+  EXPENSES
 }
 
 // Academic Year lifecycle: BUILD_STAGE → ACTIVE → ARCHIVED
@@ -125,6 +127,39 @@ enum StationaryStockMovementType {
 enum StationarySupplierPaymentDirection {
   WE_PAID_SUPPLIER
   SUPPLIER_PAID_US
+}
+
+enum OutgoingPaymentType {
+  PAYROLL
+  UTILITY
+  OTHER
+}
+
+enum OutgoingPaymentStatus {
+  PAID
+  VOID
+}
+
+enum OutgoingPaymentMethod {
+  CASH
+  CHEQUE
+  BANK_TRANSFER
+  ONLINE
+}
+
+enum PayrollPayeeType {
+  TEACHER
+  STAFF
+}
+
+enum PayrollPaymentKind {
+  REGULAR
+  EXTRA
+}
+
+enum ExpenseCategoryKind {
+  UTILITY
+  OTHER
 }
 
 enum BatchPromotionRunPhase {
@@ -238,6 +273,11 @@ model User {
   stationaryRecordsCreated  StudentStationaryRecord[] @relation("StudentStationaryRecordCreatedBy")
   stationarySupplierPayments StationarySupplierPayment[] @relation("StationarySupplierPaymentCreatedBy")
   stationaryRestockPurchases StationaryRestockPurchase[] @relation("StationaryRestockCreatedBy")
+  staffAttendances           StaffAttendance[]           @relation("StaffAttendanceStaff")
+  staffAttendanceMarkedBy    StaffAttendance[]           @relation("StaffAttendanceMarkedBy")
+  payrollPaymentsReceived    PayrollPaymentDetail[]      @relation("PayrollPayee")
+  outgoingPaymentsRecorded   BranchOutgoingPayment[]     @relation("OutgoingPaymentRecordedBy")
+  outgoingPaymentsVoided     BranchOutgoingPayment[]     @relation("OutgoingPaymentVoidedBy")
 
   @@index([username])
   @@index([email])
@@ -336,6 +376,10 @@ model Branch {
   stationaryStockMovements StationaryStockMovement[]
   studentStationaryRecords StudentStationaryRecord[]
   stationaryRestockPurchases StationaryRestockPurchase[]
+  branchExpenseCategories    BranchExpenseCategory[]
+  utilityProviders           UtilityProvider[]
+  branchOutgoingPayments     BranchOutgoingPayment[]
+  payrollMonthBalances       PayrollMonthBalance[]
 
   createdById String?
   updatedById String?
@@ -401,6 +445,7 @@ model AcademicYear {
   timetables         Timetable[]
   attendances        Attendance[]
   teacherAttendances TeacherAttendance[]
+  staffAttendances   StaffAttendance[]
   examSessions       ExamSession[]
 
   createdById   String?
@@ -990,6 +1035,27 @@ model TeacherAttendance {
   @@unique([teacherId, date])
   @@index([academicYearId, date])
   @@map("teacher_attendances")
+}
+
+model StaffAttendance {
+  id             String   @id @default(uuid())
+  staffUserId    String
+  academicYearId String
+  date           DateTime @db.Date
+  status         String // present | absent | late | leave | holiday | function
+  note           String?
+  markedById     String?
+
+  staff        User         @relation("StaffAttendanceStaff", fields: [staffUserId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
+  markedBy     User?        @relation("StaffAttendanceMarkedBy", fields: [markedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([staffUserId, date])
+  @@index([academicYearId, date])
+  @@map("staff_attendances")
 }
 
 // Credential send history (redacted — no passwords stored)
@@ -2557,4 +2623,170 @@ model StudentStationaryRecordItem {
   @@index([recordId])
   @@index([productId])
   @@map("student_stationary_record_items")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║              BRANCH EXPENSES / OUTGOING PAYMENTS                ║
+// ║  Payroll (teachers + staff), utility bills, other expenses.    ║
+// ║  Branch-scoped ledger — separate from student fee payments.     ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model BranchExpenseCategory {
+  id        String              @id @default(uuid())
+  branchId  String
+  kind      ExpenseCategoryKind
+  name      String
+  isActive  Boolean             @default(true)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  branch            Branch              @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  utilityBills      UtilityBillDetail[]
+  otherPayments     OtherPaymentDetail[]
+  utilityProviders  UtilityProvider[]
+
+  @@unique([branchId, kind, name])
+  @@index([branchId, kind])
+  @@map("branch_expense_categories")
+}
+
+model UtilityProvider {
+  id             String   @id @default(uuid())
+  branchId       String
+  categoryId     String
+  name           String
+  consumerNumber String?
+  contactNumber  String?
+  note           String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  branch   Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  category BranchExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  bills    UtilityBillDetail[]
+
+  @@unique([branchId, name])
+  @@index([branchId])
+  @@index([categoryId])
+  @@map("utility_providers")
+}
+
+model BranchOutgoingPayment {
+  id            String                 @id @default(uuid())
+  branchId      String
+  type          OutgoingPaymentType
+  amount        Decimal                @db.Decimal(12, 2)
+  paymentMethod OutgoingPaymentMethod
+  paidAt        DateTime               @default(now())
+  reference     String?
+  note          String?
+  voucherNumber String
+  status        OutgoingPaymentStatus  @default(PAID)
+  voidedAt      DateTime?
+  voidReason    String?
+  voidedById    String?
+  recordedById  String?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  branch         Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  recordedBy     User?                 @relation("OutgoingPaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+  voidedBy       User?                 @relation("OutgoingPaymentVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
+  payrollDetail  PayrollPaymentDetail?
+  utilityDetail  UtilityBillDetail?
+  otherDetail    OtherPaymentDetail?
+
+  @@unique([branchId, voucherNumber])
+  @@index([branchId, type, paidAt])
+  @@index([branchId, status])
+  @@map("branch_outgoing_payments")
+}
+
+model PayrollPaymentDetail {
+  id                 String             @id @default(uuid())
+  outgoingPaymentId  String             @unique
+  payeeUserId        String
+  payeeType          PayrollPayeeType
+  salaryMonth        String // YYYY-MM
+  paymentKind        PayrollPaymentKind @default(REGULAR)
+  profileSalary      Decimal            @db.Decimal(12, 2)
+  attendanceEarned   Decimal?           @db.Decimal(12, 2)
+  openingBalance     Decimal            @default(0) @db.Decimal(12, 2)
+  createdAt          DateTime           @default(now())
+
+  outgoingPayment BranchOutgoingPayment @relation(fields: [outgoingPaymentId], references: [id], onDelete: Cascade)
+  payee           User                  @relation("PayrollPayee", fields: [payeeUserId], references: [id], onDelete: Restrict)
+
+  @@index([payeeUserId, salaryMonth])
+  @@index([salaryMonth])
+  @@map("payroll_payment_details")
+}
+
+model PayrollMonthBalance {
+  id                 String           @id @default(uuid())
+  branchId           String
+  payeeUserId        String
+  payeeType          PayrollPayeeType
+  salaryMonth        String // YYYY-MM
+  profileSalary      Decimal          @db.Decimal(12, 2)
+  attendanceEarned   Decimal          @default(0) @db.Decimal(12, 2)
+  extraDue           Decimal          @default(0) @db.Decimal(12, 2)
+  openingBalance     Decimal          @default(0) @db.Decimal(12, 2)
+  totalPaid          Decimal          @default(0) @db.Decimal(12, 2)
+  closingBalance     Decimal          @default(0) @db.Decimal(12, 2)
+  presentDays        Int              @default(0)
+  absentDays         Int              @default(0)
+  lateDays           Int              @default(0)
+  leaveDays          Int              @default(0)
+  unmarkedDays       Int              @default(0)
+  workingDays        Int              @default(0)
+  computedAt         DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, payeeUserId, salaryMonth])
+  @@index([branchId, salaryMonth])
+  @@map("payroll_month_balances")
+}
+
+model UtilityBillDetail {
+  id                String             @id @default(uuid())
+  outgoingPaymentId String             @unique
+  categoryId        String
+  providerId        String?
+  providerName      String
+  consumerNumber    String?
+  billReference     String?
+  periodStart       DateTime?          @db.Date
+  periodEnd         DateTime?          @db.Date
+  dueDate           DateTime?          @db.Date
+  paymentKind       PayrollPaymentKind @default(REGULAR)
+  createdAt         DateTime           @default(now())
+
+  outgoingPayment BranchOutgoingPayment @relation(fields: [outgoingPaymentId], references: [id], onDelete: Cascade)
+  category        BranchExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  provider        UtilityProvider?      @relation(fields: [providerId], references: [id], onDelete: SetNull)
+
+  @@index([categoryId])
+  @@index([providerId])
+  @@map("utility_bill_details")
+}
+
+model OtherPaymentDetail {
+  id                String             @id @default(uuid())
+  outgoingPaymentId String             @unique
+  categoryId        String
+  payeeName         String
+  description       String?
+  paymentKind       PayrollPaymentKind @default(REGULAR)
+  createdAt         DateTime           @default(now())
+
+  outgoingPayment BranchOutgoingPayment @relation(fields: [outgoingPaymentId], references: [id], onDelete: Cascade)
+  category        BranchExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@index([categoryId])
+  @@map("other_payment_details")
 }

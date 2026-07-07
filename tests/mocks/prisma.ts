@@ -134,6 +134,7 @@ jest.mock('@prisma/client', () => ({
     RESULT: 'RESULT',
     CANTEEN: 'CANTEEN',
     STATIONARY: 'STATIONARY',
+    EXPENSES: 'EXPENSES',
   },
 
   StationaryStockMovementType: {

@@ -19,6 +19,7 @@ import resultRoutes from './result.routes';
 import staffRoutes from './staff.routes';
 import tenureRoutes from './tenure.routes';
 import stationaryRoutes from './stationary.routes';
+import expensesRoutes from './expenses.routes';
 import { requireScope } from '../utils/scope-context';
 import { staffPermissionMiddleware } from '../../../middleware/auth/staff-permission.middleware';
 
@@ -60,6 +61,7 @@ router.use('/result', resultRoutes); // /result/* — Result & Grade workflow
 router.use('/staff', staffRoutes); // Staff RBAC — create staff + module permissions
 router.use(tenureRoutes); // Tenure history — join/leave/rejoin, class movements
 router.use(stationaryRoutes); // Stationary module (products, inventory, suppliers, sales records)
+router.use(expensesRoutes); // Branch outgoing payments (payroll, utilities, others)
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
