@@ -22,6 +22,20 @@ type StartInput = {
 const PRISMA_UNIQUE_ERROR = 'P2002';
 
 class BatchPromotionService {
+  private async findInProgressRun(branchId: string) {
+    return prisma.batchPromotionRun.findFirst({
+      where: {
+        branchId,
+        phase: { in: ['DRAFT', 'SNAPSHOT_DONE', 'APPLIED'] },
+      },
+      include: {
+        sourceAy: { include: { calendar: true } },
+        targetAy: { include: { calendar: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async getPreconditions(branchId: string, sourceAcademicYearId: string) {
     const source = await prisma.academicYear.findFirst({
       where: { id: sourceAcademicYearId, branchId },
@@ -32,15 +46,7 @@ class BatchPromotionService {
       throw { status: 400, message: 'Batch promotion can only start from an ACTIVE academic year' };
     }
 
-    const inProgress = await prisma.batchPromotionRun.findFirst({
-      where: {
-        branchId,
-        phase: { in: ['DRAFT', 'SNAPSHOT_DONE', 'APPLIED'] },
-      },
-    });
-    if (inProgress) {
-      throw { status: 409, message: 'Another batch promotion is already in progress for this branch' };
-    }
+    const inProgress = await this.findInProgressRun(branchId);
 
     const buildYears = await prisma.academicYear.findMany({
       where: { branchId, status: 'BUILD_STAGE' },
@@ -51,6 +57,7 @@ class BatchPromotionService {
     return {
       source,
       buildYears,
+      inProgressRun: inProgress,
       defaultCarryOptions: DEFAULT_CARRY_OPTIONS,
       acknowledgements: [
         'The current ACTIVE year stays live until you publish the new year.',
@@ -62,7 +69,16 @@ class BatchPromotionService {
   }
 
   async startRun(input: StartInput) {
-    await this.getPreconditions(input.branchId, input.sourceAcademicYearId);
+    const pre = await this.getPreconditions(input.branchId, input.sourceAcademicYearId);
+    if (pre.inProgressRun) {
+      if (pre.inProgressRun.sourceAcademicYearId === input.sourceAcademicYearId) {
+        return pre.inProgressRun as any;
+      }
+      throw {
+        status: 409,
+        message: 'Another batch promotion is already in progress for this branch',
+      };
+    }
     const carryOptions = mergeCarryOptions(input.carryOptions);
 
     let targetAcademicYearId = input.targetAcademicYearId;
