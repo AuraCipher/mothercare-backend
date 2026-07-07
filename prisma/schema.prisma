@@ -54,6 +54,7 @@ enum StaffModule {
   FEES
   RESULT
   CANTEEN
+  STATIONARY
 }
 
 // Academic Year lifecycle: BUILD_STAGE → ACTIVE → ARCHIVED
@@ -113,6 +114,12 @@ enum CanteenSupplierPaymentDirection {
 enum CanteenSalePaymentType {
   CASH
   CREDIT
+}
+
+enum StationaryStockMovementType {
+  STOCK_IN
+  ADJUSTMENT
+  STUDENT_ASSIGNED
 }
 
 enum BatchPromotionRunPhase {
@@ -222,6 +229,7 @@ model User {
   canteenSupplierPayments   CanteenSupplierPayment[] @relation("CanteenSupplierPaymentCreatedBy")
   canteenRestockPurchases   CanteenRestockPurchase[] @relation("CanteenRestockCreatedBy")
   canteenAccountsCreated    CanteenAccount[]       @relation("CanteenAccountCreatedBy")
+  stationaryRecords         StudentStationaryRecord[]
 
   @@index([username])
   @@index([email])
@@ -314,6 +322,11 @@ model Branch {
   canteenAccounts          CanteenAccount[]
   canteenSales             CanteenSale[]
   canteenRestockPurchases  CanteenRestockPurchase[]
+  stationaryCategories     StationaryCategory[]
+  stationarySuppliers      StationarySupplier[]
+  stationaryProducts       StationaryProduct[]
+  stationaryStockMovements StationaryStockMovement[]
+  studentStationaryRecords StudentStationaryRecord[]
 
   createdById String?
   updatedById String?
@@ -1905,12 +1918,18 @@ model FeeExtraItem {
   studentFeeId String
   name         String
   amount       Int // in paise
+  sourceType   String?  @default("EXTRA_DUE") // EXTRA_DUE | STATIONARY
+  metadata     Json?
+  stationaryRecordItemId String?
   createdAt    DateTime @default(now())
 
   studentFee      StudentFee              @relation(fields: [studentFeeId], references: [id], onDelete: Cascade)
   headAllocations PaymentHeadAllocation[]
+  stationaryRecordItem StudentStationaryRecordItem? @relation(fields: [stationaryRecordItemId], references: [id], onDelete: SetNull)
 
   @@index([studentFeeId])
+  @@index([sourceType])
+  @@index([stationaryRecordItemId])
   @@map("fee_extra_items")
 }
 
@@ -2337,4 +2356,138 @@ model CanteenSaleItem {
   @@index([productId])
   @@index([saleId])
   @@map("canteen_sale_items")
+}
+
+model StationaryCategory {
+  id        String   @id @default(uuid())
+  branchId  String
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch   Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  products StationaryProduct[]
+
+  @@unique([branchId, name])
+  @@index([branchId])
+  @@map("stationary_categories")
+}
+
+model StationarySupplier {
+  id            String   @id @default(uuid())
+  branchId      String
+  name          String
+  contactNumber String?
+  note          String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  branch   Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  products StationaryProduct[]
+
+  @@unique([branchId, name])
+  @@unique([id, branchId])
+  @@index([branchId])
+  @@map("stationary_suppliers")
+}
+
+model StationaryProduct {
+  id                String   @id @default(uuid())
+  branchId          String
+  categoryId        String
+  supplierId        String?
+  name              String
+  unitPrice         Int // in paise
+  bundlePrice       Int?
+  unitsPerBundle    Int?
+  stockBundles      Int      @default(0)
+  stockUnits        Int      @default(0)
+  lowStockThreshold Int      @default(10)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  branch         Branch                    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  category       StationaryCategory        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  supplier       StationarySupplier?       @relation(fields: [supplierId, branchId], references: [id, branchId], onDelete: SetNull)
+  stockMovements StationaryStockMovement[]
+  recordItems    StudentStationaryRecordItem[]
+
+  @@unique([branchId, categoryId, name])
+  @@unique([id, branchId])
+  @@index([branchId])
+  @@index([categoryId])
+  @@index([supplierId])
+  @@map("stationary_products")
+}
+
+model StationaryStockMovement {
+  id                  String                     @id @default(uuid())
+  branchId            String
+  productId           String
+  movementType        StationaryStockMovementType
+  quantityBundles     Int                        @default(0)
+  quantityUnits       Int                        @default(0)
+  unitPriceSnapshot   Int?
+  note                String?
+  studentRecordItemId String?
+  createdById         String?
+  createdAt           DateTime                   @default(now())
+
+  branch            Branch                     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product           StationaryProduct          @relation(fields: [productId, branchId], references: [id, branchId], onDelete: Restrict)
+  studentRecordItem StudentStationaryRecordItem? @relation(fields: [studentRecordItemId], references: [id], onDelete: SetNull)
+  createdBy         User?                      @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([branchId, createdAt])
+  @@index([productId, createdAt])
+  @@index([movementType])
+  @@map("stationary_stock_movements")
+}
+
+model StudentStationaryRecord {
+  id          String   @id @default(uuid())
+  branchId    String
+  studentId   String
+  studentFeeId String?
+  academicYearId String?
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  branch       Branch                      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  student      Student                     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentFee   StudentFee?                 @relation(fields: [studentFeeId], references: [id], onDelete: SetNull)
+  academicYear AcademicYear?               @relation(fields: [academicYearId], references: [id], onDelete: SetNull)
+  createdBy    User?                       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  items        StudentStationaryRecordItem[]
+
+  @@index([branchId, createdAt])
+  @@index([studentId, createdAt])
+  @@index([studentFeeId])
+  @@index([academicYearId])
+  @@map("student_stationary_records")
+}
+
+model StudentStationaryRecordItem {
+  id              String   @id @default(uuid())
+  recordId        String
+  productId       String
+  productName     String
+  categoryName    String?
+  quantity        Int
+  unitPrice       Int
+  lineTotal       Int
+  createdAt       DateTime @default(now())
+
+  record          StudentStationaryRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  product         StationaryProduct       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  feeExtraItems   FeeExtraItem[]
+  stockMovements  StationaryStockMovement[]
+
+  @@index([recordId])
+  @@index([productId])
+  @@map("student_stationary_record_items")
 }
