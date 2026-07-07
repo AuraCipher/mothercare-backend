@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { prisma } from '../../lib/prisma';
 import {
   actionAllowed,
   httpMethodToAction,
@@ -33,6 +34,17 @@ function getBranchId(req: Request): string | null {
   if (b) return b;
   if (user?.branchIds?.length === 1) return user.branchIds[0];
   return null;
+}
+
+async function resolveRequestAyArchived(req: Request, branchId: string): Promise<boolean> {
+  const ayId = (req.query.academicYearId as string | undefined) || req.body?.academicYearId;
+  if (!ayId) return false;
+  const ay = await prisma.academicYear.findUnique({
+    where: { id: ayId },
+    select: { status: true, branchId: true },
+  });
+  if (!ay || ay.branchId !== branchId) return false;
+  return ay.status === 'ARCHIVED';
 }
 
 export async function staffPermissionMiddleware(
@@ -72,15 +84,17 @@ export async function staffPermissionMiddleware(
     }
 
     const action = httpMethodToAction(req.method);
-    if (actionAllowed(access.permissions, module, action)) {
+    const isArchived = await resolveRequestAyArchived(req, branchId);
+    if (actionAllowed(access.permissions, module, action, { archived: isArchived })) {
       (req as any).staffPermissions = access.permissions;
+      (req as any).scopeIsArchived = isArchived;
       next();
       return;
     }
 
     res.status(403).json({
       success: false,
-      message: `No ${action} permission for ${module.toLowerCase()}`,
+      message: `No ${action} permission for ${module.toLowerCase()}${isArchived ? ' (archived year)' : ''}`,
     });
   } catch (err) {
     next(err);

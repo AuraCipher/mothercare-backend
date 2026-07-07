@@ -44,6 +44,29 @@ export type StaffProfileFields = {
 };
 
 class StaffService {
+  private mapPermissionRow(p: {
+    module: StaffModule;
+    canCreate: boolean;
+    canUpdate: boolean;
+    canDelete: boolean;
+    archivedCanRead?: boolean;
+    archivedCanCreate?: boolean;
+    archivedCanUpdate?: boolean;
+    archivedCanDelete?: boolean;
+  }): ResolvedModulePermission {
+    return {
+      module: p.module as ResolvedModulePermission['module'],
+      canCreate: p.canCreate,
+      canRead: true,
+      canUpdate: p.canUpdate,
+      canDelete: p.canDelete,
+      archivedCanRead: !!p.archivedCanRead,
+      archivedCanCreate: !!p.archivedCanCreate,
+      archivedCanUpdate: !!p.archivedCanUpdate,
+      archivedCanDelete: !!p.archivedCanDelete,
+    };
+  }
+
   private async ensureStaffProfile(userId: string) {
     const existing = await prisma.staffProfile.findUnique({ where: { userId } });
     if (existing) return existing;
@@ -110,6 +133,10 @@ class StaffService {
       canCreate: boolean;
       canUpdate: boolean;
       canDelete: boolean;
+      archivedCanRead?: boolean;
+      archivedCanCreate?: boolean;
+      archivedCanUpdate?: boolean;
+      archivedCanDelete?: boolean;
     }>;
   }): StaffMemberRow {
     return {
@@ -124,13 +151,7 @@ class StaffService {
       profilePhotoId: m.user.profilePhotoId,
       employeeId: m.user.staffProfile?.employeeId ?? null,
       qualification: m.user.staffProfile?.qualification ?? null,
-      permissions: m.modulePermissions.map((p) => ({
-        module: p.module as ResolvedModulePermission['module'],
-        canCreate: p.canCreate,
-        canRead: true,
-        canUpdate: p.canUpdate,
-        canDelete: p.canDelete,
-      })),
+      permissions: m.modulePermissions.map((p) => this.mapPermissionRow(p)),
     };
   }
 
@@ -427,6 +448,10 @@ class StaffService {
           canRead: true,
           canUpdate: p.canUpdate,
           canDelete: p.canDelete,
+          archivedCanRead: p.archivedCanRead ?? false,
+          archivedCanCreate: p.archivedCanCreate ?? false,
+          archivedCanUpdate: p.archivedCanUpdate ?? false,
+          archivedCanDelete: p.archivedCanDelete ?? false,
         })),
       });
 
@@ -461,13 +486,7 @@ class StaffService {
         branchMemberId: member.id,
         name: user.name,
         username: user.username,
-        permissions: saved.map((p) => ({
-          module: p.module,
-          canCreate: p.canCreate,
-          canRead: true,
-          canUpdate: p.canUpdate,
-          canDelete: p.canDelete,
-        })),
+        permissions: saved.map((p) => this.mapPermissionRow(p)),
       };
     });
   }
@@ -500,6 +519,10 @@ class StaffService {
           canRead: true,
           canUpdate: p.canUpdate,
           canDelete: p.canDelete,
+          archivedCanRead: p.archivedCanRead ?? false,
+          archivedCanCreate: p.archivedCanCreate ?? false,
+          archivedCanUpdate: p.archivedCanUpdate ?? false,
+          archivedCanDelete: p.archivedCanDelete ?? false,
         })),
       });
     });
@@ -526,13 +549,7 @@ class StaffService {
       username: member.user.username,
       branchRole: member.role,
       isFullAdmin: FULL_ADMIN_BRANCH_ROLES.has(member.role),
-      permissions: member.modulePermissions.map((p) => ({
-        module: p.module,
-        canCreate: p.canCreate,
-        canRead: true,
-        canUpdate: p.canUpdate,
-        canDelete: p.canDelete,
-      })),
+      permissions: member.modulePermissions.map((p) => this.mapPermissionRow(p)),
     };
   }
 
@@ -554,13 +571,7 @@ class StaffService {
       return { isRestricted: false as const, isFullAdmin: true, permissions: [] as ResolvedModulePermission[] };
     }
 
-    const permissions = (member.modulePermissions ?? []).map((p) => ({
-      module: p.module as ResolvedModulePermission['module'],
-      canCreate: p.canCreate,
-      canRead: true,
-      canUpdate: p.canUpdate,
-      canDelete: p.canDelete,
-    }));
+    const permissions = (member.modulePermissions ?? []).map((p) => this.mapPermissionRow(p));
 
     // Legacy canteen_staff without module rows → canteen read + sales actions
     if (member.role === 'canteen_staff' && permissions.length === 0) {
@@ -573,6 +584,10 @@ class StaffService {
           canRead: true,
           canUpdate: false,
           canDelete: false,
+          archivedCanRead: false,
+          archivedCanCreate: false,
+          archivedCanUpdate: false,
+          archivedCanDelete: false,
         }],
       };
     }

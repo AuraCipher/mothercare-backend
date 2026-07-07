@@ -22,6 +22,10 @@ export type ModulePermissionInput = {
   canRead: boolean;
   canUpdate: boolean;
   canDelete: boolean;
+  archivedCanRead?: boolean;
+  archivedCanCreate?: boolean;
+  archivedCanUpdate?: boolean;
+  archivedCanDelete?: boolean;
 };
 
 export type ResolvedModulePermission = ModulePermissionInput;
@@ -63,9 +67,19 @@ export function actionAllowed(
   perms: ResolvedModulePermission[],
   module: StaffModuleKey,
   action: CrudAction,
+  opts?: { archived?: boolean },
 ): boolean {
   const row = perms.find((p) => p.module === module);
   if (!row) return false;
+  const archived = opts?.archived === true;
+  if (archived) {
+    if (!row.archivedCanRead) return false;
+    if (action === 'read') return true;
+    if (action === 'create') return !!row.archivedCanCreate;
+    if (action === 'update') return !!row.archivedCanUpdate;
+    if (action === 'delete') return !!row.archivedCanDelete;
+    return false;
+  }
   if (action === 'read') return row.canRead;
   if (action === 'create') return row.canCreate;
   if (action === 'update') return row.canUpdate;
@@ -87,12 +101,17 @@ export function normalizePermissionInput(
     }
     if (seen.has(m.module)) continue;
     seen.add(m.module);
+    const archivedRead = m.archivedCanRead ?? !!(m.archivedCanCreate || m.archivedCanUpdate || m.archivedCanDelete);
     out.push({
       module: m.module,
       canCreate: !!m.canCreate,
       canRead: true,
       canUpdate: !!m.canUpdate,
       canDelete: !!m.canDelete,
+      archivedCanRead: archivedRead,
+      archivedCanCreate: !!m.archivedCanCreate,
+      archivedCanUpdate: !!m.archivedCanUpdate,
+      archivedCanDelete: !!m.archivedCanDelete,
     });
   }
   return out;
