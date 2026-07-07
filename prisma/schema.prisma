@@ -115,6 +115,34 @@ enum CanteenSalePaymentType {
   CREDIT
 }
 
+enum BatchPromotionRunPhase {
+  DRAFT
+  SNAPSHOT_DONE
+  APPLIED
+  PUBLISHED
+  FAILED
+}
+
+enum StudentCredentialTag {
+  CRED_NONE
+  CRED_CARRIED
+  CRED_NEW
+  CRED_RESEND
+  NO_LOGIN
+}
+
+enum TenureEndReason {
+  RESIGNED
+  TERMINATED
+  TRANSFERRED
+  GRADUATED
+  WITHDRAWN
+  DECEASED
+  LEAVE
+  REJOINED
+  OTHER
+}
+
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║                           USERS                                 ║
 // ║  All credentials created by admin. No signup / forgot password. ║
@@ -158,6 +186,7 @@ model User {
   auditLogs           AuditLog[]
   groupMembers        GroupMember[]
   batchPromotions     BatchPromotion[]        @relation("PromotedByUser")
+  batchPromotionRuns  BatchPromotionRun[]     @relation("BatchPromotionTriggeredBy")
   passwordResetTokens PasswordResetToken[]
 
   // New relations for Academic Year System
@@ -172,6 +201,7 @@ model User {
   timetableEntries          TimetableEntry[]       @relation("TimetableTeacher")
   uploadedFiles             FileRecord[]
   student                   Student?
+  studentPerson             StudentPerson?
   createdStudents           Student[]              @relation("StudentCreatedBy")
   updatedStudents           Student[]              @relation("StudentUpdatedBy")
   credentialSends           CredentialSend[]
@@ -274,7 +304,9 @@ model Branch {
   updatedAt DateTime @updatedAt
 
   academicYears    AcademicYear[]
+  studentPersons   StudentPerson[]
   branchMembers    BranchMember[]
+  batchPromotionRuns BatchPromotionRun[]
   adminInvitations AdminInvitation[]
   canteenSuppliers         CanteenSupplier[]
   canteenProductCategories CanteenProductCategory[]
@@ -353,6 +385,9 @@ model AcademicYear {
   updatedById   String?
   feeStructures FeeStructure[]
   studentFees   StudentFee[]
+  promotionRunsAsSource BatchPromotionRun[] @relation("PromotionSourceAy")
+  promotionRunsAsTarget BatchPromotionRun[] @relation("PromotionTargetAy")
+  teacherAySnapshots    TeacherAySnapshot[]
 
   @@unique([branchId, calendarId])
   @@map("academic_years")
@@ -409,6 +444,7 @@ model BranchMember {
   updatedById String?
 
   modulePermissions StaffModulePermission[]
+  tenures           BranchTenure[]
 
   @@unique([branchId, userId])
   @@index([userId])
@@ -423,6 +459,10 @@ model StaffModulePermission {
   canRead        Boolean     @default(true)
   canUpdate      Boolean     @default(false)
   canDelete      Boolean     @default(false)
+  archivedCanRead    Boolean @default(false)
+  archivedCanCreate  Boolean @default(false)
+  archivedCanUpdate  Boolean @default(false)
+  archivedCanDelete  Boolean @default(false)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
@@ -431,6 +471,29 @@ model StaffModulePermission {
   @@unique([branchMemberId, module])
   @@index([branchMemberId])
   @@map("staff_module_permissions")
+}
+
+// Append-only join/leave/rejoin history for teachers & staff at a branch.
+model BranchTenure {
+  id               String           @id @default(uuid())
+  branchMemberId   String
+  sequence         Int
+  joinedAt         DateTime
+  leftAt           DateTime?
+  endReason        TenureEndReason?
+  notes            String?
+  previousTenureId String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  createdById      String?
+
+  branchMember   BranchMember  @relation(fields: [branchMemberId], references: [id], onDelete: Cascade)
+  previousTenure BranchTenure? @relation("TenureRejoinChain", fields: [previousTenureId], references: [id], onDelete: SetNull)
+  nextTenures    BranchTenure[] @relation("TenureRejoinChain")
+
+  @@unique([branchMemberId, sequence])
+  @@index([branchMemberId, joinedAt])
+  @@map("branch_tenures")
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -637,6 +700,8 @@ model TeacherAssignment {
   subjectId      String
   isClassTeacher Boolean @default(false)
   role           String  @default("primary") // "primary", "assistant", "hod"
+  validFrom      DateTime @default(now())
+  validTo        DateTime?
 
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   teacher      User         @relation(fields: [teacherId], references: [id], onDelete: Cascade)
@@ -707,13 +772,60 @@ model ParentProfile {
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
+// ║                     STUDENT PERSON                              ║
+// ║  Stable identity across academic years (one row per human).     ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model StudentPerson {
+  id              String   @id @default(uuid())
+  branchId        String
+  userId          String?  @unique
+  admissionNumber String?  @unique
+  name            String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  branch        Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  user          User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
+  yearRecords   Student[]
+  schoolTenures StudentSchoolTenure[]
+
+  @@index([branchId])
+  @@map("student_persons")
+}
+
+// Append-only school join/leave/rejoin at branch level.
+model StudentSchoolTenure {
+  id               String           @id @default(uuid())
+  personId         String
+  branchId         String
+  sequence         Int
+  joinedAt         DateTime
+  leftAt           DateTime?
+  endReason        TenureEndReason?
+  notes            String?
+  previousTenureId String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  createdById      String?
+
+  person         StudentPerson       @relation(fields: [personId], references: [id], onDelete: Cascade)
+  previousTenure StudentSchoolTenure? @relation("StudentTenureRejoin", fields: [previousTenureId], references: [id], onDelete: SetNull)
+  nextTenures    StudentSchoolTenure[] @relation("StudentTenureRejoin")
+
+  @@unique([personId, sequence])
+  @@index([branchId, joinedAt])
+  @@map("student_school_tenures")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
 // ║                          STUDENT                                ║
-// ║  Core student record. Current placement is groupId. Full        ║
-// ║  history tracked via Enrollment model.                          ║
+// ║  Per-academic-year placement. personId links stable identity.    ║
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model Student {
   id                      String                   @id @default(uuid())
+  personId                String?
   academicYearId          String
   groupId                 String?
   familyId                String?
@@ -762,10 +874,13 @@ model Student {
   credentialSeenAt        DateTime?
   passwordSetAt           DateTime?
   credentialStatus        String?                  @default("none")
+  credentialTag           StudentCredentialTag     @default(CRED_NONE)
   credentialSends         CredentialSend[]
   statusLogs              StudentStatusLog[]
   attendanceNotifications AttendanceNotification[]
+  classMovements          StudentClassMovement[]
 
+  person            StudentPerson?     @relation(fields: [personId], references: [id], onDelete: SetNull)
   academicYear      AcademicYear       @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   group             Group?             @relation(fields: [groupId], references: [id], onDelete: SetNull)
   family            Family?            @relation("StudentFamily", fields: [familyId], references: [id], onDelete: SetNull)
@@ -780,11 +895,34 @@ model Student {
   subjectResults    SubjectResult[]
   reportCards       ReportCard[]
   canteenAccounts   CanteenAccount[]
+  feeCarryForwardsFrom FeeCarryForward[] @relation("FeeCarryFrom")
+  feeCarryForwardsTo   FeeCarryForward[] @relation("FeeCarryTo")
 
   @@index([groupId])
   @@index([familyId])
   @@index([academicYearId])
+  @@index([personId])
   @@map("students")
+}
+
+// Unlimited mid-year class changes within an academic year (append-only).
+model StudentClassMovement {
+  id             String   @id @default(uuid())
+  studentId      String
+  academicYearId String
+  sequence       Int
+  fromGroupId    String?
+  toGroupId      String
+  effectiveAt    DateTime
+  reason         String?
+  createdById    String?
+  createdAt      DateTime @default(now())
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, sequence])
+  @@index([academicYearId, effectiveAt])
+  @@map("student_class_movements")
 }
 
 // ─── Attendance (one row per student per day per AY) ─────────
@@ -975,6 +1113,7 @@ model AcademicYearSnapshot {
   newAcademicYear AcademicYear?   @relation("NewAcademicYear", fields: [newAcademicYearId], references: [id])
   triggeredBy     User            @relation("SnapshotTriggeredBy", fields: [triggeredById], references: [id])
   groupSnapshots  GroupSnapshot[]
+  promotionRuns   BatchPromotionRun[]
 
   updatedAt DateTime @updatedAt
 
@@ -1074,8 +1213,6 @@ model AttendanceNotification {
 
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║                    BATCH PROMOTION                              ║
-// ║  Promote all students from current class to next.              ║
-// ║  Will be fully reworked in Phase 12.                           ║
 // ╚══════════════════════════════════════════════════════════════════╝
 
 model BatchPromotion {
@@ -1099,6 +1236,48 @@ model BatchPromotion {
   updatedById String?
 
   @@map("batch_promotions")
+}
+
+model BatchPromotionRun {
+  id                   String                 @id @default(uuid())
+  branchId             String
+  sourceAcademicYearId String
+  targetAcademicYearId String
+  phase                BatchPromotionRunPhase @default(DRAFT)
+  carryOptions         Json
+  snapshotId           String?
+  promotedById         String
+  notes                String?
+  errorMessage         String?
+  publishedAt          DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  branch       Branch               @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  sourceAy     AcademicYear         @relation("PromotionSourceAy", fields: [sourceAcademicYearId], references: [id], onDelete: Cascade)
+  targetAy     AcademicYear         @relation("PromotionTargetAy", fields: [targetAcademicYearId], references: [id], onDelete: Cascade)
+  snapshot     AcademicYearSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
+  promotedBy   User                 @relation("BatchPromotionTriggeredBy", fields: [promotedById], references: [id])
+
+  @@index([branchId, phase])
+  @@index([sourceAcademicYearId])
+  @@index([targetAcademicYearId])
+  @@map("batch_promotion_runs")
+}
+
+model TeacherAySnapshot {
+  id             String   @id @default(uuid())
+  academicYearId String
+  teacherId      String
+  assignments    Json
+  firstAssignedAt DateTime?
+  lastAssignedAt  DateTime?
+  createdAt      DateTime @default(now())
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+
+  @@unique([academicYearId, teacherId])
+  @@map("teacher_ay_snapshots")
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -1712,6 +1891,8 @@ model StudentFee {
   payments        Payment[]
   extraItems      FeeExtraItem[]
   headAllocations PaymentHeadAllocation[]
+  carryForwardsFrom FeeCarryForward[] @relation("FeeCarryFromFee")
+  carryForwardsTo   FeeCarryForward[] @relation("FeeCarryToFee")
 
   @@unique([studentId, month, year, academicYearId])
   @@index([month, year, status])
@@ -1731,6 +1912,28 @@ model FeeExtraItem {
 
   @@index([studentFeeId])
   @@map("fee_extra_items")
+}
+
+// Manual link when outstanding balance is moved from an archived AY fee to a new AY fee.
+model FeeCarryForward {
+  id               String   @id @default(uuid())
+  fromStudentFeeId String
+  toStudentFeeId   String
+  fromStudentId    String?
+  toStudentId      String?
+  amount           Int
+  notes            String?
+  createdById      String?
+  createdAt        DateTime @default(now())
+
+  fromStudentFee StudentFee @relation("FeeCarryFromFee", fields: [fromStudentFeeId], references: [id], onDelete: Cascade)
+  toStudentFee   StudentFee @relation("FeeCarryToFee", fields: [toStudentFeeId], references: [id], onDelete: Cascade)
+  fromStudent    Student?   @relation("FeeCarryFrom", fields: [fromStudentId], references: [id], onDelete: SetNull)
+  toStudent      Student?   @relation("FeeCarryTo", fields: [toStudentId], references: [id], onDelete: SetNull)
+
+  @@index([fromStudentFeeId])
+  @@index([toStudentFeeId])
+  @@map("fee_carry_forwards")
 }
 
 model FamilyPayment {
