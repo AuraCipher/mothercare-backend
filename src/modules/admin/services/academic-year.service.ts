@@ -229,6 +229,54 @@ class AcademicYearService {
     });
   }
 
+  /**
+   * Remove a year from the archive bucket so it can be edited again.
+   * BUILD_STAGE = setup / historical data entry; ON_HOLD = paused operational year.
+   */
+  async unarchive(id: string, target: 'BUILD_STAGE' | 'ON_HOLD' = 'BUILD_STAGE') {
+    const ay = await prisma.academicYear.findUnique({ where: { id } });
+    if (!ay) {
+      throw { status: 404, message: 'Academic year not found' };
+    }
+    if (ay.status !== 'ARCHIVED') {
+      throw { status: 400, message: 'Only ARCHIVED academic years can be restored from the archive' };
+    }
+
+    if (target === 'BUILD_STAGE') {
+      const existingBuild = await prisma.academicYear.findFirst({
+        where: { branchId: ay.branchId, status: 'BUILD_STAGE', id: { not: id } },
+      });
+      if (existingBuild) {
+        throw {
+          status: 409,
+          message: 'Another BUILD_STAGE year already exists. Publish or archive it before restoring this year to setup mode.',
+        };
+      }
+    }
+
+    if (target === 'ON_HOLD') {
+      const activeAy = await prisma.academicYear.findFirst({
+        where: { branchId: ay.branchId, status: 'ACTIVE', id: { not: id } },
+      });
+      if (!activeAy) {
+        throw {
+          status: 400,
+          message: 'Cannot restore to ON_HOLD without an ACTIVE year in the branch. Use BUILD_STAGE for historical re-entry.',
+        };
+      }
+    }
+
+    return prisma.academicYear.update({
+      where: { id },
+      data: { status: target },
+      include: {
+        branch: { select: { id: true, name: true } },
+        calendar: { select: { id: true, label: true } },
+        _count: { select: { groups: true, students: true } },
+      },
+    });
+  }
+
   async delete(id: string) {
     const ay = await prisma.academicYear.findUnique({
       where: { id },

@@ -108,14 +108,21 @@ router.patch('/branches/:branchId/academic-years/:id/archive', requireNotArchive
   res.json({ success: true, data: academicYear });
 }));
 
+// PATCH /admin/branches/:branchId/academic-years/:id/unarchive — Restore from archive bucket
+router.patch('/branches/:branchId/academic-years/:id/unarchive', asyncHandler(async (req: Request, res: Response) => {
+  const target = req.body?.target === 'ON_HOLD' ? 'ON_HOLD' : 'BUILD_STAGE';
+  const academicYear = await academicYearService.unarchive(req.params.id, target);
+  res.json({ success: true, data: academicYear });
+}));
+
 // Batch promotion wizard (branch + source AY scoped)
 router.use(
   '/branches/:branchId/academic-years/:sourceAcademicYearId/promotion',
   batchPromotionRoutes,
 );
 
-// DELETE /admin/branches/:branchId/academic-years/:id — Delete AY (BA-020)
-router.delete('/branches/:branchId/academic-years/:id', requireNotArchived, asyncHandler(async (req: Request, res: Response) => {
+// DELETE /admin/branches/:branchId/academic-years/:id — Delete ARCHIVED AY only (BA-020)
+router.delete('/branches/:branchId/academic-years/:id', asyncHandler(async (req: Request, res: Response) => {
   await academicYearService.delete(req.params.id);
   res.status(204).json({ success: true, message: 'Academic year deleted' });
 }));
