@@ -41,7 +41,7 @@ function matchesFeeStatusFilter(status: string, filter: string): boolean {
 function computeFeeAmountAndBreakdown(
   student: { customFeeAmount?: number | null; feeOverrides?: unknown },
   groupStructures: { feeHeadId: string; feeHead: { name: string; category: string }; amount: number }[],
-): { totalAmount: number; breakdown: { feeHeadId?: string; name: string; amount: number; category: string }[] } {
+): { totalAmount: number; breakdown: FeeHeadBreakdownRow[] } {
   const sOverrides = student.feeOverrides as Record<string, number> | null;
 
   if (sOverrides && Object.keys(sOverrides).length > 0) {
@@ -51,8 +51,9 @@ function computeFeeAmountAndBreakdown(
       const amount = sOverrides[s.feeHeadId] !== undefined ? sOverrides[s.feeHeadId] : s.amount;
       return { feeHeadId: s.feeHeadId, name: s.feeHead.name, amount, category: s.feeHead.category };
     });
-    const totalAmount = breakdown.reduce((sum, b) => sum + (b.amount || 0), 0);
-    return { totalAmount, breakdown };
+    const mergedBreakdown = mergeFeeHeadBreakdown(breakdown);
+    const totalAmount = mergedBreakdown.reduce((sum, b) => sum + (b.amount || 0), 0);
+    return { totalAmount, breakdown: mergedBreakdown };
   }
 
   if (student.customFeeAmount != null) {
@@ -68,8 +69,37 @@ function computeFeeAmountAndBreakdown(
     amount: s.amount,
     category: s.feeHead.category,
   }));
-  const totalAmount = groupStructures.reduce((sum, s) => sum + s.amount, 0);
-  return { totalAmount, breakdown };
+  const mergedBreakdown = mergeFeeHeadBreakdown(breakdown);
+  const totalAmount = mergedBreakdown.reduce((sum, b) => sum + (b.amount || 0), 0);
+  return { totalAmount, breakdown: mergedBreakdown };
+}
+
+type FeeHeadBreakdownRow = { feeHeadId?: string; name: string; amount: number; category: string };
+
+/** Collapse duplicate feeHeadId / name rows in stored breakdowns. */
+function mergeFeeHeadBreakdown(breakdown: unknown): FeeHeadBreakdownRow[] {
+  const merged = new Map<string, FeeHeadBreakdownRow>();
+  for (const h of (Array.isArray(breakdown) ? breakdown : []) as Partial<FeeHeadBreakdownRow>[]) {
+    if (!h?.name) continue;
+    const key = h.feeHeadId || `name:${h.name}`;
+    const prev = merged.get(key);
+    if (prev) prev.amount += h.amount || 0;
+    else merged.set(key, { feeHeadId: h.feeHeadId, name: h.name, amount: h.amount || 0, category: h.category || 'OTHER' });
+  }
+  return [...merged.values()];
+}
+
+function normalizeAllocateHeadsInput(heads: unknown): { feeHeadId?: string; headName?: string; amountPaise: number }[] {
+  const list = Array.isArray(heads) ? heads : (heads && typeof heads === 'object' ? Object.values(heads as Record<string, unknown>) : []);
+  const merged = new Map<string, { feeHeadId?: string; headName?: string; amountPaise: number }>();
+  for (const h of list as { feeHeadId?: string; headName?: string; amountPaise?: number }[]) {
+    const key = h.feeHeadId ? `id:${h.feeHeadId}` : `name:${h.headName || ''}`;
+    const prev = merged.get(key);
+    const amt = h.amountPaise || 0;
+    if (prev) prev.amountPaise += amt;
+    else merged.set(key, { feeHeadId: h.feeHeadId, headName: h.headName, amountPaise: amt });
+  }
+  return [...merged.values()];
 }
 
 /** Keep only latest active structure per (groupId, feeHeadId). */
@@ -1822,8 +1852,10 @@ router.post('/payments/allocate', asyncHandler(async (req: Request, res: Respons
     return;
   }
   const prevList: { studentFeeId: string; amountPaise: number }[] = Array.isArray(previousMonths) ? previousMonths : [];
-  const curHeads: { feeHeadId?: string; headName?: string; amountPaise: number }[] = currentMonth?.heads || [];
-  const curExtras: { feeExtraItemId: string; amountPaise: number }[] = currentMonth?.extras || [];
+  const curHeads: { feeHeadId?: string; headName?: string; amountPaise: number }[] =
+    normalizeAllocateHeadsInput(currentMonth?.heads).filter((h) => h.amountPaise > 0);
+  const curExtras: { feeExtraItemId: string; amountPaise: number }[] =
+    (Array.isArray(currentMonth?.extras) ? currentMonth.extras : []).filter((e: { amountPaise?: number }) => (e.amountPaise || 0) > 0);
   const curStudentFeeId: string | undefined = currentMonth?.studentFeeId;
 
   if (prevList.length === 0 && curHeads.length === 0 && curExtras.length === 0) {
@@ -1927,7 +1959,7 @@ router.post('/payments/allocate', asyncHandler(async (req: Request, res: Respons
             }
           }
 
-          const headBreakdown = (fee.feeHeadBreakdown as any[]) || [];
+          const headBreakdown = mergeFeeHeadBreakdown((fee.feeHeadBreakdown as any[]) || []);
           const allocInputs: { feeHeadId?: string; feeExtraItemId?: string; amount: number }[] = [];
 
           for (const h of curHeads) {

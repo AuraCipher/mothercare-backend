@@ -785,6 +785,8 @@ describe('POST /admin/payments/waterfall', () => {
 describe('POST /admin/payments/allocate — partial head payments', () => {
   beforeEach(() => jest.clearAllMocks());
 
+  const allocateQuery = { branchId: 'b1' };
+
   const julFee = {
     id: 'sf-jul', studentId: 's1', month: 7, year: 2026,
     netAmount: 750000, paidAmount: 600000, status: 'PARTIAL',
@@ -813,7 +815,7 @@ describe('POST /admin/payments/allocate — partial head payments', () => {
       { feeHeadId: 'fh-annual', feeExtraItemId: null, amount: 50000 },
     ] as any);
 
-    const res = await request(app).post('/admin/payments/allocate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/payments/allocate').query(allocateQuery).set('Authorization', adminToken).send({
       studentId: 's1',
       amountPaidPaise: 150000,
       paymentMethod: 'CASH',
@@ -865,7 +867,7 @@ describe('POST /admin/payments/allocate — partial head payments', () => {
     prismaMock.paymentReceipt.create.mockResolvedValue({} as any);
     prismaMock.paymentAuditLog.create.mockResolvedValue({} as any);
 
-    const res = await request(app).post('/admin/payments/allocate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/payments/allocate').query(allocateQuery).set('Authorization', adminToken).send({
       studentId: 's1',
       amountPaidPaise: 150000,
       paymentMethod: 'CASH',
@@ -884,6 +886,64 @@ describe('POST /admin/payments/allocate — partial head payments', () => {
         balanceAfterPaise: 0,
         isFullyPaid: true,
       }),
+    }));
+  });
+
+  test('merges duplicate fee head rows in breakdown and request payload', async () => {
+    const dupFee = {
+      ...julFee,
+      feeHeadBreakdown: [
+        { feeHeadId: 'fh-monthly', name: 'MonthlyFee', amount: 500000, category: 'MONTHLY' },
+        { feeHeadId: 'fh-paper', name: 'PaperFund', amount: 50000, category: 'MONTHLY' },
+        { feeHeadId: 'fh-paper', name: 'PaperFund', amount: 50000, category: 'MONTHLY' },
+      ],
+      paidAmount: 500000,
+    };
+    const txMock = {
+      payment: { create: jest.fn() },
+      studentFee: { findMany: jest.fn(), update: jest.fn() },
+      paymentHeadAllocation: { findMany: jest.fn(), create: jest.fn() },
+      $queryRaw: jest.fn(),
+    };
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
+    prismaMock.payment.findMany.mockResolvedValue([]);
+    txMock.$queryRaw.mockResolvedValue([{ id: 'sf-jul' }] as any);
+    txMock.studentFee.findMany.mockResolvedValue([dupFee] as any);
+    txMock.paymentHeadAllocation.findMany.mockResolvedValue([]);
+    txMock.payment.create.mockResolvedValue({
+      id: 'p-new', studentFeeId: 'sf-jul', studentId: 's1', amount: 100000,
+      paymentMethod: 'CASH', receiptNumber: 'RCP-202607-0003-1',
+    } as any);
+    txMock.paymentHeadAllocation.create.mockResolvedValue({} as any);
+    txMock.studentFee.update.mockResolvedValue({} as any);
+    prismaMock.student.findUnique.mockResolvedValue({
+      name: 'Ahmed', rollNumber: '1', group: { name: 'Playgroup', section: null }, parents: [],
+    } as any);
+    prismaMock.studentFee.findMany
+      .mockResolvedValueOnce([{ ...dupFee, paidAmount: 600000, extraItems: [] }] as any)
+      .mockResolvedValueOnce([] as any);
+    prismaMock.paymentHeadAllocation.findMany.mockResolvedValue([]);
+    prismaMock.paymentReceipt.create.mockResolvedValue({} as any);
+    prismaMock.paymentAuditLog.create.mockResolvedValue({} as any);
+
+    const res = await request(app).post('/admin/payments/allocate').query(allocateQuery).set('Authorization', adminToken).send({
+      studentId: 's1',
+      amountPaidPaise: 100000,
+      paymentMethod: 'CASH',
+      currentMonth: {
+        studentFeeId: 'sf-jul',
+        heads: [
+          { feeHeadId: 'fh-paper', headName: 'PaperFund', amountPaise: 50000 },
+          { feeHeadId: 'fh-paper', headName: 'PaperFund', amountPaise: 50000 },
+        ],
+        extras: [],
+      },
+    });
+
+    expect(res.status).toBe(201);
+    expect(txMock.paymentHeadAllocation.create).toHaveBeenCalledTimes(1);
+    expect(txMock.paymentHeadAllocation.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ feeHeadId: 'fh-paper', amount: 100000 }),
     }));
   });
 });
