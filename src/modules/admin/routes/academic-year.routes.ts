@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { academicYearService } from '../services/academic-year.service';
 import { prisma } from '../../../lib/prisma';
+import batchPromotionRoutes from './batch-promotion.routes';
 
 const router = Router();
 
@@ -106,6 +107,12 @@ router.patch('/branches/:branchId/academic-years/:id/archive', requireNotArchive
   const academicYear = await academicYearService.archive(req.params.id);
   res.json({ success: true, data: academicYear });
 }));
+
+// Batch promotion wizard (branch + source AY scoped)
+router.use(
+  '/branches/:branchId/academic-years/:sourceAcademicYearId/promotion',
+  batchPromotionRoutes,
+);
 
 // DELETE /admin/branches/:branchId/academic-years/:id — Delete AY (BA-020)
 router.delete('/branches/:branchId/academic-years/:id', requireNotArchived, asyncHandler(async (req: Request, res: Response) => {

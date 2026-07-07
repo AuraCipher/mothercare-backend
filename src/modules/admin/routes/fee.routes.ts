@@ -3338,4 +3338,75 @@ router.get('/fees/analytics', asyncHandler(async (req: Request, res: Response) =
   res.json({ success: true, data });
 }));
 
+// POST /admin/fees/carry-forward — Move outstanding balance from archived fee to new AY fee
+router.post('/fees/carry-forward', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { fromStudentFeeId, toStudentFeeId, notes } = req.body;
+  if (!fromStudentFeeId || !toStudentFeeId) {
+    res.status(400).json({ success: false, message: 'fromStudentFeeId and toStudentFeeId are required' });
+    return;
+  }
+
+  const [fromFee, toFee] = await Promise.all([
+    prisma.studentFee.findUnique({
+      where: { id: fromStudentFeeId },
+      include: { academicYear: { select: { status: true, branchId: true } }, student: true },
+    }),
+    prisma.studentFee.findUnique({
+      where: { id: toStudentFeeId },
+      include: { academicYear: { select: { status: true, branchId: true } }, student: true },
+    }),
+  ]);
+
+  if (!fromFee || !toFee) {
+    res.status(404).json({ success: false, message: 'Student fee record not found' });
+    return;
+  }
+  if (fromFee.academicYear.branchId !== scope.branchId || toFee.academicYear.branchId !== scope.branchId) {
+    res.status(403).json({ success: false, message: 'Fees must belong to the active branch' });
+    return;
+  }
+  if (fromFee.academicYear.status !== 'ARCHIVED') {
+    res.status(400).json({ success: false, message: 'Source fee must be from an archived academic year' });
+    return;
+  }
+  if (!['BUILD_STAGE', 'ACTIVE'].includes(toFee.academicYear.status)) {
+    res.status(400).json({ success: false, message: 'Target fee must be in BUILD_STAGE or ACTIVE year' });
+    return;
+  }
+
+  const remaining = fromFee.netAmount - fromFee.paidAmount;
+  if (remaining <= 0) {
+    res.status(400).json({ success: false, message: 'No outstanding balance to carry forward' });
+    return;
+  }
+
+  const userId = (req as any).user?.id;
+  const record = await prisma.$transaction(async (tx) => {
+    const carry = await tx.feeCarryForward.create({
+      data: {
+        fromStudentFeeId,
+        toStudentFeeId,
+        fromStudentId: fromFee.studentId,
+        toStudentId: toFee.studentId,
+        amount: remaining,
+        notes,
+        createdById: userId,
+      },
+    });
+    await tx.studentFee.update({
+      where: { id: toStudentFeeId },
+      data: {
+        extraCharges: { increment: remaining },
+        netAmount: { increment: remaining },
+        extraReason: notes || `Carried forward from archived year (${remaining / 100} PKR)`,
+      },
+    });
+    return carry;
+  });
+
+  res.status(201).json({ success: true, data: record });
+}));
+
 export default router;

@@ -3,6 +3,7 @@ import { prisma } from '../../../lib/prisma';
 import { academicYearService } from '../services/academic-year.service';
 import { branchMemberService } from '../services/branch-member.service';
 import { staffService } from '../services/staff.service';
+import { listAccessibleAyStatuses } from '../utils/ay-access';
 
 const router = Router();
 
@@ -43,7 +44,19 @@ router.get('/permissions', asyncHandler(async (req: Request, res: Response) => {
     return;
   }
   const access = await staffService.resolveUserAccess(user.id, branchId, user.role);
-  res.json({ success: true, data: { branchId, ...access } });
+  const accessibleAyStatuses = listAccessibleAyStatuses({
+    isFullAdmin: access.isFullAdmin,
+    isRestricted: access.isRestricted,
+    permissions: access.permissions,
+  });
+  res.json({
+    success: true,
+    data: {
+      branchId,
+      ...access,
+      accessibleAyStatuses,
+    },
+  });
 }));
 
 export default router;

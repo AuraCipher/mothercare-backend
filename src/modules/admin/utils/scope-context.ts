@@ -1,9 +1,13 @@
 import { Request, Response } from 'express';
 import { prisma } from '../../../lib/prisma';
+import { staffService } from '../services/staff.service';
+import { canAccessArchivedAy } from './ay-access';
 
 export interface ScopeContext {
   academicYearId: string;
   branchId: string;
+  academicYearStatus: string;
+  isArchived: boolean;
 }
 
 export async function resolveAcademicYearId(explicitId?: string | null): Promise<string | null> {
@@ -52,7 +56,7 @@ export async function resolveScopeContext(req: Request): Promise<ScopeContext | 
 
   const ay = await prisma.academicYear.findUnique({
     where: { id: academicYearId },
-    select: { id: true, branchId: true },
+    select: { id: true, branchId: true, status: true },
   });
   if (!ay) {
     return { error: { status: 404, message: 'Academic year not found' } };
@@ -68,7 +72,20 @@ export async function resolveScopeContext(req: Request): Promise<ScopeContext | 
   const accessErr = assertBranchAccess(req, branchId);
   if (accessErr) return { error: accessErr };
 
-  return { academicYearId, branchId };
+  const user = (req as any).user;
+  if (ay.status === 'ARCHIVED' && user?.role === 'management') {
+    const access = await staffService.resolveUserAccess(user.id, branchId, user.role);
+    if (access.isRestricted && !access.isFullAdmin && !canAccessArchivedAy(access.permissions)) {
+      return { error: { status: 403, message: 'No permission to access archived academic years' } };
+    }
+  }
+
+  return {
+    academicYearId,
+    branchId,
+    academicYearStatus: ay.status,
+    isArchived: ay.status === 'ARCHIVED',
+  };
 }
 
 export async function requireScope(req: Request, res: Response): Promise<ScopeContext | null> {

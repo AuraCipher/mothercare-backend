@@ -17,6 +17,7 @@ import feeRoutes from './fee.routes';
 import examSessionRoutes from './exam-session.routes';
 import resultRoutes from './result.routes';
 import staffRoutes from './staff.routes';
+import tenureRoutes from './tenure.routes';
 import { requireScope } from '../utils/scope-context';
 import { staffPermissionMiddleware } from '../../../middleware/auth/staff-permission.middleware';
 
@@ -56,6 +57,7 @@ router.use(studentRoutes); // Contains /students, /students/:id, /students/:id/e
 router.use(examSessionRoutes); // /exam-sessions — ExamSession CRUD
 router.use('/result', resultRoutes); // /result/* — Result & Grade workflow
 router.use('/staff', staffRoutes); // Staff RBAC — create staff + module permissions
+router.use(tenureRoutes); // Tenure history — join/leave/rejoin, class movements
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)

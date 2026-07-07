@@ -123,10 +123,15 @@ class StudentService {
     if (!data.name) throw { status: 400, message: 'Student name is required' };
     let academicYearId = data.academicYearId;
     if (!academicYearId) {
-      const activeAy = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true } });
+      const activeAy = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true, branchId: true } });
       if (!activeAy) throw { status: 400, message: 'No active academic year found' };
       academicYearId = activeAy.id;
     }
+    const ayRow = await prisma.academicYear.findUnique({
+      where: { id: academicYearId },
+      select: { branchId: true },
+    });
+    if (!ayRow) throw { status: 400, message: 'Academic year not found' };
 
     // Get next student number from sequence (permanent, never reuses)
     let studentNumber = 1;
@@ -158,8 +163,17 @@ class StudentService {
       rollNumber = String(count + 1);
     }
 
+    const person = await prisma.studentPerson.create({
+      data: {
+        branchId: ayRow.branchId,
+        name: data.name,
+        admissionNumber,
+      },
+    });
+
     const student = await prisma.student.create({
       data: {
+        personId: person.id,
         name: data.name, gender: data.gender as any,
         dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : undefined,
         religion: data.religion, nationality: data.nationality || 'Pakistani',
@@ -176,6 +190,7 @@ class StudentService {
         studentNumber,
         rollNumber,
         username,
+        credentialTag: 'CRED_NEW',
       },
       include: { group: { select: { id: true, name: true, section: true } } },
     });
