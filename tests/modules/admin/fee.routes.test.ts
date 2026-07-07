@@ -16,6 +16,7 @@ import app from '../../../src/app';
 import { generateTestToken } from '../../helpers/auth';
 
 const adminToken = 'Bearer ' + generateTestToken('admin-1', 'super_admin');
+const feeQuery = { branchId: 'b1' };
 
 // ═══════════════════════════════════════════════════════════════════
 // FEE HEADS
@@ -34,7 +35,7 @@ describe('GET /admin/fee-heads', () => {
       { id: 'fh1', name: 'Tuition', category: 'MONTHLY', isActive: true, isOptional: false, description: null, createdAt: new Date(), updatedAt: new Date() },
       { id: 'fh2', name: 'Transport', category: 'MONTHLY', isActive: true, isOptional: true, description: null, createdAt: new Date(), updatedAt: new Date() },
     ] as any);
-    const res = await request(app).get('/admin/fee-heads').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/fee-heads').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(2);
@@ -46,14 +47,14 @@ describe('POST /admin/fee-heads', () => {
     prismaMock.feeHead.create.mockResolvedValue({
       id: 'fh-new', name: 'Lab Fee', category: 'TERM', isActive: true, isOptional: false, description: 'Lab charges', createdAt: new Date(), updatedAt: new Date(),
     } as any);
-    const res = await request(app).post('/admin/fee-heads').set('Authorization', adminToken).send({ name: 'Lab Fee', category: 'TERM', description: 'Lab charges' });
+    const res = await request(app).post('/admin/fee-heads').query(feeQuery).set('Authorization', adminToken).send({ name: 'Lab Fee', category: 'TERM', description: 'Lab charges' });
     expect(res.status).toBe(201);
     expect(res.body.data.name).toBe('Lab Fee');
     expect(res.body.data.category).toBe('TERM');
   });
 
   test('rejects without name', async () => {
-    const res = await request(app).post('/admin/fee-heads').set('Authorization', adminToken).send({ category: 'MONTHLY' });
+    const res = await request(app).post('/admin/fee-heads').query(feeQuery).set('Authorization', adminToken).send({ category: 'MONTHLY' });
     expect(res.status).toBe(400);
   });
 });
@@ -63,7 +64,7 @@ describe('PUT /admin/fee-heads/:id', () => {
     prismaMock.feeHead.update.mockResolvedValue({
       id: 'fh1', name: 'Tuition Updated', category: 'MONTHLY', isActive: true, isOptional: false, description: null, createdAt: new Date(), updatedAt: new Date(),
     } as any);
-    const res = await request(app).put('/admin/fee-heads/fh1').set('Authorization', adminToken).send({ name: 'Tuition Updated' });
+    const res = await request(app).put('/admin/fee-heads/fh1').query(feeQuery).set('Authorization', adminToken).send({ name: 'Tuition Updated' });
     expect(res.status).toBe(200);
     expect(res.body.data.name).toBe('Tuition Updated');
   });
@@ -108,7 +109,7 @@ describe('POST /admin/fee-structures', () => {
     } as any);
     prismaMock.$transaction.mockImplementation(async (cb: any) => cb(prismaMock));
 
-    const res = await request(app).post('/admin/fee-structures').set('Authorization', adminToken).send({ academicYearId: 'ay1', groupId: 'g1', feeHeadId: 'fh1', amount: 450000 });
+    const res = await request(app).post('/admin/fee-structures').query(feeQuery).set('Authorization', adminToken).send({ academicYearId: 'ay1', groupId: 'g1', feeHeadId: 'fh1', amount: 450000 });
     expect(res.status).toBe(201);
     expect(prismaMock.feeStructure.updateMany).not.toHaveBeenCalled();
   });
@@ -127,14 +128,14 @@ describe('POST /admin/fee-structures', () => {
     prismaMock.feeChangeLog.create.mockResolvedValue({} as any);
     prismaMock.$transaction.mockImplementation(async (cb: any) => cb(prismaMock));
 
-    const res = await request(app).post('/admin/fee-structures').set('Authorization', adminToken).send({ academicYearId: 'ay1', groupId: 'g1', feeHeadId: 'fh1', amount: 450000 });
+    const res = await request(app).post('/admin/fee-structures').query(feeQuery).set('Authorization', adminToken).send({ academicYearId: 'ay1', groupId: 'g1', feeHeadId: 'fh1', amount: 450000 });
     expect(res.status).toBe(200);
     expect(prismaMock.feeStructure.updateMany).toHaveBeenCalled();
     expect(prismaMock.feeChangeLog.create).toHaveBeenCalled();
   });
 
   test('rejects without required fields', async () => {
-    const res = await request(app).post('/admin/fee-structures').set('Authorization', adminToken).send({});
+    const res = await request(app).post('/admin/fee-structures').query(feeQuery).set('Authorization', adminToken).send({});
     expect(res.status).toBe(400);
   });
 });
@@ -147,7 +148,7 @@ describe('POST /admin/student-fees/generate', () => {
   beforeEach(() => jest.clearAllMocks());
 
   test('rejects without month/year', async () => {
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({});
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({});
     expect(res.status).toBe(400);
   });
 
@@ -163,7 +164,7 @@ describe('POST /admin/student-fees/generate', () => {
     prismaMock.studentFee.findUnique.mockResolvedValue(null); // No existing fee
     prismaMock.studentFee.create.mockResolvedValue({} as any);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({ month: 6, year: 2026 });
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({ month: 6, year: 2026 });
     expect(res.status).toBe(200);
     expect(res.body.data.generated).toBe(2);
   });
@@ -179,7 +180,7 @@ describe('POST /admin/student-fees/generate', () => {
     ] as any);
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({ month: 6, year: 2026, categories: ['MONTHLY'] });
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({ month: 6, year: 2026, categories: ['MONTHLY'] });
     expect(res.status).toBe(200);
     expect(res.body.data.generated).toBe(1);
   });
@@ -195,7 +196,7 @@ describe('POST /admin/student-fees/generate', () => {
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
     prismaMock.studentFee.create.mockResolvedValue({} as any);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({
       month: 6, year: 2026, academicYearId: 'ay1', groupIds: ['g2'], headIds: ['fh1'],
     });
     expect(res.status).toBe(200);
@@ -218,7 +219,7 @@ describe('POST /admin/student-fees/generate', () => {
     prismaMock.studentFee.create.mockResolvedValue({} as any);
 
     // Uses customFeeAmount despite empty structures
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({ month: 6, year: 2026, categories: ['MONTHLY', 'TERM'] });
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({ month: 6, year: 2026, categories: ['MONTHLY', 'TERM'] });
     expect(res.status).toBe(200);
     expect(res.body.data.generated).toBe(1);
   });
@@ -258,7 +259,7 @@ describe('GET /admin/fees/students-list', () => {
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
@@ -272,7 +273,7 @@ describe('GET /admin/fees/students-list', () => {
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
@@ -285,7 +286,7 @@ describe('GET /admin/fees/students-list', () => {
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
@@ -302,7 +303,7 @@ describe('GET /admin/fees/students-list', () => {
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=full&academicYearId=ay1')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(2);
@@ -317,7 +318,7 @@ describe('GET /admin/fees/students-list', () => {
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1&feeStatus=unpaid')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
@@ -331,7 +332,7 @@ describe('GET /admin/fees/students-list', () => {
 
     await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay-old')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ academicYearId: 'ay-old' }),
@@ -346,7 +347,7 @@ describe('GET /admin/fees/students-list', () => {
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(2);
@@ -364,7 +365,7 @@ describe('GET /admin/fees/students-list', () => {
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
@@ -377,7 +378,7 @@ describe('GET /admin/fees/students-list', () => {
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
@@ -389,7 +390,7 @@ describe('GET /admin/fees/students-list', () => {
 
     await request(app)
       .get('/admin/fees/students-list?month=7&year=2026&period=monthly&academicYearId=ay1')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
       select: expect.objectContaining({
@@ -405,7 +406,7 @@ describe('GET /admin/fees/students-list', () => {
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1&groupId=g2')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(0);
@@ -422,7 +423,7 @@ describe('GET /admin/fees/students-list', () => {
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
@@ -435,7 +436,7 @@ describe('GET /admin/fees/students-list', () => {
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/academic year/i);
@@ -446,7 +447,7 @@ describe('GET /admin/fees/students-list', () => {
 
     await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1&roll=42')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ rollNumber: '42' }),
@@ -458,7 +459,7 @@ describe('GET /admin/fees/students-list', () => {
 
     await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1&fatherSearch=Ali')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(prismaMock.student.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
@@ -476,7 +477,7 @@ describe('GET /admin/fees/students-list', () => {
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=monthly&academicYearId=ay1&page=2')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.pagination).toEqual({ page: 2, limit: 100, total: 250, totalPages: 3 });
@@ -499,7 +500,7 @@ describe('GET /admin/fees/students-list', () => {
 
     const res = await request(app)
       .get('/admin/fees/students-list?month=6&year=2026&period=full&academicYearId=ay1')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
 
     expect(res.status).toBe(200);
     expect(res.body.data[0]._isEstimated).toBe(true);
@@ -526,7 +527,7 @@ describe('POST /admin/student-fees/generate — modes', () => {
       id: 'sf1', netAmount: 500000, paidAmount: 0, feeHeadBreakdown: [], extraItems: [],
     } as any);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({
       month: 6, year: 2026, academicYearId: 'ay1', headIds: ['fh1'], mode: 'generate',
     });
 
@@ -543,7 +544,7 @@ describe('POST /admin/student-fees/generate — modes', () => {
     } as any);
     prismaMock.studentFee.update.mockResolvedValue({} as any);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({
       month: 6, year: 2026, academicYearId: 'ay1', headIds: ['fh1'], mode: 'update',
     });
 
@@ -558,7 +559,7 @@ describe('POST /admin/student-fees/generate — modes', () => {
     baseMocks();
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({
       month: 6, year: 2026, academicYearId: 'ay1', headIds: ['fh1'], mode: 'update',
     });
 
@@ -575,7 +576,7 @@ describe('POST /admin/student-fees/generate — modes', () => {
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
     prismaMock.studentFee.create.mockResolvedValue({} as any);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({
       month: 6, year: 2026, academicYearId: 'ay1', headIds: ['fh1'], mode: 'regenerate',
     });
 
@@ -594,7 +595,7 @@ describe('POST /admin/student-fees/generate — modes', () => {
       id: 'sf-paid', netAmount: 500000, paidAmount: 100000, feeHeadBreakdown: [], extraItems: [],
     } as any);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({
       month: 6, year: 2026, academicYearId: 'ay1', headIds: ['fh1'], mode: 'regenerate',
     });
 
@@ -617,7 +618,7 @@ describe('POST /admin/student-fees/generate — class selection', () => {
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
     prismaMock.studentFee.create.mockResolvedValue({} as any);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({
       month: 6, year: 2026, academicYearId: 'ay1', groupIds: ['g2a'], headIds: ['fh1'],
     });
 
@@ -642,7 +643,7 @@ describe('POST /admin/student-fees/generate — class selection', () => {
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
     prismaMock.studentFee.create.mockResolvedValue({} as any);
 
-    await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+    await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({
       month: 6, year: 2026, academicYearId: 'ay1', groupIds: ['g2a'], headIds: ['fh1'],
     });
 
@@ -665,7 +666,7 @@ describe('POST /admin/student-fees/generate — class selection', () => {
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
     prismaMock.studentFee.create.mockResolvedValue({} as any);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({
       month: 6, year: 2026, academicYearId: 'ay1', headIds: ['fh1'],
     });
 
@@ -687,7 +688,7 @@ describe('POST /admin/student-fees/generate — class selection', () => {
     ] as any);
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({
       month: 6, year: 2026, academicYearId: 'ay1', groupIds: ['g-empty'], headIds: ['fh1'],
     });
 
@@ -700,7 +701,7 @@ describe('POST /admin/student-fees/generate — class selection', () => {
     prismaMock.student.findMany.mockResolvedValue([] as any);
     prismaMock.feeStructure.findMany.mockResolvedValue([] as any);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({
       month: 6, year: 2026, academicYearId: 'ay1', groupIds: [], headIds: ['fh1'],
     });
 
@@ -721,7 +722,7 @@ describe('POST /admin/student-fees/generate — class selection', () => {
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
     prismaMock.studentFee.create.mockResolvedValue({} as any);
 
-    await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+    await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({
       month: 6, year: 2026, academicYearId: 'ay-old', headIds: ['fh1'],
     });
 
@@ -740,7 +741,7 @@ describe('POST /admin/student-fees/generate — class selection', () => {
 
 describe('POST /admin/payments', () => {
   test('rejects without required fields', async () => {
-    const res = await request(app).post('/admin/payments').set('Authorization', adminToken).send({});
+    const res = await request(app).post('/admin/payments').query(feeQuery).set('Authorization', adminToken).send({});
     expect(res.status).toBe(400);
   });
 });
@@ -776,7 +777,7 @@ describe('POST /admin/payments/waterfall', () => {
     prismaMock.student.findUnique.mockResolvedValue({ name: 'Test', rollNumber: '1', group: { name: 'Class 1', section: null }, parents: [] } as any);
     prismaMock.studentFee.findMany.mockResolvedValue([] as any); // previous balance query
 
-    const res = await request(app).post('/admin/payments/waterfall').set('Authorization', adminToken).send({ studentId: 's1', amount: 400000, paymentMethod: 'CASH' });
+    const res = await request(app).post('/admin/payments/waterfall').query(feeQuery).set('Authorization', adminToken).send({ studentId: 's1', amount: 400000, paymentMethod: 'CASH' });
     expect(res.status).toBe(201);
     expect(res.body.data.monthsCovered).toBeGreaterThanOrEqual(1);
   });
@@ -815,7 +816,7 @@ describe('POST /admin/payments/allocate — partial head payments', () => {
       { feeHeadId: 'fh-annual', feeExtraItemId: null, amount: 50000 },
     ] as any);
 
-    const res = await request(app).post('/admin/payments/allocate').query(allocateQuery).set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/payments/allocate').query(allocateQuery).query(feeQuery).set('Authorization', adminToken).send({
       studentId: 's1',
       amountPaidPaise: 150000,
       paymentMethod: 'CASH',
@@ -867,7 +868,7 @@ describe('POST /admin/payments/allocate — partial head payments', () => {
     prismaMock.paymentReceipt.create.mockResolvedValue({} as any);
     prismaMock.paymentAuditLog.create.mockResolvedValue({} as any);
 
-    const res = await request(app).post('/admin/payments/allocate').query(allocateQuery).set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/payments/allocate').query(allocateQuery).query(feeQuery).set('Authorization', adminToken).send({
       studentId: 's1',
       amountPaidPaise: 150000,
       paymentMethod: 'CASH',
@@ -926,7 +927,7 @@ describe('POST /admin/payments/allocate — partial head payments', () => {
     prismaMock.paymentReceipt.create.mockResolvedValue({} as any);
     prismaMock.paymentAuditLog.create.mockResolvedValue({} as any);
 
-    const res = await request(app).post('/admin/payments/allocate').query(allocateQuery).set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/payments/allocate').query(allocateQuery).query(feeQuery).set('Authorization', adminToken).send({
       studentId: 's1',
       amountPaidPaise: 100000,
       paymentMethod: 'CASH',
@@ -945,6 +946,16 @@ describe('POST /admin/payments/allocate — partial head payments', () => {
     expect(txMock.paymentHeadAllocation.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ feeHeadId: 'fh-paper', amount: 100000 }),
     }));
+    expect(prismaMock.paymentReceipt.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        currentMonthHeads: expect.arrayContaining([
+          expect.objectContaining({ name: 'PaperFund', paidPaise: 100000 }),
+        ]),
+      }),
+    }));
+    const receiptHeads = prismaMock.paymentReceipt.create.mock.calls[0][0].data.currentMonthHeads as any[];
+    const paperRows = receiptHeads.filter((h) => h.name === 'PaperFund');
+    expect(paperRows).toHaveLength(1);
   });
 });
 
@@ -958,7 +969,7 @@ describe('PUT /admin/students/:id/custom-fee', () => {
       id: 's1', customFeeAmount: 400000, concessionReason: 'Merit scholarship',
       feeOverrides: { fh1: 400000 },
     } as any);
-    const res = await request(app).put('/admin/students/s1/custom-fee').set('Authorization', adminToken).send({
+    const res = await request(app).put('/admin/students/s1/custom-fee').query(feeQuery).set('Authorization', adminToken).send({
       customFeeAmount: 400000, concessionReason: 'Merit scholarship', feeOverrides: { fh1: 400000 },
     });
     expect(res.status).toBe(200);
@@ -975,7 +986,7 @@ describe('GET /admin/students/:id/fee — academic year scope', () => {
 
   test('returns 400 without resolvable academic year', async () => {
     prismaMock.academicYear.findFirst.mockResolvedValue(null);
-    const res = await request(app).get('/admin/students/s1/fee').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/students/s1/fee').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(400);
   });
 
@@ -988,7 +999,7 @@ describe('GET /admin/students/:id/fee — academic year scope', () => {
       studentFees: [{ id: 'sf1', month: 6, year: 2026, academicYearId: 'ay1', netAmount: 500000, paidAmount: 0, payments: [], extraItems: [] }],
     } as any);
 
-    const res = await request(app).get('/admin/students/s1/fee?academicYearId=ay1').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/students/s1/fee?academicYearId=ay1').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(200);
     expect(prismaMock.student.findUnique).toHaveBeenCalledWith(expect.objectContaining({
       include: expect.objectContaining({
@@ -1002,7 +1013,7 @@ describe('GET /admin/students/:id/fee — academic year scope', () => {
 
   test('explicit academicYearId overrides active year lookup', async () => {
     prismaMock.student.findUnique.mockResolvedValue({ id: 's1', studentFees: [], group: null, parents: [] } as any);
-    await request(app).get('/admin/students/s1/fee?academicYearId=ay-old').set('Authorization', adminToken);
+    await request(app).get('/admin/students/s1/fee?academicYearId=ay-old').query(feeQuery).set('Authorization', adminToken);
     expect(prismaMock.student.findUnique).toHaveBeenCalledWith(expect.objectContaining({
       include: expect.objectContaining({
         studentFees: expect.objectContaining({ where: { academicYearId: 'ay-old' } }),
@@ -1024,7 +1035,7 @@ describe('POST /admin/student-fees/generate — AY unique key', () => {
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
     prismaMock.studentFee.create.mockResolvedValue({} as any);
 
-    await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({
+    await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({
       month: 6, year: 2026, academicYearId: 'ay-old', headIds: ['fh1'],
     });
 
@@ -1040,7 +1051,7 @@ describe('GET /admin/families — AY scope', () => {
 
   test('returns 400 without academic year in search mode', async () => {
     prismaMock.academicYear.findFirst.mockResolvedValue(null);
-    const res = await request(app).get('/admin/families?search=Ali').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/families?search=Ali').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(400);
   });
 
@@ -1055,7 +1066,7 @@ describe('GET /admin/families — AY scope', () => {
       },
     ] as any);
 
-    const res = await request(app).get('/admin/families?academicYearId=ay1').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/families?academicYearId=ay1').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].name).toBe('Khan Family');
@@ -1075,7 +1086,7 @@ describe('GET /admin/families — AY scope', () => {
       },
     ] as any);
 
-    const res = await request(app).get('/admin/families?search=Ali&academicYearId=ay1').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/families?search=Ali&academicYearId=ay1').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(200);
     expect(prismaMock.family.findMany).toHaveBeenCalledWith(expect.objectContaining({
       include: expect.objectContaining({
@@ -1099,7 +1110,7 @@ describe('POST /admin/families — CRUD', () => {
   beforeEach(() => jest.clearAllMocks());
 
   test('rejects without name', async () => {
-    const res = await request(app).post('/admin/families').set('Authorization', adminToken).send({ studentIds: ['s1'] });
+    const res = await request(app).post('/admin/families').query(feeQuery).set('Authorization', adminToken).send({ studentIds: ['s1'] });
     expect(res.status).toBe(400);
   });
 
@@ -1121,7 +1132,7 @@ describe('POST /admin/families — CRUD', () => {
     });
     prismaMock.auditLog.create.mockResolvedValue({} as any);
 
-    const res = await request(app).post('/admin/families').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/families').query(feeQuery).set('Authorization', adminToken).send({
       name: 'Ahmed Family', studentIds: ['s1'],
     });
     expect(res.status).toBe(201);
@@ -1137,7 +1148,7 @@ describe('POST /admin/family-payments/allocate', () => {
       id: 'fam1', isActive: true, students: [{ id: 's1' }],
     } as any);
 
-    const res = await request(app).post('/admin/family-payments/allocate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/family-payments/allocate').query(feeQuery).set('Authorization', adminToken).send({
       familyId: 'fam1',
       academicYearId: 'ay1',
       amountPaidPaise: 100000,
@@ -1153,7 +1164,7 @@ describe('POST /admin/family-payments/allocate', () => {
       id: 'fam1', isActive: true, students: [{ id: 's1' }],
     } as any);
 
-    const res = await request(app).post('/admin/family-payments/allocate').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/family-payments/allocate').query(feeQuery).set('Authorization', adminToken).send({
       familyId: 'fam1',
       academicYearId: 'ay1',
       amountPaidPaise: 100000,
@@ -1168,7 +1179,7 @@ describe('POST /admin/family-payments/allocate', () => {
 describe('GET /admin/family-payments/:id/receipt', () => {
   test('returns 404 when no snapshot', async () => {
     prismaMock.familyPaymentReceipt.findUnique.mockResolvedValue(null);
-    const res = await request(app).get('/admin/family-payments/fp1/receipt').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/family-payments/fp1/receipt').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(404);
   });
 
@@ -1184,7 +1195,7 @@ describe('GET /admin/family-payments/:id/receipt', () => {
       balanceAfterPaise: 0,
       printCount: 0,
     } as any);
-    const res = await request(app).get('/admin/family-payments/fp1/receipt').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/family-payments/fp1/receipt').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data.templateType).toBe('FIRST');
   });
@@ -1195,7 +1206,7 @@ describe('POST /admin/family-payments — AY integrity', () => {
 
   test('returns 400 without academicYearId', async () => {
     prismaMock.academicYear.findFirst.mockResolvedValue(null);
-    const res = await request(app).post('/admin/family-payments').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/family-payments').query(feeQuery).set('Authorization', adminToken).send({
       familyId: 'fam1', payments: [{ studentFeeId: 'sf1', amount: 100000, paymentMethod: 'CASH' }],
     });
     expect(res.status).toBe(400);
@@ -1213,7 +1224,7 @@ describe('POST /admin/family-payments — AY integrity', () => {
     prismaMock.familyPayment.findMany.mockResolvedValue([]);
     prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txMock));
 
-    const res = await request(app).post('/admin/family-payments').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/family-payments').query(feeQuery).set('Authorization', adminToken).send({
       familyId: 'fam1', academicYearId: 'ay1',
       payments: [{ studentFeeId: 'sf-wrong', amount: 100000, paymentMethod: 'CASH' }],
     });
@@ -1251,7 +1262,7 @@ describe('POST /admin/family-payments — AY integrity', () => {
     prismaMock.paymentReceipt.create.mockResolvedValue({} as any);
     prismaMock.paymentAuditLog.create.mockResolvedValue({} as any);
 
-    const res = await request(app).post('/admin/family-payments').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/family-payments').query(feeQuery).set('Authorization', adminToken).send({
       familyId: 'fam1', academicYearId: 'ay1',
       payments: [{ studentFeeId: 'sf1', amount: 450000, paymentMethod: 'CASH' }],
     });
@@ -1275,7 +1286,7 @@ describe('GET /admin/fees/summary', () => {
       { netAmount: 500000, paidAmount: 500000, status: 'PAID', extraItems: [] },
       { netAmount: 500000, paidAmount: 0, status: 'UNPAID', extraItems: [] },
     ] as any);
-    const res = await request(app).get('/admin/fees/summary?month=6&year=2026&academicYearId=ay1').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/fees/summary?month=6&year=2026&academicYearId=ay1').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data.totalDue).toBe(1000000);
     expect(res.body.data.pendingCount).toBe(1);
@@ -1323,7 +1334,7 @@ describe('GET /admin/payments/:id/receipt — snapshot', () => {
 
   test('returns 404 when no snapshot exists', async () => {
     prismaMock.paymentReceipt.findUnique.mockResolvedValue(null);
-    const res = await request(app).get('/admin/payments/p1/receipt').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/payments/p1/receipt').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(404);
   });
 
@@ -1341,7 +1352,7 @@ describe('GET /admin/payments/:id/receipt — snapshot', () => {
       paymentDate: new Date(), printedAt: null, printCount: 0, createdAt: new Date(),
     };
     prismaMock.paymentReceipt.findUnique.mockResolvedValue(mockSnapshot as any);
-    const res = await request(app).get('/admin/payments/p1/receipt').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/payments/p1/receipt').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data.receiptNumber).toBe('RCP-001');
     expect(res.body.data.currentMonthLabel).toBe('Jun 2026');
@@ -1360,14 +1371,14 @@ describe('POST /admin/payments/:id/print-receipt', () => {
     prismaMock.paymentReceipt.update.mockResolvedValue({
       id: 'rs1', printedAt: new Date(), printCount: 1,
     } as any);
-    const res = await request(app).post('/admin/payments/p1/print-receipt').set('Authorization', adminToken);
+    const res = await request(app).post('/admin/payments/p1/print-receipt').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(200);
     expect(prismaMock.paymentReceipt.update).toHaveBeenCalled();
   });
 
   test('returns 404 when no snapshot', async () => {
     prismaMock.paymentReceipt.findUnique.mockResolvedValue(null);
-    const res = await request(app).post('/admin/payments/p1/print-receipt').set('Authorization', adminToken);
+    const res = await request(app).post('/admin/payments/p1/print-receipt').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(404);
   });
 });
@@ -1380,7 +1391,7 @@ describe('POST /admin/payments/:id/audit-log', () => {
       id: 'al1', paymentId: 'p1', action: 'REPRINTED', performedById: 'admin-1', createdAt: new Date(),
     } as any);
     const res = await request(app).post('/admin/payments/p1/audit-log')
-      .set('Authorization', adminToken)
+      .query(feeQuery).set('Authorization', adminToken)
       .send({ action: 'REPRINTED' });
     expect(res.status).toBe(201);
     expect(res.body.data.action).toBe('REPRINTED');
@@ -1388,7 +1399,7 @@ describe('POST /admin/payments/:id/audit-log', () => {
 
   test('rejects invalid action', async () => {
     const res = await request(app).post('/admin/payments/p1/audit-log')
-      .set('Authorization', adminToken)
+      .query(feeQuery).set('Authorization', adminToken)
       .send({ action: 'INVALID' });
     expect(res.status).toBe(400);
   });
@@ -1399,7 +1410,7 @@ describe('GET /admin/payments/:id/audit-log', () => {
     prismaMock.paymentAuditLog.findMany.mockResolvedValue([
       { id: 'al1', paymentId: 'p1', action: 'CREATED', createdAt: new Date() },
     ] as any);
-    const res = await request(app).get('/admin/payments/p1/audit-log').set('Authorization', adminToken);
+    const res = await request(app).get('/admin/payments/p1/audit-log').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
   });
@@ -1422,7 +1433,7 @@ describe('POST /admin/student-fees/:id/extra-items — status recalculation', ()
     prismaMock.feeExtraItem.aggregate.mockResolvedValue({ _sum: { amount: 50000 } } as any);
 
     const res = await request(app).post('/admin/student-fees/sf1/extra-items')
-      .set('Authorization', adminToken)
+      .query(feeQuery).set('Authorization', adminToken)
       .send({ name: 'Lab Charges', amount: 50000 });
     expect(res.status).toBe(201);
 
@@ -1441,7 +1452,7 @@ describe('POST /admin/student-fees/:id/extra-items — status recalculation', ()
     prismaMock.feeExtraItem.aggregate.mockResolvedValue({ _sum: { amount: 50000 } } as any);
 
     const res = await request(app).post('/admin/student-fees/sf1/extra-items')
-      .set('Authorization', adminToken)
+      .query(feeQuery).set('Authorization', adminToken)
       .send({ name: 'Fine', amount: 50000 });
     expect(res.status).toBe(201);
     expect(prismaMock.studentFee.update).toHaveBeenCalledWith(
@@ -1451,7 +1462,7 @@ describe('POST /admin/student-fees/:id/extra-items — status recalculation', ()
 
   test('rejects without name or amount', async () => {
     const res = await request(app).post('/admin/student-fees/sf1/extra-items')
-      .set('Authorization', adminToken)
+      .query(feeQuery).set('Authorization', adminToken)
       .send({});
     expect(res.status).toBe(400);
   });
@@ -1470,7 +1481,7 @@ describe('DELETE /admin/student-fees/:id/extra-items/:itemId — status recalcul
     } as any);
 
     const res = await request(app).delete('/admin/student-fees/sf1/extra-items/extra1')
-      .set('Authorization', adminToken);
+      .query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(200);
 
     // Status should go back to PAID (500k paid = 500k due, no extras)
@@ -1517,7 +1528,7 @@ describe('POST /admin/payments/waterfall — status accounts for extras', () => 
     prismaMock.student.findUnique.mockResolvedValue({ name: 'Test', rollNumber: '1', group: { name: 'Class 1', section: null }, parents: [] } as any);
     prismaMock.studentFee.findMany.mockResolvedValue([] as any);
 
-    const res = await request(app).post('/admin/payments/waterfall').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/payments/waterfall').query(feeQuery).set('Authorization', adminToken).send({
       studentId: 's1', amount: 450000, paymentMethod: 'CASH',
     });
     expect(res.status).toBe(201);
@@ -1549,7 +1560,7 @@ describe('POST /admin/payments/waterfall — status accounts for extras', () => 
     prismaMock.student.findUnique.mockResolvedValue({ name: 'Test', rollNumber: '1', group: { name: 'Class 1', section: null }, parents: [] } as any);
     prismaMock.studentFee.findMany.mockResolvedValue([] as any);
 
-    const res = await request(app).post('/admin/payments/waterfall').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/payments/waterfall').query(feeQuery).set('Authorization', adminToken).send({
       studentId: 's1', amount: 420000, paymentMethod: 'CASH',
     });
     expect(res.status).toBe(201);
@@ -1569,14 +1580,14 @@ describe('Issue 5: Atomic receipt number generation', () => {
   beforeEach(() => jest.clearAllMocks());
 
   test('rejects /payments with negative amount', async () => {
-    const res = await request(app).post('/admin/payments').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/payments').query(feeQuery).set('Authorization', adminToken).send({
       studentFeeId: 'sf1', amount: -5000, paymentMethod: 'CASH',
     });
     expect(res.status).toBe(400);
   });
 
   test('rejects /payments with zero amount', async () => {
-    const res = await request(app).post('/admin/payments').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/payments').query(feeQuery).set('Authorization', adminToken).send({
       studentFeeId: 'sf1', amount: 0, paymentMethod: 'CASH',
     });
     expect(res.status).toBe(400);
@@ -1602,7 +1613,7 @@ describe('Issue 6: Waterfall concurrency guards', () => {
     txMock.$queryRaw.mockResolvedValue([]); // lock query finds no unpaid rows (already paid by another tx)
     txMock.studentFee.findMany.mockResolvedValue([]); // no unpaid fees
 
-    const res = await request(app).post('/admin/payments/waterfall').set('Authorization', adminToken).send({
+    const res = await request(app).post('/admin/payments/waterfall').query(feeQuery).set('Authorization', adminToken).send({
       studentId: 's1', amount: 100000, paymentMethod: 'CASH',
     });
     expect(res.status).toBe(400);
@@ -1633,7 +1644,7 @@ describe('Issue 8: ONE_TIME fee head tracking', () => {
     prismaMock.studentFee.findUnique.mockResolvedValue(null); // no existing fee for this month
     prismaMock.studentFee.create.mockResolvedValue({ id: 'sf-new' } as any);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({ month: 9, year: 2026, categories: ['MONTHLY', 'ONE_TIME'] });
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({ month: 9, year: 2026, categories: ['MONTHLY', 'ONE_TIME'] });
     expect(res.status).toBe(200);
     expect(res.body.data.generated).toBe(1);
   });
@@ -1653,7 +1664,7 @@ describe('Issue 8: ONE_TIME fee head tracking', () => {
     prismaMock.studentFee.findUnique.mockResolvedValue(null);
     prismaMock.studentFee.create.mockResolvedValue({ id: 'sf-new' } as any);
 
-    const res = await request(app).post('/admin/student-fees/generate').set('Authorization', adminToken).send({ month: 9, year: 2026, categories: ['MONTHLY', 'ONE_TIME'] });
+    const res = await request(app).post('/admin/student-fees/generate').query(feeQuery).set('Authorization', adminToken).send({ month: 9, year: 2026, categories: ['MONTHLY', 'ONE_TIME'] });
     expect(res.status).toBe(200);
     // One fee generated (MONTHLY Tuition), ONE_TIME Admission Fee was skipped
     expect(res.body.data.generated).toBe(1);

@@ -3,6 +3,15 @@ import { prisma } from '../../../lib/prisma';
 import { logAudit, diffFields } from '../../../services/audit.service';
 import { resolveAcademicYearId, requireScope } from '../utils/scope-context';
 import { computeFeeAnalytics, resolveFeeAnalyticsFilters } from '../services/fee-analytics.service';
+import {
+  mergeFeeHeadBreakdown,
+  normalizeAllocateHeadsInput,
+  headRowAmountPaise,
+  stickerHeadRowsFromBreakdown,
+  buildReceiptHeadPaidRows,
+  buildReceiptHeadRowsFromAllocations,
+  type FeeHeadBreakdownRow,
+} from '../services/fee-breakdown.utils';
 
 const router = Router();
 
@@ -74,32 +83,19 @@ function computeFeeAmountAndBreakdown(
   return { totalAmount, breakdown: mergedBreakdown };
 }
 
-type FeeHeadBreakdownRow = { feeHeadId?: string; name: string; amount: number; category: string };
-
-/** Collapse duplicate feeHeadId / name rows in stored breakdowns. */
-function mergeFeeHeadBreakdown(breakdown: unknown): FeeHeadBreakdownRow[] {
-  const merged = new Map<string, FeeHeadBreakdownRow>();
-  for (const h of (Array.isArray(breakdown) ? breakdown : []) as Partial<FeeHeadBreakdownRow>[]) {
-    if (!h?.name) continue;
-    const key = h.feeHeadId || `name:${h.name}`;
-    const prev = merged.get(key);
-    if (prev) prev.amount += h.amount || 0;
-    else merged.set(key, { feeHeadId: h.feeHeadId, name: h.name, amount: h.amount || 0, category: h.category || 'OTHER' });
-  }
-  return [...merged.values()];
-}
-
-function normalizeAllocateHeadsInput(heads: unknown): { feeHeadId?: string; headName?: string; amountPaise: number }[] {
-  const list = Array.isArray(heads) ? heads : (heads && typeof heads === 'object' ? Object.values(heads as Record<string, unknown>) : []);
-  const merged = new Map<string, { feeHeadId?: string; headName?: string; amountPaise: number }>();
-  for (const h of list as { feeHeadId?: string; headName?: string; amountPaise?: number }[]) {
-    const key = h.feeHeadId ? `id:${h.feeHeadId}` : `name:${h.headName || ''}`;
-    const prev = merged.get(key);
-    const amt = h.amountPaise || 0;
-    if (prev) prev.amountPaise += amt;
-    else merged.set(key, { feeHeadId: h.feeHeadId, headName: h.headName, amountPaise: amt });
-  }
-  return [...merged.values()];
+/** Build per-head receipt rows for a payment (merged breakdown, no duplicate paid lines). */
+async function receiptHeadRowsForPayment(
+  paymentId: string,
+  studentFeeId: string,
+  feeHeadBreakdown: unknown,
+) {
+  const allAllocs = await prisma.paymentHeadAllocation.findMany({
+    where: { studentFeeId, revertedAt: null },
+    select: { feeHeadId: true, feeExtraItemId: true, amount: true, paymentId: true },
+  });
+  const headRows = buildReceiptHeadRowsFromAllocations(feeHeadBreakdown, allAllocs, paymentId);
+  if (headRows.length > 0) return headRows;
+  return stickerHeadRowsFromBreakdown(feeHeadBreakdown);
 }
 
 /** Keep only latest active structure per (groupId, feeHeadId). */
@@ -1175,7 +1171,7 @@ async function createReceiptSnapshot(
       paymentId,
       receiptNumber,
       currentMonthLabel: input.currentMonthLabel,
-      currentMonthTotal: input.currentMonthHeads.reduce((s: number, h: any) => s + (h.amount || 0), 0),
+      currentMonthTotal: input.currentMonthHeads.reduce((s: number, h: any) => s + headRowAmountPaise(h), 0),
       currentMonthHeads: input.currentMonthHeads,
       currentMonthExtras: input.currentMonthExtras,
       previousBalancePaise: input.previousBalancePaise,
@@ -1393,7 +1389,7 @@ async function createFamilyReceiptSnapshot(familyPaymentId: string, userId: stri
 
       const heads: any[] = [];
       const extras: any[] = [];
-      const headBreakdown = (fee.feeHeadBreakdown as any[]) || [];
+      const headBreakdown = mergeFeeHeadBreakdown(fee.feeHeadBreakdown);
 
       for (const h of headBreakdown) {
         const headAllocs = feePayments.flatMap(p => p.headAllocations.filter(a => a.feeHeadId === h.feeHeadId));
@@ -1612,7 +1608,7 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
   // at write time so every snapshot going forward is self-consistent,
   // instead of relying on the frontend to know which raw DB shape it's
   // looking at.
-  const heads = ((studentFee.feeHeadBreakdown as any[]) || []).map((h: any) => ({ name: h.name, amountPaise: h.amount || 0 }));
+  const heads = stickerHeadRowsFromBreakdown(studentFee.feeHeadBreakdown);
   const snapExtras = extraItems.map((e: any) => ({ name: e.name, amountPaise: e.amount || 0 }));
 
   await createReceiptSnapshot(
@@ -1778,7 +1774,7 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
   const monthLabel = latestPaidFee
     ? (['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(latestPaidFee.month || 1) - 1] + ' ' + (latestPaidFee.year || ''))
     : 'Waterfall Payment';
-  const cmHeads = ((latestPaidFee?.feeHeadBreakdown as any[]) || []).map((h: any) => ({ name: h.name, amountPaise: h.amount || 0 }));
+  const cmHeads = stickerHeadRowsFromBreakdown(latestPaidFee?.feeHeadBreakdown);
   const cmExtras = latestPaidFee ? ((latestPaidFee as any).extraItems || []).map((e: any) => ({ name: e.name, amountPaise: e.amount || 0 })) : [];
   const currentTotal = latestPaidFee ? (latestPaidFee.netAmount + ((latestPaidFee as any).extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0)) : 0;
   const totalDueBefore = previousBalance + currentTotal;
@@ -2075,9 +2071,6 @@ router.post('/payments/allocate', asyncHandler(async (req: Request, res: Respons
   const curPaymentOnCurrent = curStudentFeeId
     ? payments.filter((p: any) => p.studentFeeId === curStudentFeeId).reduce((s, p) => s + p.amount, 0)
     : 0;
-  const headBreakdownForReceipt = curStudentFeeId && currentFee
-    ? ((currentFee.feeHeadBreakdown as any[]) || [])
-    : [];
 
   let priorHeadPaid = new Map<string, number>();
   if (curStudentFeeId) {
@@ -2096,19 +2089,15 @@ router.post('/payments/allocate', asyncHandler(async (req: Request, res: Respons
     }
   }
 
-  const cmHeads: { name: string; amountPaise: number; paidPaise?: number }[] = [];
-  if (curStudentFeeId && currentFee) {
-    for (const b of headBreakdownForReceipt) {
-      const headKey = b.feeHeadId ? `h:${b.feeHeadId}` : `n:${b.name}`;
-      const paidBefore = priorHeadPaid.get(headKey) || 0;
-      const dueBefore = Math.max(0, (b.amount || 0) - paidBefore);
-      const selected = curHeads.find((h: any) => (h.feeHeadId && h.feeHeadId === b.feeHeadId) || (h.headName && h.headName === b.name));
-      const paidThis = selected?.amountPaise || 0;
-      if (dueBefore > 0 || paidThis > 0) {
-        cmHeads.push({ name: b.name, amountPaise: dueBefore > 0 ? dueBefore : (b.amount || 0), paidPaise: paidThis });
-      }
-    }
+  const paidThisByHead = new Map<string, number>();
+  for (const h of curHeads) {
+    const key = h.feeHeadId ? `h:${h.feeHeadId}` : `n:${h.headName || ''}`;
+    paidThisByHead.set(key, h.amountPaise || 0);
   }
+
+  const cmHeads = curStudentFeeId && currentFee
+    ? buildReceiptHeadPaidRows(currentFee.feeHeadBreakdown, priorHeadPaid, paidThisByHead)
+    : [];
   const cmExtras = curStudentFeeId && currentFee
     ? curExtras.map((e: any) => {
         const def = currentFee.extraItems.find(ei => ei.id === e.feeExtraItemId);
@@ -2723,8 +2712,10 @@ async function executeStudentAllocInTx(
 ): Promise<any[]> {
   const {
     studentId, userId, paymentMethod, reference, note,
-    prevList, curStudentFeeId, curHeads, curExtras, receiptNumber, familyPaymentId,
+    prevList, curStudentFeeId, receiptNumber, familyPaymentId,
   } = opts;
+  const curHeads = normalizeAllocateHeadsInput(opts.curHeads).filter((h) => h.amountPaise > 0);
+  const curExtras = (opts.curExtras || []).filter((e) => (e.amountPaise || 0) > 0);
 
   const allFeeIds = Array.from(new Set([...prevList.map(p => p.studentFeeId), ...(curStudentFeeId ? [curStudentFeeId] : [])]));
   if (allFeeIds.length === 0) return [];
@@ -2785,7 +2776,7 @@ async function executeStudentAllocInTx(
       else if (a.feeExtraItemId) priorByHead.set(`e:${a.feeExtraItemId}`, (priorByHead.get(`e:${a.feeExtraItemId}`) || 0) + a.amount);
     }
 
-    const headBreakdown = (fee.feeHeadBreakdown as any[]) || [];
+    const headBreakdown = mergeFeeHeadBreakdown((fee.feeHeadBreakdown as any[]) || []);
     const allocInputs: { feeHeadId?: string; feeExtraItemId?: string; amount: number }[] = [];
 
     for (const h of curHeads) {
@@ -2894,12 +2885,12 @@ router.post('/family-payments/allocate', asyncHandler(async (req: Request, res: 
       return;
     }
     const prevList = Array.isArray(s.previousMonths) ? s.previousMonths : [];
-    const curHeads = s.currentMonth?.heads || [];
-    const curExtras = s.currentMonth?.extras || [];
+    const curHeads = normalizeAllocateHeadsInput(s.currentMonth?.heads).filter((h) => h.amountPaise > 0);
+    const curExtras = (Array.isArray(s.currentMonth?.extras) ? s.currentMonth.extras : []).filter((e: { amountPaise?: number }) => (e.amountPaise || 0) > 0);
     const curStudentFeeId = s.currentMonth?.studentFeeId;
     const selectedTotal =
       prevList.reduce((sum, p) => sum + (p.amountPaise || 0), 0) +
-      curHeads.reduce((sum, h) => sum + (h.amountPaise || 0), 0) +
+      curHeads.reduce((sum, h) => sum + h.amountPaise, 0) +
       curExtras.reduce((sum, e) => sum + (e.amountPaise || 0), 0);
     if (selectedTotal !== s.amountPaidPaise) {
       res.status(400).json({ success: false, message: `Student ${s.studentId}: selected total (${selectedTotal}) does not match amount (${s.amountPaidPaise})` });
@@ -2939,8 +2930,8 @@ router.post('/family-payments/allocate', asyncHandler(async (req: Request, res: 
         let seq = 0;
         for (const s of studentList) {
           const prevList = Array.isArray(s.previousMonths) ? s.previousMonths : [];
-          const curHeads = s.currentMonth?.heads || [];
-          const curExtras = s.currentMonth?.extras || [];
+          const curHeads = normalizeAllocateHeadsInput(s.currentMonth?.heads).filter((h) => h.amountPaise > 0);
+          const curExtras = (Array.isArray(s.currentMonth?.extras) ? s.currentMonth.extras : []).filter((e: { amountPaise?: number }) => (e.amountPaise || 0) > 0);
           const curStudentFeeId = s.currentMonth?.studentFeeId;
 
           for (const p of prevList) {
@@ -3018,7 +3009,7 @@ router.post('/family-payments/allocate', asyncHandler(async (req: Request, res: 
       const fName = father?.parent?.user?.name || father?.parent?.phone || null;
       const sClass = [(sf.student as any)?.group?.name, (sf.student as any)?.group?.section].filter(Boolean).join(' — ') || '—';
       const mLabel = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(sf.month || 1) - 1] + ' ' + (sf.year || '');
-      const cHeads = ((sf.feeHeadBreakdown as any[]) || []).map((h: any) => ({ name: h.name, amountPaise: h.amount || 0 }));
+      const cHeads = await receiptHeadRowsForPayment(cp.id, cp.studentFeeId, sf.feeHeadBreakdown);
       const cExtras = (sf.extraItems || []).map((e: any) => ({ name: e.name, amountPaise: e.amount || 0 }));
       const feeTotal = getFeeTotalDue(sf);
       const otherFees = await prisma.studentFee.findMany({
@@ -3198,7 +3189,7 @@ router.post('/family-payments', asyncHandler(async (req: Request, res: Response)
       const fName = father?.parent?.user?.name || father?.parent?.phone || null;
       const sClass = [(sf.student as any)?.group?.name, (sf.student as any)?.group?.section].filter(Boolean).join(' — ') || '—';
       const mLabel = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(sf.month || 1) - 1] + ' ' + (sf.year || '');
-      const cHeads = ((sf.feeHeadBreakdown as any[]) || []).map((h: any) => ({ name: h.name, amountPaise: h.amount || 0 }));
+      const cHeads = await receiptHeadRowsForPayment(cp.id, cp.studentFeeId, sf.feeHeadBreakdown);
       const cExtras = (sf.extraItems || []).map((e: any) => ({ name: e.name, amountPaise: e.amount || 0 }));
       const feeTotal = getFeeTotalDue(sf);
       const otherFees = await prisma.studentFee.findMany({
