@@ -229,7 +229,8 @@ model User {
   canteenSupplierPayments   CanteenSupplierPayment[] @relation("CanteenSupplierPaymentCreatedBy")
   canteenRestockPurchases   CanteenRestockPurchase[] @relation("CanteenRestockCreatedBy")
   canteenAccountsCreated    CanteenAccount[]       @relation("CanteenAccountCreatedBy")
-  stationaryRecords         StudentStationaryRecord[]
+  stationaryStockMovements  StationaryStockMovement[] @relation("StationaryStockMovementCreatedBy")
+  stationaryRecordsCreated  StudentStationaryRecord[] @relation("StudentStationaryRecordCreatedBy")
 
   @@index([username])
   @@index([email])
@@ -401,6 +402,7 @@ model AcademicYear {
   promotionRunsAsSource BatchPromotionRun[] @relation("PromotionSourceAy")
   promotionRunsAsTarget BatchPromotionRun[] @relation("PromotionTargetAy")
   teacherAySnapshots    TeacherAySnapshot[]
+  stationaryRecords     StudentStationaryRecord[]
 
   @@unique([branchId, calendarId])
   @@map("academic_years")
@@ -892,6 +894,7 @@ model Student {
   statusLogs              StudentStatusLog[]
   attendanceNotifications AttendanceNotification[]
   classMovements          StudentClassMovement[]
+  stationaryRecords       StudentStationaryRecord[]
 
   person            StudentPerson?     @relation(fields: [personId], references: [id], onDelete: SetNull)
   academicYear      AcademicYear       @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
@@ -1906,6 +1909,7 @@ model StudentFee {
   headAllocations PaymentHeadAllocation[]
   carryForwardsFrom FeeCarryForward[] @relation("FeeCarryFromFee")
   carryForwardsTo   FeeCarryForward[] @relation("FeeCarryToFee")
+  stationaryRecords StudentStationaryRecord[]
 
   @@unique([studentId, month, year, academicYearId])
   @@index([month, year, status])
@@ -2439,7 +2443,7 @@ model StationaryStockMovement {
   branch            Branch                     @relation(fields: [branchId], references: [id], onDelete: Cascade)
   product           StationaryProduct          @relation(fields: [productId, branchId], references: [id, branchId], onDelete: Restrict)
   studentRecordItem StudentStationaryRecordItem? @relation(fields: [studentRecordItemId], references: [id], onDelete: SetNull)
-  createdBy         User?                      @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy         User?                      @relation("StationaryStockMovementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([branchId, createdAt])
   @@index([productId, createdAt])
@@ -2461,7 +2465,7 @@ model StudentStationaryRecord {
   student      Student                     @relation(fields: [studentId], references: [id], onDelete: Cascade)
   studentFee   StudentFee?                 @relation(fields: [studentFeeId], references: [id], onDelete: SetNull)
   academicYear AcademicYear?               @relation(fields: [academicYearId], references: [id], onDelete: SetNull)
-  createdBy    User?                       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy    User?                       @relation("StudentStationaryRecordCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   items        StudentStationaryRecordItem[]
 
   @@index([branchId, createdAt])
