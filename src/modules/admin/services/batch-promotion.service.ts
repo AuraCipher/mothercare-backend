@@ -19,6 +19,8 @@ type StartInput = {
   promotedById: string;
 };
 
+const PRISMA_UNIQUE_ERROR = 'P2002';
+
 class BatchPromotionService {
   async getPreconditions(branchId: string, sourceAcademicYearId: string) {
     const source = await prisma.academicYear.findFirst({
@@ -68,16 +70,37 @@ class BatchPromotionService {
       if (!input.calendarId) {
         throw { status: 400, message: 'targetAcademicYearId or calendarId is required' };
       }
-      const created = await prisma.academicYear.create({
-        data: {
-          branchId: input.branchId,
-          calendarId: input.calendarId,
-          status: 'BUILD_STAGE',
-          previousAcademicYearId: input.previousAcademicYearId ?? input.sourceAcademicYearId,
-          createdById: input.promotedById,
-        },
-      });
-      targetAcademicYearId = created.id;
+      try {
+        const created = await prisma.academicYear.create({
+          data: {
+            branchId: input.branchId,
+            calendarId: input.calendarId,
+            status: 'BUILD_STAGE',
+            previousAcademicYearId: input.previousAcademicYearId ?? input.sourceAcademicYearId,
+            createdById: input.promotedById,
+          },
+        });
+        targetAcademicYearId = created.id;
+      } catch (err: any) {
+        if (err?.code === PRISMA_UNIQUE_ERROR) {
+          const existingYear = await prisma.academicYear.findFirst({
+            where: {
+              branchId: input.branchId,
+              calendarId: input.calendarId,
+            },
+          });
+          if (!existingYear) throw err;
+          if (existingYear.status !== 'BUILD_STAGE') {
+            throw {
+              status: 409,
+              message: 'This calendar already exists in branch as ACTIVE/ARCHIVED year. Pick a different calendar.',
+            };
+          }
+          targetAcademicYearId = existingYear.id;
+        } else {
+          throw err;
+        }
+      }
     } else {
       const target = await prisma.academicYear.findFirst({
         where: { id: targetAcademicYearId, branchId: input.branchId },
@@ -85,6 +108,9 @@ class BatchPromotionService {
       if (!target) throw { status: 404, message: 'Target academic year not found' };
       if (target.status !== 'BUILD_STAGE') {
         throw { status: 400, message: 'Target academic year must be in BUILD_STAGE' };
+      }
+      if (target.id === input.sourceAcademicYearId) {
+        throw { status: 400, message: 'Target academic year cannot be the same as source year' };
       }
     }
 
@@ -224,6 +250,15 @@ class BatchPromotionService {
     }
 
     const carry = mergeCarryOptions(run.carryOptions as Partial<CarryOptions>);
+    if (carry.students && !carry.classes) {
+      throw { status: 400, message: 'Cannot carry students without carrying classes.' };
+    }
+    if (carry.teacherAssignments && (!carry.classes || !carry.subjects)) {
+      throw { status: 400, message: 'Teacher assignments require both classes and subjects carry options.' };
+    }
+    if (carry.timetableGrid && (!carry.classes || !carry.subjects)) {
+      throw { status: 400, message: 'Timetable requires both classes and subjects carry options.' };
+    }
     const sourceId = run.sourceAcademicYearId;
     const targetId = run.targetAcademicYearId;
 
@@ -344,7 +379,8 @@ class BatchPromotionService {
               familyId: s.familyId,
               name: s.name,
               rollNumber: s.rollNumber,
-              admissionNumber: s.admissionNumber,
+              // Identity-level uniques stay on StudentPerson; keep year-row clean to avoid collisions.
+              admissionNumber: null,
               dateOfBirth: s.dateOfBirth,
               gender: s.gender,
               religion: s.religion,
@@ -366,9 +402,10 @@ class BatchPromotionService {
               previousClass: s.previousClass,
               tcNumber: s.tcNumber,
               referredBy: s.referredBy,
-              profilePhotoId: s.profilePhotoId,
-              userId: s.userId,
+              profilePhotoId: null,
+              userId: null,
               username: s.username,
+              studentNumber: null,
               status: 'ACTIVE',
               isActive: true,
               credentialTag: credTag,
