@@ -125,6 +125,23 @@ jest.mock('@prisma/client', () => ({
     CREDIT: 'CREDIT',
   },
 
+  StaffModule: {
+    STUDENTS: 'STUDENTS',
+    OPERATIONS: 'OPERATIONS',
+    TIMETABLE: 'TIMETABLE',
+    ATTENDANCE: 'ATTENDANCE',
+    FEES: 'FEES',
+    RESULT: 'RESULT',
+    CANTEEN: 'CANTEEN',
+    STATIONARY: 'STATIONARY',
+  },
+
+  StationaryStockMovementType: {
+    STOCK_IN: 'STOCK_IN',
+    ADJUSTMENT: 'ADJUSTMENT',
+    STUDENT_ASSIGNED: 'STUDENT_ASSIGNED',
+  },
+
   Prisma: {
     Decimal: class {
       constructor(public value: number) {}
