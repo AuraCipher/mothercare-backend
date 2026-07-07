@@ -236,6 +236,12 @@ class AuthService {
     if (!user) {
       throw { status: 401, message: 'Invalid or expired session' };
     }
+    if (user.status !== 'active') {
+      throw { status: 401, message: 'User not found or inactive' };
+    }
+    if (user.role === 'student') {
+      await this.assertStudentLoginEligible(user.id);
+    }
 
     // Update last seen and generate new token
     await prisma.user.update({
