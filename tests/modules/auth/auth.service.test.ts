@@ -231,6 +231,38 @@ describe('AuthService.login', () => {
     expect(result.user.id).toBe(adminUser.id);
   });
 
+  test('error: student without active enrollment is blocked', async () => {
+    const studentUser = createMockUser({ role: 'student' as any });
+    prismaMock.user.findFirst.mockResolvedValue(studentUser as any);
+    prismaMock.student.findFirst
+      .mockResolvedValueOnce(null as any) // no active enrollment
+      .mockResolvedValueOnce(null as any); // no graduation marker
+
+    await expect(
+      authService.login({
+        identifier: studentUser.username!,
+        password: 'password123',
+        rememberMe: false,
+      }),
+    ).rejects.toMatchObject({ status: 403, message: 'Student is not enrolled in any active academic year' });
+  });
+
+  test('error: graduated student login blocked', async () => {
+    const studentUser = createMockUser({ role: 'student' as any });
+    prismaMock.user.findFirst.mockResolvedValue(studentUser as any);
+    prismaMock.student.findFirst
+      .mockResolvedValueOnce(null as any) // no active enrollment
+      .mockResolvedValueOnce({ id: 'st-1' } as any); // blocked marker exists
+
+    await expect(
+      authService.login({
+        identifier: studentUser.username!,
+        password: 'password123',
+        rememberMe: false,
+      }),
+    ).rejects.toMatchObject({ status: 403, message: 'Student login is disabled after graduation' });
+  });
+
   // ─── Update last login ─────────────────────────────
 
   test('updates lastLoginAt and lastSeen on successful login', async () => {

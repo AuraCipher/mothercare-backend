@@ -17,6 +17,36 @@ const loginSchema = z.object({
 type LoginInput = z.infer<typeof loginSchema>;
 
 class AuthService {
+  private async assertStudentLoginEligible(userId: string) {
+    const activeEnrollment = await prisma.student.findFirst({
+      where: {
+        userId,
+        isActive: true,
+        status: 'ACTIVE',
+        credentialTag: { not: 'NO_LOGIN' },
+        academicYear: { status: 'ACTIVE' },
+      },
+      select: { id: true },
+    });
+    if (activeEnrollment) return;
+
+    const blocked = await prisma.student.findFirst({
+      where: {
+        userId,
+        OR: [
+          { credentialTag: 'NO_LOGIN' },
+          { status: 'GRADUATED' },
+        ],
+      },
+      select: { id: true },
+    });
+
+    if (blocked) {
+      throw { status: 403, message: 'Student login is disabled after graduation' };
+    }
+    throw { status: 403, message: 'Student is not enrolled in any active academic year' };
+  }
+
   // ─── LOGIN ─────────────────────────────────────────────────────────
   /**
    * Accepts username, email, or phone in the first field.
@@ -43,6 +73,10 @@ class AuthService {
 
     if (user.status !== 'active') {
       throw { status: 403, message: 'Account is not active' };
+    }
+
+    if (user.role === 'student') {
+      await this.assertStudentLoginEligible(user.id);
     }
 
     const valid = await verifyPassword(password, user.passwordHash);
@@ -251,6 +285,10 @@ class AuthService {
       throw { status: 401, message: 'User not found or inactive' };
     }
 
+    if (user.role === 'student') {
+      await this.assertStudentLoginEligible(user.id);
+    }
+
     // Re-query current branch memberships
     const memberships = await prisma.branchMember.findMany({
       where: { userId: user.id, isActive: true },
@@ -305,6 +343,10 @@ class AuthService {
       if (!user || user.status !== 'active') {
         throw { status: 401, message: 'User not found or inactive' };
       }
+
+    if (user.role === 'student') {
+      await this.assertStudentLoginEligible(user.id);
+    }
 
       return { user, payload };
     } catch (error) {

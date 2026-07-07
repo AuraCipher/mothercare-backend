@@ -77,5 +77,36 @@ describe('BatchPromotionService', () => {
       batchPromotionService.applyCarry('run-1', 'branch-1'),
     ).rejects.toMatchObject({ status: 400, message: expect.stringContaining('students') });
   });
+
+  test('returns in-progress run in preconditions', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValueOnce(sourceAy as any);
+    prismaMock.batchPromotionRun.findFirst.mockResolvedValueOnce({
+      id: 'run-existing',
+      sourceAcademicYearId: 'ay-source',
+      phase: 'DRAFT',
+    } as any);
+    prismaMock.academicYear.findMany.mockResolvedValueOnce([]);
+
+    const pre = await batchPromotionService.getPreconditions('branch-1', 'ay-source');
+    expect(pre.inProgressRun?.id).toBe('run-existing');
+  });
+
+  test('startRun returns same-source in-progress run', async () => {
+    prismaMock.academicYear.findFirst.mockResolvedValueOnce(sourceAy as any);
+    prismaMock.batchPromotionRun.findFirst.mockResolvedValueOnce({
+      id: 'run-existing',
+      sourceAcademicYearId: 'ay-source',
+      phase: 'DRAFT',
+    } as any);
+    prismaMock.academicYear.findMany.mockResolvedValueOnce([]);
+
+    const result = await batchPromotionService.startRun({
+      branchId: 'branch-1',
+      sourceAcademicYearId: 'ay-source',
+      targetAcademicYearId: 'ay-build',
+      promotedById: 'admin-1',
+    });
+    expect(result.id).toBe('run-existing');
+  });
 });
 
