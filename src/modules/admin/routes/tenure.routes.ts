@@ -125,4 +125,61 @@ router.post('/students/:studentId/class-movements', asyncHandler(async (req: Req
   res.status(201).json({ success: true, data });
 }));
 
+async function resolveBranchMemberByUser(branchId: string, userId: string) {
+  return prisma.branchMember.findUnique({
+    where: { branchId_userId: { branchId, userId } },
+    select: { id: true },
+  });
+}
+
+router.get('/teachers/:userId/tenures', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const member = await resolveBranchMemberByUser(scope.branchId, req.params.userId);
+  if (!member) {
+    res.status(404).json({ success: false, message: 'Teacher is not assigned to this branch' });
+    return;
+  }
+  const data = await tenureService.listBranchTenures(member.id);
+  res.json({ success: true, data });
+}));
+
+router.post('/teachers/:userId/tenures/join', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const member = await resolveBranchMemberByUser(scope.branchId, req.params.userId);
+  if (!member) {
+    res.status(404).json({ success: false, message: 'Teacher is not assigned to this branch' });
+    return;
+  }
+  const data = await tenureService.recordBranchJoin(
+    member.id,
+    req.body.joinedAt ? new Date(req.body.joinedAt) : new Date(),
+    (req as any).user?.id,
+    req.body.previousTenureId,
+  );
+  res.status(201).json({ success: true, data });
+}));
+
+router.post('/teachers/:userId/tenures/leave', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const member = await resolveBranchMemberByUser(scope.branchId, req.params.userId);
+  if (!member) {
+    res.status(404).json({ success: false, message: 'Teacher is not assigned to this branch' });
+    return;
+  }
+  if (!req.body.endReason) {
+    res.status(400).json({ success: false, message: 'endReason is required' });
+    return;
+  }
+  const data = await tenureService.recordBranchLeave(
+    member.id,
+    req.body.leftAt ? new Date(req.body.leftAt) : new Date(),
+    req.body.endReason,
+    req.body.notes,
+  );
+  res.json({ success: true, data });
+}));
+
 export default router;

@@ -3409,4 +3409,48 @@ router.post('/fees/carry-forward', asyncHandler(async (req: Request, res: Respon
   res.status(201).json({ success: true, data: record });
 }));
 
+// GET /admin/fees/carry-forward/sources/:studentId — list archived outstanding dues for same person
+router.get('/fees/carry-forward/sources/:studentId', asyncHandler(async (req: Request, res: Response) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const student = await prisma.student.findUnique({
+    where: { id: req.params.studentId },
+    select: { personId: true },
+  });
+  if (!student?.personId) {
+    res.json({ success: true, data: [] });
+    return;
+  }
+  const rows = await prisma.studentFee.findMany({
+    where: {
+      student: { personId: student.personId },
+      academicYear: { status: 'ARCHIVED', branchId: scope.branchId },
+    },
+    include: {
+      academicYear: { include: { calendar: true } },
+      student: { select: { id: true, name: true } },
+      extraItems: true,
+    },
+    orderBy: [{ year: 'desc' }, { month: 'desc' }],
+  });
+  const data = rows
+    .map((r) => {
+      const extra = (r.extraItems || []).reduce((s, e) => s + e.amount, 0);
+      const remaining = r.netAmount + extra - r.paidAmount;
+      return {
+        id: r.id,
+        month: r.month,
+        year: r.year,
+        academicYearId: r.academicYearId,
+        ayLabel: r.academicYear.calendar?.label,
+        studentId: r.studentId,
+        studentName: r.student?.name,
+        remaining,
+      };
+    })
+    .filter((r) => r.remaining > 0);
+
+  res.json({ success: true, data });
+}));
+
 export default router;
