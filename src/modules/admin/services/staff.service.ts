@@ -20,11 +20,13 @@ export type StaffMemberRow = {
   permissions: ResolvedModulePermission[];
   profilePhotoId?: string | null;
   employeeId?: string | null;
+  workRole?: string | null;
   qualification?: string | null;
 };
 
 export type StaffProfileFields = {
   employeeId?: string;
+  workRole?: string;
   qualification?: string;
   specialization?: string;
   joiningDate?: string;
@@ -76,6 +78,7 @@ class StaffService {
   private serializeProfile(profile: {
     id: string;
     employeeId: string | null;
+    workRole: string | null;
     qualification: string | null;
     specialization: string | null;
     joiningDate: Date | null;
@@ -95,6 +98,7 @@ class StaffService {
     return {
       profileId: profile.id,
       employeeId: profile.employeeId,
+      workRole: profile.workRole,
       qualification: profile.qualification,
       specialization: profile.specialization,
       joiningDate: profile.joiningDate,
@@ -125,6 +129,7 @@ class StaffService {
       profilePhotoId?: string | null;
       staffProfile?: {
         employeeId: string | null;
+        workRole: string | null;
         qualification: string | null;
       } | null;
     };
@@ -150,6 +155,7 @@ class StaffService {
       branchRole: m.role,
       profilePhotoId: m.user.profilePhotoId,
       employeeId: m.user.staffProfile?.employeeId ?? null,
+      workRole: m.user.staffProfile?.workRole ?? null,
       qualification: m.user.staffProfile?.qualification ?? null,
       permissions: m.modulePermissions.map((p) => this.mapPermissionRow(p)),
     };
@@ -314,6 +320,7 @@ class StaffService {
       where: { userId },
       data: {
         employeeId: data.employeeId !== undefined ? (data.employeeId.trim() || null) : undefined,
+        workRole: data.workRole !== undefined ? (data.workRole.trim() || null) : undefined,
         qualification: data.qualification !== undefined ? (data.qualification.trim() || null) : undefined,
         specialization: data.specialization !== undefined ? (data.specialization.trim() || null) : undefined,
         joiningDate: data.joiningDate ? new Date(data.joiningDate) : data.joiningDate === '' ? null : undefined,
@@ -461,6 +468,7 @@ class StaffService {
           userId: user.id,
           phone: profilePhone,
           employeeId: data.employeeId?.trim() || null,
+          workRole: data.workRole?.trim() || null,
           qualification: data.qualification?.trim() || null,
           specialization: data.specialization?.trim() || null,
           joiningDate: data.joiningDate ? new Date(data.joiningDate) : null,
@@ -531,6 +539,7 @@ class StaffService {
           passwordHash,
           role: 'management',
           status: 'active',
+          ...(data.profilePhotoId ? { profilePhotoId: data.profilePhotoId } : {}),
         },
       });
 
@@ -548,9 +557,21 @@ class StaffService {
           userId: user.id,
           phone: profilePhone,
           employeeId: data.employeeId?.trim() || null,
+          workRole: data.workRole?.trim() || null,
+          qualification: data.qualification?.trim() || null,
+          specialization: data.specialization?.trim() || null,
           joiningDate: data.joiningDate ? new Date(data.joiningDate) : new Date(),
           salary: data.salary ?? null,
+          emergencyContact: data.emergencyContact?.trim() || null,
           address: data.address?.trim() || null,
+          dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null,
+          gender: (data.gender as any) || null,
+          bloodGroup: data.bloodGroup?.trim() || null,
+          fatherName: data.fatherName?.trim() || null,
+          cardId: data.cardId?.trim() || null,
+          severeDisease: data.severeDisease?.trim() || null,
+          experience: data.experience?.trim() || null,
+          bio: data.bio?.trim() || null,
         },
       });
 

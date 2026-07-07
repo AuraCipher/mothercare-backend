@@ -1,5 +1,5 @@
 import { prisma } from '../../../lib/prisma';
-import type { AcademicYearStatus } from '@prisma/client';
+import type { AcademicYearAuditAction, AcademicYearStatus } from '@prisma/client';
 
 export interface CreateAcademicYearInput {
   branchId: string;
@@ -15,6 +15,30 @@ export interface UpdateAcademicYearInput {
 }
 
 class AcademicYearService {
+  private async logAudit(input: {
+    academicYearId: string;
+    branchId: string;
+    action: AcademicYearAuditAction;
+    fromStatus?: AcademicYearStatus | null;
+    toStatus?: AcademicYearStatus | null;
+    note?: string;
+    performedById?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    await prisma.academicYearAuditLog.create({
+      data: {
+        academicYearId: input.academicYearId,
+        branchId: input.branchId,
+        action: input.action,
+        fromStatus: input.fromStatus ?? undefined,
+        toStatus: input.toStatus ?? undefined,
+        note: input.note?.trim() || null,
+        performedById: input.performedById ?? null,
+        metadata: input.metadata ?? undefined,
+      },
+    });
+  }
+
   async create(data: CreateAcademicYearInput) {
     // Verify branch exists
     const branch = await prisma.branch.findUnique({ where: { id: data.branchId } });
@@ -67,7 +91,7 @@ class AcademicYearService {
 
     // Historical years are still created as BUILD_STAGE so the admin can add data.
     // They manually click Archive when done, or Publish if it should be the active year.
-    return prisma.academicYear.create({
+    const ay = await prisma.academicYear.create({
       data: {
         branchId: data.branchId,
         calendarId: data.calendarId,
@@ -80,6 +104,17 @@ class AcademicYearService {
         _count: { select: { groups: true, students: true } },
       },
     });
+
+    await this.logAudit({
+      academicYearId: ay.id,
+      branchId: ay.branchId,
+      action: 'CREATED',
+      toStatus: 'BUILD_STAGE',
+      performedById: data.createdById,
+      metadata: { calendarLabel: ay.calendar.label },
+    });
+
+    return ay;
   }
 
   async findAll(branchId?: string, status?: string) {
@@ -202,7 +237,7 @@ class AcademicYearService {
       };
     }
 
-    return prisma.academicYear.update({
+    const updated = await prisma.academicYear.update({
       where: { id },
       data: { status: 'ACTIVE' },
       include: {
@@ -211,9 +246,19 @@ class AcademicYearService {
         _count: { select: { groups: true, students: true } },
       },
     });
+
+    await this.logAudit({
+      academicYearId: id,
+      branchId: ay.branchId,
+      action: 'PUBLISHED',
+      fromStatus: ay.status,
+      toStatus: 'ACTIVE',
+    });
+
+    return updated;
   }
 
-  async archive(id: string) {
+  async archive(id: string, performedById?: string) {
     const ay = await prisma.academicYear.findUnique({ where: { id } });
     if (!ay) {
       throw { status: 404, message: 'Academic year not found' };
@@ -223,17 +268,28 @@ class AcademicYearService {
       throw { status: 409, message: 'Academic year is already ARCHIVED' };
     }
 
-    return prisma.academicYear.update({
+    const updated = await prisma.academicYear.update({
       where: { id },
       data: { status: 'ARCHIVED' },
     });
+
+    await this.logAudit({
+      academicYearId: id,
+      branchId: ay.branchId,
+      action: 'ARCHIVED',
+      fromStatus: ay.status,
+      toStatus: 'ARCHIVED',
+      performedById,
+    });
+
+    return updated;
   }
 
   /**
    * Remove a year from the archive bucket so it can be edited again.
    * BUILD_STAGE = setup / historical data entry; ON_HOLD = paused operational year.
    */
-  async unarchive(id: string, target: 'BUILD_STAGE' | 'ON_HOLD' = 'BUILD_STAGE') {
+  async unarchive(id: string, target: 'BUILD_STAGE' | 'ON_HOLD' = 'BUILD_STAGE', performedById?: string) {
     const ay = await prisma.academicYear.findUnique({ where: { id } });
     if (!ay) {
       throw { status: 404, message: 'Academic year not found' };
@@ -266,7 +322,7 @@ class AcademicYearService {
       }
     }
 
-    return prisma.academicYear.update({
+    const updated = await prisma.academicYear.update({
       where: { id },
       data: { status: target },
       include: {
@@ -275,12 +331,73 @@ class AcademicYearService {
         _count: { select: { groups: true, students: true } },
       },
     });
+
+    await this.logAudit({
+      academicYearId: id,
+      branchId: ay.branchId,
+      action: 'UNARCHIVED',
+      fromStatus: 'ARCHIVED',
+      toStatus: target,
+      performedById,
+      note: `Restored to ${target}`,
+    });
+
+    return updated;
   }
 
-  async delete(id: string) {
+  async getDeletePreview(id: string) {
     const ay = await prisma.academicYear.findUnique({
       where: { id },
-      include: { _count: { select: { groups: true, students: true, members: true } } },
+      include: {
+        calendar: { select: { label: true } },
+        _count: {
+          select: {
+            groups: true,
+            students: true,
+            members: true,
+            attendances: true,
+            studentFees: true,
+            examSessions: true,
+            feeStructures: true,
+            teacherAttendances: true,
+            staffAttendances: true,
+          },
+        },
+      },
+    });
+    if (!ay) throw { status: 404, message: 'Academic year not found' };
+
+    return {
+      id: ay.id,
+      label: ay.calendar.label,
+      status: ay.status,
+      canDelete: ay.status === 'ARCHIVED',
+      counts: ay._count,
+    };
+  }
+
+  async listAuditLogs(branchId: string, opts?: { academicYearId?: string; limit?: number }) {
+    return prisma.academicYearAuditLog.findMany({
+      where: {
+        branchId,
+        ...(opts?.academicYearId ? { academicYearId: opts.academicYearId } : {}),
+      },
+      include: {
+        performedBy: { select: { id: true, name: true } },
+        academicYear: { include: { calendar: { select: { label: true } } } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: opts?.limit ?? 50,
+    });
+  }
+
+  async delete(id: string, opts?: { confirmLabel?: string; performedById?: string }) {
+    const ay = await prisma.academicYear.findUnique({
+      where: { id },
+      include: {
+        calendar: { select: { label: true } },
+        _count: { select: { groups: true, students: true, members: true } },
+      },
     });
     if (!ay) {
       throw { status: 404, message: 'Academic year not found' };
@@ -297,7 +414,28 @@ class AcademicYearService {
       };
     }
 
-    // Only ARCHIVED can be deleted
+    if (ay.status !== 'ARCHIVED') {
+      throw { status: 400, message: 'Only ARCHIVED academic years can be permanently deleted' };
+    }
+
+    const expectedLabel = ay.calendar.label.trim();
+    if (!opts?.confirmLabel || opts.confirmLabel.trim() !== expectedLabel) {
+      throw {
+        status: 400,
+        message: `Type the year label exactly to confirm: "${expectedLabel}"`,
+      };
+    }
+
+    await this.logAudit({
+      academicYearId: id,
+      branchId: ay.branchId,
+      action: 'DELETED',
+      fromStatus: ay.status,
+      performedById: opts.performedById,
+      note: 'Permanent delete from archive bucket',
+      metadata: { counts: ay._count, label: expectedLabel },
+    });
+
     return prisma.academicYear.delete({ where: { id } });
   }
 

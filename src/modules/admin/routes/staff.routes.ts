@@ -39,7 +39,7 @@ router.post('/', asyncHandler(async (req, res) => {
   if (!ctx) return;
   const {
     name, username, password, email, phone, permissions,
-    employeeId, qualification, specialization, joiningDate, salary,
+    employeeId, workRole, qualification, specialization, joiningDate, salary,
     emergencyContact, address, dateOfBirth, gender, bloodGroup,
     fatherName, cardId, severeDisease, experience, bio, profilePhotoId,
   } = req.body;
@@ -61,6 +61,7 @@ router.post('/', asyncHandler(async (req, res) => {
       phone,
       permissions: permissions as ModulePermissionInput[],
       employeeId,
+      workRole,
       qualification,
       specialization,
       joiningDate,
@@ -85,22 +86,14 @@ router.post('/', asyncHandler(async (req, res) => {
 router.post('/workers', asyncHandler(async (req, res) => {
   const ctx = await assertStaffAdmin(req, res);
   if (!ctx) return;
-  const { name, username, phone, employeeId, joiningDate, salary, address } = req.body;
+  const { name, username, phone } = req.body;
   if (!name?.trim()) {
     res.status(400).json({ success: false, message: 'Name is required' });
     return;
   }
   const data = await staffService.createWorker(
     ctx.branchId,
-    {
-      name,
-      username,
-      phone,
-      employeeId,
-      joiningDate,
-      salary: salary != null && salary !== '' ? Number(salary) : undefined,
-      address,
-    },
+    req.body,
     (req as any).user?.id,
   );
   res.status(201).json({ success: true, data });

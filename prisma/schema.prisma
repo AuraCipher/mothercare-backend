@@ -67,6 +67,16 @@ enum AcademicYearStatus {
   ARCHIVED // Closed year — admins can still edit data
 }
 
+enum AcademicYearAuditAction {
+  CREATED
+  PUBLISHED
+  ARCHIVED
+  UNARCHIVED
+  DELETED
+  PAUSED
+  RESUMED
+}
+
 // Year-end close / batch promotion state machine
 enum PromotionStatus {
   PENDING
@@ -279,6 +289,7 @@ model User {
   outgoingPaymentsRecorded   BranchOutgoingPayment[]     @relation("OutgoingPaymentRecordedBy")
   outgoingPaymentsVoided     BranchOutgoingPayment[]     @relation("OutgoingPaymentVoidedBy")
   payrollBulkRunsRecorded    PayrollBulkRun[]            @relation("PayrollBulkRunRecordedBy")
+  academicYearAuditsPerformed AcademicYearAuditLog[]     @relation("AcademicYearAuditPerformedBy")
 
   @@index([username])
   @@index([email])
@@ -382,6 +393,7 @@ model Branch {
   branchOutgoingPayments     BranchOutgoingPayment[]
   payrollMonthBalances       PayrollMonthBalance[]
   payrollBulkRuns            PayrollBulkRun[]
+  academicYearAuditLogs      AcademicYearAuditLog[]
 
   createdById String?
   updatedById String?
@@ -458,9 +470,31 @@ model AcademicYear {
   promotionRunsAsTarget BatchPromotionRun[] @relation("PromotionTargetAy")
   teacherAySnapshots    TeacherAySnapshot[]
   stationaryRecords     StudentStationaryRecord[]
+  auditLogs             AcademicYearAuditLog[]
 
   @@unique([branchId, calendarId])
   @@map("academic_years")
+}
+
+model AcademicYearAuditLog {
+  id             String                  @id @default(uuid())
+  academicYearId String
+  branchId       String
+  action         AcademicYearAuditAction
+  fromStatus     AcademicYearStatus?
+  toStatus       AcademicYearStatus?
+  note           String?
+  performedById  String?
+  metadata       Json?
+  createdAt      DateTime                @default(now())
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  branch       Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  performedBy  User?        @relation("AcademicYearAuditPerformedBy", fields: [performedById], references: [id], onDelete: SetNull)
+
+  @@index([branchId, createdAt])
+  @@index([academicYearId, createdAt])
+  @@map("academic_year_audit_logs")
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -729,6 +763,7 @@ model StaffProfile {
   id               String    @id @default(uuid())
   userId           String    @unique
   employeeId       String?   @unique
+  workRole         String?
   qualification    String?
   specialization   String?
   joiningDate      DateTime?
