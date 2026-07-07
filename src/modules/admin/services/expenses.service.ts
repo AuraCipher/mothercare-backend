@@ -133,6 +133,226 @@ class ExpensesService {
     return results;
   }
 
+  async previewPayrollBulk(
+    branchId: string,
+    salaryMonth: string,
+    academicYearId: string,
+    filters?: {
+      payeeType?: 'TEACHER' | 'STAFF' | 'WORKER' | 'ALL';
+      unpaidOnly?: boolean;
+      missingAttendanceOnly?: boolean;
+    },
+  ) {
+    let rows = await this.listPayroll(branchId, salaryMonth, academicYearId);
+    const payeeType = filters?.payeeType ?? 'ALL';
+    if (payeeType === 'TEACHER') {
+      rows = rows.filter((r) => r.payeeType === 'TEACHER');
+    } else if (payeeType === 'STAFF') {
+      rows = rows.filter((r) => r.payeeType === 'STAFF' && r.branchRole !== 'worker');
+    } else if (payeeType === 'WORKER') {
+      rows = rows.filter((r) => r.branchRole === 'worker');
+    }
+    if (filters?.unpaidOnly) {
+      rows = rows.filter((r) => Number(r.closingBalance ?? 0) > 0);
+    }
+    if (filters?.missingAttendanceOnly) {
+      rows = rows.filter((r) => Number(r.unmarkedDays ?? 0) > 0);
+    }
+    return rows.map((r) => ({
+      ...r,
+      suggestedAmount: Math.max(0, Number(r.closingBalance ?? r.remainingToPay ?? 0)),
+    }));
+  }
+
+  async recordPayrollBulk(
+    branchId: string,
+    recordedById: string,
+    input: {
+      salaryMonth: string;
+      paymentMethod: OutgoingPaymentMethod;
+      paymentKind?: PayrollPaymentKind;
+      note?: string;
+      academicYearId: string;
+      payments: Array<{ payeeUserId: string; amount: number }>;
+    },
+  ) {
+    if (!input.salaryMonth || !input.payments?.length) {
+      throw { status: 400, message: 'salaryMonth and payments array are required' };
+    }
+    const paymentKind = input.paymentKind ?? 'REGULAR';
+    const payees = await listPayrollPayees(branchId);
+    const payeeMap = new Map(payees.map((p) => [p.userId, p]));
+
+    const results: Array<{ payeeUserId: string; success: boolean; voucherNumber?: string; error?: string }> = [];
+    let totalAmount = 0;
+    let successCount = 0;
+    let failCount = 0;
+
+    const bulkRun = await prisma.payrollBulkRun.create({
+      data: {
+        branchId,
+        salaryMonth: input.salaryMonth,
+        paymentMethod: input.paymentMethod,
+        paymentKind,
+        totalAmount: 0,
+        successCount: 0,
+        failCount: 0,
+        note: input.note?.trim() || null,
+        recordedById,
+      },
+    });
+
+    for (const item of input.payments) {
+      if (!item.payeeUserId || !item.amount || item.amount <= 0) {
+        results.push({ payeeUserId: item.payeeUserId, success: false, error: 'Invalid amount' });
+        failCount++;
+        continue;
+      }
+      const payee = payeeMap.get(item.payeeUserId);
+      if (!payee) {
+        results.push({ payeeUserId: item.payeeUserId, success: false, error: 'Payee not found' });
+        failCount++;
+        continue;
+      }
+      try {
+        const computed = await computePayrollMonth(
+          branchId,
+          payee.userId,
+          payee.payeeType,
+          input.salaryMonth,
+          input.academicYearId,
+          payee.profileSalary,
+        );
+        const voucherNumber = await nextVoucherNumber(branchId);
+        await prisma.$transaction(async (tx) => {
+          const header = await tx.branchOutgoingPayment.create({
+            data: {
+              branchId,
+              type: 'PAYROLL',
+              amount: item.amount,
+              paymentMethod: input.paymentMethod,
+              paidAt: new Date(),
+              note: input.note?.trim() || null,
+              voucherNumber,
+              recordedById,
+              bulkRunId: bulkRun.id,
+            },
+          });
+          await tx.payrollPaymentDetail.create({
+            data: {
+              outgoingPaymentId: header.id,
+              payeeUserId: payee.userId,
+              payeeType: payee.payeeType,
+              salaryMonth: input.salaryMonth,
+              paymentKind,
+              profileSalary: payee.profileSalary,
+              attendanceEarned: computed.summary.attendanceEarned,
+              openingBalance: computed.summary.openingBalance,
+            },
+          });
+        });
+        await refreshPayrollMonthBalance(branchId, payee.userId, input.salaryMonth);
+        results.push({ payeeUserId: item.payeeUserId, success: true, voucherNumber });
+        totalAmount += item.amount;
+        successCount++;
+      } catch (e: any) {
+        results.push({
+          payeeUserId: item.payeeUserId,
+          success: false,
+          error: e?.message || 'Payment failed',
+        });
+        failCount++;
+      }
+    }
+
+    await prisma.payrollBulkRun.update({
+      where: { id: bulkRun.id },
+      data: { totalAmount, successCount, failCount },
+    });
+
+    return { bulkRunId: bulkRun.id, totalAmount, successCount, failCount, results };
+  }
+
+  async getPayeePayrollProfile(
+    branchId: string,
+    payeeUserId: string,
+    academicYearId: string,
+    limit = 12,
+  ) {
+    const payees = await listPayrollPayees(branchId);
+    const payee = payees.find((p) => p.userId === payeeUserId);
+    if (!payee) throw { status: 404, message: 'Payee not found in branch payroll list' };
+
+    const balances = await prisma.payrollMonthBalance.findMany({
+      where: { branchId, payeeUserId },
+      orderBy: { salaryMonth: 'desc' },
+      take: limit,
+    });
+
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const hasCurrent = balances.some((b) => b.salaryMonth === currentMonth);
+    const months = [...balances];
+    if (!hasCurrent) {
+      const computed = await computePayrollMonth(
+        branchId,
+        payee.userId,
+        payee.payeeType,
+        currentMonth,
+        academicYearId,
+        payee.profileSalary,
+      );
+      months.unshift({
+        ...computed.balance,
+        salaryMonth: currentMonth,
+      } as typeof balances[0]);
+      if (months.length > limit) months.pop();
+    }
+
+    const payments = await prisma.payrollPaymentDetail.findMany({
+      where: { payeeUserId, outgoingPayment: { branchId, status: 'PAID' } },
+      include: {
+        outgoingPayment: {
+          select: {
+            id: true,
+            amount: true,
+            paymentMethod: true,
+            paidAt: true,
+            voucherNumber: true,
+            note: true,
+            status: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    return {
+      payee,
+      months: months.map((m) => ({
+        salaryMonth: m.salaryMonth,
+        profileSalary: Number(m.profileSalary),
+        attendanceEarned: Number(m.attendanceEarned),
+        openingBalance: Number(m.openingBalance),
+        totalPaid: Number(m.totalPaid),
+        closingBalance: Number(m.closingBalance),
+        unmarkedDays: m.unmarkedDays,
+        workingDays: m.workingDays,
+      })),
+      payments: payments.map((p) => ({
+        id: p.id,
+        salaryMonth: p.salaryMonth,
+        paymentKind: p.paymentKind,
+        amount: Number(p.outgoingPayment.amount),
+        paymentMethod: p.outgoingPayment.paymentMethod,
+        paidAt: p.outgoingPayment.paidAt,
+        voucherNumber: p.outgoingPayment.voucherNumber,
+        note: p.outgoingPayment.note,
+        status: p.outgoingPayment.status,
+      })),
+    };
+  }
+
   async recordPayrollPayment(
     branchId: string,
     recordedById: string,

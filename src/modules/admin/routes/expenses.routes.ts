@@ -43,6 +43,43 @@ router.get('/expenses/payroll/payees', asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 }));
 
+router.get('/expenses/payroll/preview', asyncHandler(async (req, res) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const salaryMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
+  const payeeType = req.query.payeeType as 'TEACHER' | 'STAFF' | 'WORKER' | 'ALL' | undefined;
+  const data = await expensesService.previewPayrollBulk(scope.branchId, salaryMonth, scope.academicYearId, {
+    payeeType: payeeType || 'ALL',
+    unpaidOnly: req.query.unpaidOnly === 'true',
+    missingAttendanceOnly: req.query.missingAttendanceOnly === 'true',
+  });
+  res.json({ success: true, data, month: salaryMonth });
+}));
+
+router.post('/expenses/payroll/bulk', asyncHandler(async (req, res) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const userId = (req as any).user?.id;
+  const data = await expensesService.recordPayrollBulk(scope.branchId, userId, {
+    ...req.body,
+    academicYearId: scope.academicYearId,
+  });
+  res.status(201).json({ success: true, data });
+}));
+
+router.get('/expenses/payroll/profile/:userId', asyncHandler(async (req, res) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 12;
+  const data = await expensesService.getPayeePayrollProfile(
+    scope.branchId,
+    req.params.userId,
+    scope.academicYearId,
+    limit,
+  );
+  res.json({ success: true, data });
+}));
+
 router.get('/expenses/payroll', asyncHandler(async (req, res) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
