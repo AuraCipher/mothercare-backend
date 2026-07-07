@@ -102,6 +102,8 @@ class ExpensesService {
     consumerNumber?: string;
     contactNumber?: string;
     note?: string;
+    reminderDayOfMonth?: number;
+    typicalAmount?: number;
   }) {
     const name = data.name.trim();
     if (!name || !data.categoryId) throw { status: 400, message: 'name and categoryId are required' };
@@ -113,7 +115,70 @@ class ExpensesService {
         consumerNumber: data.consumerNumber?.trim() || null,
         contactNumber: data.contactNumber?.trim() || null,
         note: data.note?.trim() || null,
+        reminderDayOfMonth: data.reminderDayOfMonth ?? null,
+        typicalAmount: data.typicalAmount ?? null,
       },
+    });
+  }
+
+  async updateUtilityProvider(branchId: string, id: string, data: {
+    name?: string;
+    consumerNumber?: string;
+    contactNumber?: string;
+    note?: string;
+    reminderDayOfMonth?: number | null;
+    typicalAmount?: number | null;
+    isActive?: boolean;
+  }) {
+    const current = await prisma.utilityProvider.findFirst({ where: { id, branchId } });
+    if (!current) throw { status: 404, message: 'Provider not found' };
+    return prisma.utilityProvider.update({
+      where: { id },
+      data: {
+        name: data.name?.trim() ?? undefined,
+        consumerNumber: data.consumerNumber !== undefined ? (data.consumerNumber.trim() || null) : undefined,
+        contactNumber: data.contactNumber !== undefined ? (data.contactNumber.trim() || null) : undefined,
+        note: data.note !== undefined ? (data.note.trim() || null) : undefined,
+        reminderDayOfMonth: data.reminderDayOfMonth !== undefined ? data.reminderDayOfMonth : undefined,
+        typicalAmount: data.typicalAmount !== undefined ? data.typicalAmount : undefined,
+        isActive: typeof data.isActive === 'boolean' ? data.isActive : undefined,
+      },
+    });
+  }
+
+  async getLastUtilityBill(branchId: string, providerId: string) {
+    const bill = await prisma.branchOutgoingPayment.findFirst({
+      where: {
+        branchId,
+        type: 'UTILITY',
+        status: 'PAID',
+        utilityDetail: { providerId },
+      },
+      include: { utilityDetail: { include: { category: true, provider: true } } },
+      orderBy: { paidAt: 'desc' },
+    });
+    return bill;
+  }
+
+  async duplicateLastUtilityBill(
+    branchId: string,
+    recordedById: string,
+    providerId: string,
+    overrides?: { amount?: number; paymentMethod?: OutgoingPaymentMethod },
+  ) {
+    const last = await this.getLastUtilityBill(branchId, providerId);
+    if (!last?.utilityDetail) throw { status: 404, message: 'No previous bill found for this provider' };
+    const d = last.utilityDetail;
+    return this.recordUtility(branchId, recordedById, {
+      categoryId: d.categoryId,
+      providerId,
+      providerName: d.providerName,
+      amount: overrides?.amount ?? Number(last.amount),
+      paymentMethod: overrides?.paymentMethod ?? last.paymentMethod,
+      paymentKind: d.paymentKind,
+      consumerNumber: d.consumerNumber ?? undefined,
+      billReference: d.billReference ?? undefined,
+      note: `Duplicated from ${last.voucherNumber}`,
     });
   }
 
@@ -128,6 +193,8 @@ class ExpensesService {
         ...p,
         ...computed.summary,
         balanceId: computed.balance.id,
+        missingDates: computed.missingDates,
+        attendancePath: p.payeeType === 'TEACHER' ? '/admin/attendance/teachers' : '/admin/attendance/staff',
       });
     }
     return results;
@@ -470,11 +537,35 @@ class ExpensesService {
       reference?: string;
       note?: string;
       paidAt?: string;
+      saveProvider?: boolean;
+      contactNumber?: string;
+      reminderDayOfMonth?: number;
     },
   ) {
     if (!input.categoryId || !input.providerName?.trim() || !input.amount || input.amount <= 0) {
       throw { status: 400, message: 'categoryId, providerName, and amount (>0) are required' };
     }
+
+    let providerId = input.providerId;
+    if (!providerId && input.saveProvider) {
+      const existing = await prisma.utilityProvider.findFirst({
+        where: { branchId, name: input.providerName.trim() },
+      });
+      if (existing) {
+        providerId = existing.id;
+      } else {
+        const created = await this.createUtilityProvider(branchId, {
+          categoryId: input.categoryId,
+          name: input.providerName.trim(),
+          consumerNumber: input.consumerNumber,
+          contactNumber: input.contactNumber,
+          reminderDayOfMonth: input.reminderDayOfMonth,
+          typicalAmount: input.amount,
+        });
+        providerId = created.id;
+      }
+    }
+
     const voucherNumber = await nextVoucherNumber(branchId);
     return prisma.$transaction(async (tx) => {
       const header = await tx.branchOutgoingPayment.create({
@@ -494,7 +585,7 @@ class ExpensesService {
         data: {
           outgoingPaymentId: header.id,
           categoryId: input.categoryId,
-          providerId: input.providerId || null,
+          providerId: providerId || null,
           providerName: input.providerName.trim(),
           consumerNumber: input.consumerNumber?.trim() || null,
           billReference: input.billReference?.trim() || null,
@@ -504,6 +595,12 @@ class ExpensesService {
           paymentKind: input.paymentKind ?? 'REGULAR',
         },
       });
+      if (providerId && input.amount) {
+        await tx.utilityProvider.update({
+          where: { id: providerId },
+          data: { typicalAmount: input.amount },
+        });
+      }
       return header;
     });
   }
@@ -613,6 +710,108 @@ class ExpensesService {
     });
     if (!payment) throw { status: 404, message: 'Voucher not found' };
     return payment;
+  }
+
+  private csvEscape(v: unknown): string {
+    const s = v == null ? '' : String(v);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  }
+
+  private toCsv(headers: string[], rows: unknown[][]): string {
+    const lines = [headers.join(',')];
+    for (const row of rows) {
+      lines.push(row.map((c) => this.csvEscape(c)).join(','));
+    }
+    return lines.join('\n');
+  }
+
+  async listVouchers(branchId: string, opts?: {
+    from?: string; to?: string; type?: OutgoingPaymentType; status?: string;
+  }) {
+    const where: any = { branchId };
+    if (opts?.type) where.type = opts.type;
+    if (opts?.status) where.status = opts.status;
+    if (opts?.from || opts?.to) {
+      where.paidAt = {};
+      if (opts.from) where.paidAt.gte = new Date(opts.from);
+      if (opts.to) where.paidAt.lte = new Date(`${opts.to}T23:59:59`);
+    }
+    return prisma.branchOutgoingPayment.findMany({
+      where,
+      include: {
+        payrollDetail: { include: { payee: { select: { name: true } } } },
+        utilityDetail: { include: { category: true } },
+        otherDetail: { include: { category: true } },
+        recordedBy: { select: { name: true } },
+      },
+      orderBy: { paidAt: 'desc' },
+      take: 500,
+    });
+  }
+
+  async exportPayrollCsv(branchId: string, salaryMonth: string, academicYearId: string) {
+    const rows = await this.listPayroll(branchId, salaryMonth, academicYearId);
+    const csv = this.toCsv(
+      ['Name', 'Work Role', 'Type', 'Profile Salary', 'Earned', 'Opening', 'Paid', 'Balance', 'Unmarked Days'],
+      rows.map((r) => [
+        r.name, r.workRole ?? '', `${r.payeeType} / ${r.branchRole}`,
+        r.profileSalary, r.attendanceEarned, r.openingBalance, r.totalPaid, r.closingBalance, r.unmarkedDays,
+      ]),
+    );
+    return { filename: `payroll-${salaryMonth}.csv`, csv };
+  }
+
+  async exportUtilitiesCsv(branchId: string, opts?: { from?: string; to?: string }) {
+    const bills = await this.listUtilities(branchId, opts);
+    const csv = this.toCsv(
+      ['Date', 'Voucher', 'Category', 'Provider', 'Kind', 'Amount', 'Method', 'Status'],
+      bills.map((b) => [
+        new Date(b.paidAt).toISOString().slice(0, 10),
+        b.voucherNumber,
+        b.utilityDetail?.category?.name ?? '',
+        b.utilityDetail?.providerName ?? '',
+        b.utilityDetail?.paymentKind ?? '',
+        Number(b.amount),
+        b.paymentMethod,
+        b.status,
+      ]),
+    );
+    return { filename: `utility-bills-${opts?.from || 'all'}.csv`, csv };
+  }
+
+  async exportOthersCsv(branchId: string, opts?: { from?: string; to?: string }) {
+    const payments = await this.listOthers(branchId, opts);
+    const csv = this.toCsv(
+      ['Date', 'Voucher', 'Category', 'Payee', 'Kind', 'Amount', 'Method', 'Status'],
+      payments.map((p) => [
+        new Date(p.paidAt).toISOString().slice(0, 10),
+        p.voucherNumber,
+        p.otherDetail?.category?.name ?? '',
+        p.otherDetail?.payeeName ?? '',
+        p.otherDetail?.paymentKind ?? '',
+        Number(p.amount),
+        p.paymentMethod,
+        p.status,
+      ]),
+    );
+    return { filename: `other-payments-${opts?.from || 'all'}.csv`, csv };
+  }
+
+  async listUtilityReminders(branchId: string) {
+    const today = new Date().getDate();
+    const providers = await prisma.utilityProvider.findMany({
+      where: { branchId, isActive: true, reminderDayOfMonth: { not: null } },
+      include: { category: { select: { name: true } } },
+      orderBy: { reminderDayOfMonth: 'asc' },
+    });
+    return providers.map((p) => ({
+      ...p,
+      typicalAmount: p.typicalAmount != null ? Number(p.typicalAmount) : null,
+      isDueSoon: p.reminderDayOfMonth != null && Math.abs(p.reminderDayOfMonth - today) <= 3,
+    }));
   }
 }
 

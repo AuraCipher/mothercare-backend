@@ -14,6 +14,7 @@ export type PayrollPayeeRow = {
   branchRole: string;
   profileSalary: number;
   employeeId: string | null;
+  workRole: string | null;
 };
 
 const STAFF_PAYROLL_ROLES = ['management', 'canteen_staff', 'worker'] as const;
@@ -34,6 +35,16 @@ export async function listPayrollPayees(branchId: string): Promise<PayrollPayeeR
     orderBy: { name: 'asc' },
   });
 
+  const teacherRows: PayrollPayeeRow[] = teachers.map((t) => ({
+    userId: t.id,
+    name: t.name,
+    payeeType: 'TEACHER',
+    branchRole: t.branchMembers[0]?.role ?? 'teacher',
+    profileSalary: t.teacherProfile?.salary != null ? Number(t.teacherProfile.salary) : 0,
+    employeeId: t.teacherProfile?.employeeId ?? null,
+    workRole: null,
+  }));
+
   const staff = await prisma.user.findMany({
     where: {
       status: 'active',
@@ -44,20 +55,11 @@ export async function listPayrollPayees(branchId: string): Promise<PayrollPayeeR
     select: {
       id: true,
       name: true,
-      staffProfile: { select: { salary: true, employeeId: true } },
+      staffProfile: { select: { salary: true, employeeId: true, workRole: true } },
       branchMembers: { where: { branchId }, select: { role: true } },
     },
     orderBy: { name: 'asc' },
   });
-
-  const teacherRows: PayrollPayeeRow[] = teachers.map((t) => ({
-    userId: t.id,
-    name: t.name,
-    payeeType: 'TEACHER',
-    branchRole: t.branchMembers[0]?.role ?? 'teacher',
-    profileSalary: t.teacherProfile?.salary != null ? Number(t.teacherProfile.salary) : 0,
-    employeeId: t.teacherProfile?.employeeId ?? null,
-  }));
 
   const staffRows: PayrollPayeeRow[] = staff
     .filter((s) => s.branchMembers[0]?.role !== 'teacher')
@@ -68,6 +70,7 @@ export async function listPayrollPayees(branchId: string): Promise<PayrollPayeeR
       branchRole: s.branchMembers[0]?.role ?? 'management',
       profileSalary: s.staffProfile?.salary != null ? Number(s.staffProfile.salary) : 0,
       employeeId: s.staffProfile?.employeeId ?? null,
+      workRole: s.staffProfile?.workRole ?? null,
     }));
 
   return [...teacherRows, ...staffRows];

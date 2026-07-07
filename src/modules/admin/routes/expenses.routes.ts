@@ -22,6 +22,17 @@ router.get('/expenses/summary', asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 }));
 
+router.get('/expenses/vouchers', asyncHandler(async (req, res) => {
+  const branchId = resolveBranchId(req);
+  const data = await expensesService.listVouchers(branchId, {
+    from: req.query.from as string | undefined,
+    to: req.query.to as string | undefined,
+    type: req.query.type as any,
+    status: req.query.status as string | undefined,
+  });
+  res.json({ success: true, data });
+}));
+
 router.get('/expenses/vouchers/:id', asyncHandler(async (req, res) => {
   const branchId = resolveBranchId(req);
   const data = await expensesService.getVoucher(branchId, req.params.id);
@@ -172,6 +183,59 @@ router.post('/expenses/utilities/providers', asyncHandler(async (req, res) => {
   const branchId = resolveBranchId(req);
   const data = await expensesService.createUtilityProvider(branchId, req.body);
   res.status(201).json({ success: true, data });
+}));
+
+router.post('/expenses/utilities/duplicate-last', asyncHandler(async (req, res) => {
+  const branchId = resolveBranchId(req);
+  const userId = (req as any).user?.id;
+  const { providerId, amount, paymentMethod } = req.body;
+  if (!providerId) {
+    res.status(400).json({ success: false, message: 'providerId is required' });
+    return;
+  }
+  const data = await expensesService.duplicateLastUtilityBill(branchId, userId, providerId, {
+    amount: amount != null ? Number(amount) : undefined,
+    paymentMethod,
+  });
+  res.status(201).json({ success: true, data });
+}));
+
+router.patch('/expenses/utilities/providers/:id', asyncHandler(async (req, res) => {
+  const branchId = resolveBranchId(req);
+  const data = await expensesService.updateUtilityProvider(branchId, req.params.id, req.body);
+  res.json({ success: true, data });
+}));
+
+router.get('/expenses/utilities/reminders', asyncHandler(async (req, res) => {
+  const branchId = resolveBranchId(req);
+  const data = await expensesService.listUtilityReminders(branchId);
+  res.json({ success: true, data });
+}));
+
+router.get('/expenses/export/payroll', asyncHandler(async (req, res) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const salaryMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
+  const data = await expensesService.exportPayrollCsv(scope.branchId, salaryMonth, scope.academicYearId);
+  res.json({ success: true, data });
+}));
+
+router.get('/expenses/export/utilities', asyncHandler(async (req, res) => {
+  const branchId = resolveBranchId(req);
+  const data = await expensesService.exportUtilitiesCsv(branchId, {
+    from: req.query.from as string | undefined,
+    to: req.query.to as string | undefined,
+  });
+  res.json({ success: true, data });
+}));
+
+router.get('/expenses/export/others', asyncHandler(async (req, res) => {
+  const branchId = resolveBranchId(req);
+  const data = await expensesService.exportOthersCsv(branchId, {
+    from: req.query.from as string | undefined,
+    to: req.query.to as string | undefined,
+  });
+  res.json({ success: true, data });
 }));
 
 router.get('/expenses/utilities', asyncHandler(async (req, res) => {
