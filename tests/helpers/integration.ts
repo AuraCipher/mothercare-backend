@@ -16,6 +16,8 @@ export function mockActiveAcademicYear(overrides: Record<string, unknown> = {}) 
     id: TEST_AY_ID,
     branchId: TEST_BRANCH_ID,
     status: 'ACTIVE',
+    calendar: { label: '2025-2026' },
+    branch: { id: TEST_BRANCH_ID, name: 'Test Branch', code: 'TST' },
     ...overrides,
   };
   (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue(ay);

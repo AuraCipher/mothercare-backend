@@ -47,6 +47,24 @@ class AuthService {
     throw { status: 403, message: 'Student is not enrolled in any active academic year' };
   }
 
+  private async assertTeacherLoginEligible(userId: string) {
+    const profile = await prisma.teacherProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!profile) {
+      throw { status: 403, message: 'Teacher profile not found. Contact school administration.' };
+    }
+
+    const membership = await prisma.branchMember.findFirst({
+      where: { userId, role: 'teacher', isActive: true },
+      select: { id: true },
+    });
+    if (!membership) {
+      throw { status: 403, message: 'No active teacher branch membership. Contact school administration.' };
+    }
+  }
+
   // ─── LOGIN ─────────────────────────────────────────────────────────
   /**
    * Accepts username, email, or phone in the first field.
@@ -77,6 +95,9 @@ class AuthService {
 
     if (user.role === 'student') {
       await this.assertStudentLoginEligible(user.id);
+    }
+    if (user.role === 'teacher') {
+      await this.assertTeacherLoginEligible(user.id);
     }
 
     const valid = await verifyPassword(password, user.passwordHash);
@@ -242,6 +263,9 @@ class AuthService {
     if (user.role === 'student') {
       await this.assertStudentLoginEligible(user.id);
     }
+    if (user.role === 'teacher') {
+      await this.assertTeacherLoginEligible(user.id);
+    }
 
     // Update last seen and generate new token
     await prisma.user.update({
@@ -293,6 +317,9 @@ class AuthService {
 
     if (user.role === 'student') {
       await this.assertStudentLoginEligible(user.id);
+    }
+    if (user.role === 'teacher') {
+      await this.assertTeacherLoginEligible(user.id);
     }
 
     // Re-query current branch memberships
@@ -352,6 +379,9 @@ class AuthService {
 
     if (user.role === 'student') {
       await this.assertStudentLoginEligible(user.id);
+    }
+    if (user.role === 'teacher') {
+      await this.assertTeacherLoginEligible(user.id);
     }
 
       return { user, payload };

@@ -27,6 +27,7 @@ export interface TokenPayload {
   role: 'super_admin' | 'management' | 'teacher' | 'parent';
   name?: string;
   schoolId?: string;
+  branchIds?: string[];
 }
 
 // ─── Token Generation ───────────────────────────────────
