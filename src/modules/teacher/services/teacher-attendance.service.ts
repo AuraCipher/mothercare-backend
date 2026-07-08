@@ -76,6 +76,10 @@ export async function saveGroupAttendanceBatch(
 ) {
   assertTeacherAssignedToGroup(ctx, groupId);
 
+  if (!ctx.branch.teachersCanMarkAttendance) {
+    throw { status: 403, message: 'Attendance marking is disabled for teachers at this branch' };
+  }
+
   if (!records?.length) {
     throw { status: 400, message: 'records[] is required' };
   }

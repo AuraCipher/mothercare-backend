@@ -55,10 +55,10 @@ router.get('/teachers/:id', asyncHandler(async (req: Request, res: Response) => 
 
 // TC-014: PUT /admin/teachers/:id — Update teacher profile
 router.put('/teachers/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio, profilePhotoId, portalAccess } = req.body;
+  const { employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio, profilePhotoId, portalAccess, canViewParentContact, hodParentContactScope } = req.body;
 
   const profile = await teacherProfileService.update(req.params.id, {
-    employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio, profilePhotoId, portalAccess,
+    employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio, profilePhotoId, portalAccess, canViewParentContact, hodParentContactScope,
     updatedById: (req as any).user?.id,
   });
 

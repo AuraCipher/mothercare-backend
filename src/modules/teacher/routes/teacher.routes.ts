@@ -21,6 +21,12 @@ import {
   listTeacherExamSubjects,
   saveTeacherMarks,
 } from '../services/teacher-marks.service';
+import { getHodDepartmentOverview, listHodExamSubjects } from '../services/teacher-hod.service';
+import {
+  listTeacherNotifications,
+  markAllTeacherNotificationsRead,
+  markTeacherNotificationRead,
+} from '../services/teacher-notifications.service';
 import { getTeacherContext, TeacherAccessError } from '../utils/teacher-assignment.guard';
 import type { TeacherContext } from '../services/teacher-context.service';
 import { prisma } from '../../../lib/prisma';
@@ -144,6 +150,61 @@ router.get(
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
     const data = await getTeacherMarksGrid(ctx, req.params.examClassSubjectId);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/hod/department',
+  asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    if (!ctx.isHod) {
+      res.status(403).json({ success: false, message: 'HOD access only' });
+      return;
+    }
+    const data = await getHodDepartmentOverview(ctx);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/hod/marks/subjects',
+  asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    if (!ctx.isHod) {
+      res.status(403).json({ success: false, message: 'HOD access only' });
+      return;
+    }
+    const data = await listHodExamSubjects(ctx);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/notifications',
+  asyncHandler(async (req, res) => {
+    const user = (req as any).teacherUser;
+    const unreadOnly = req.query.unreadOnly === 'true';
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const data = await listTeacherNotifications(user.id, { unreadOnly, limit });
+    res.json({ success: true, data });
+  }),
+);
+
+router.patch(
+  '/notifications/:id/read',
+  asyncHandler(async (req, res) => {
+    const user = (req as any).teacherUser;
+    const data = await markTeacherNotificationRead(user.id, req.params.id);
+    res.json({ success: true, data });
+  }),
+);
+
+router.post(
+  '/notifications/read-all',
+  asyncHandler(async (req, res) => {
+    const user = (req as any).teacherUser;
+    const data = await markAllTeacherNotificationsRead(user.id);
     res.json({ success: true, data });
   }),
 );

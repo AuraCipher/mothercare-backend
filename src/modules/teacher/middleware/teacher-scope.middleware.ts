@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../../../lib/prisma';
 import { TEACHER_READ_ONLY_AY_STATUSES, TEACHER_PORTAL_ACCESS } from '../teacher.constants';
 import type { TeacherContext } from '../services/teacher-context.service';
+import { resolveHodSubjectIds } from '../utils/teacher-hod.guard';
 
 function extractBranchId(req: Request): string | undefined {
   return (
@@ -52,7 +53,16 @@ export async function teacherScopeMiddleware(
         branchId: true,
         status: true,
         calendar: { select: { label: true } },
-        branch: { select: { id: true, name: true, code: true } },
+        branch: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            teacherParentContactEnabled: true,
+            teachersCanMarkAttendance: true,
+            teachersCanEnterMarks: true,
+          },
+        },
       },
     });
 
@@ -112,9 +122,17 @@ export async function teacherScopeMiddleware(
 
     const profile = await prisma.teacherProfile.findUnique({
       where: { userId },
-      select: { portalAccess: true },
+      select: {
+        portalAccess: true,
+        canViewParentContact: true,
+        hodParentContactScope: true,
+      },
     });
     const portalAccess = (profile?.portalAccess || TEACHER_PORTAL_ACCESS.FULL) as TeacherContext['portalAccess'];
+    const hodSubjectIds =
+      portalAccess === TEACHER_PORTAL_ACCESS.FROZEN
+        ? []
+        : await resolveHodSubjectIds(userId, academicYearId, assignments);
 
     const classTeacherGroupIds = assignments
       .filter((a) => a.isClassTeacher)
@@ -143,6 +161,10 @@ export async function teacherScopeMiddleware(
       portalAccess,
       isReadOnly,
       freezeReason,
+      canViewParentContact: profile?.canViewParentContact ?? false,
+      hodParentContactScope: profile?.hodParentContactScope ?? 'ASSIGNED_ONLY',
+      hodSubjectIds,
+      isHod: hodSubjectIds.length > 0,
       assignments: portalAccess === TEACHER_PORTAL_ACCESS.FROZEN ? [] : assignments,
       classTeacherGroupIds: portalAccess === TEACHER_PORTAL_ACCESS.FROZEN ? [] : classTeacherGroupIds,
       assignmentGroupIds:

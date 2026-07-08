@@ -29,6 +29,11 @@ export interface TeacherBootstrapData {
     freezeReason?: string;
     assignmentCount: number;
     classTeacherGroupIds: string[];
+    isHod: boolean;
+    hodSubjectCount: number;
+    canViewParentContact: boolean;
+    teachersCanMarkAttendance: boolean;
+    teachersCanEnterMarks: boolean;
   };
   assignments: TeacherContext['assignments'];
 }
@@ -54,6 +59,12 @@ export function buildBootstrapResponse(ctx: TeacherContext, user: TeacherBootstr
       freezeReason: ctx.freezeReason,
       assignmentCount: ctx.assignments.length,
       classTeacherGroupIds: ctx.classTeacherGroupIds,
+      isHod: ctx.isHod,
+      hodSubjectCount: ctx.hodSubjectIds.length,
+      canViewParentContact:
+        ctx.canViewParentContact && ctx.branch.teacherParentContactEnabled,
+      teachersCanMarkAttendance: ctx.branch.teachersCanMarkAttendance,
+      teachersCanEnterMarks: ctx.branch.teachersCanEnterMarks,
     },
     assignments: ctx.assignments,
   };

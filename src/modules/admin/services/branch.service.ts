@@ -16,6 +16,9 @@ export interface UpdateBranchInput {
   phone?: string;
   email?: string;
   logoUrl?: string;
+  teacherParentContactEnabled?: boolean;
+  teachersCanMarkAttendance?: boolean;
+  teachersCanEnterMarks?: boolean;
   updatedById?: string;
 }
 

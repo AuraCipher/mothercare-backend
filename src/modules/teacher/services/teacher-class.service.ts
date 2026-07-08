@@ -1,6 +1,10 @@
 import { prisma } from '../../../lib/prisma';
 import type { TeacherContext } from './teacher-context.service';
 import { assertTeacherAssignedToGroup } from '../utils/teacher-assignment.guard';
+import {
+  canViewParentContactsForGroup,
+  loadParentContactsForStudents,
+} from '../utils/teacher-parent-contact.guard';
 
 export async function getClassStudents(ctx: TeacherContext, groupId: string) {
   assertTeacherAssignedToGroup(ctx, groupId);
@@ -31,6 +35,21 @@ export async function getClassStudents(ctx: TeacherContext, groupId: string) {
   });
 
   const isClassTeacher = ctx.classTeacherGroupIds.includes(groupId);
+  const showParentContacts = await canViewParentContactsForGroup(ctx, groupId);
+  const parentContactsByStudent = showParentContacts
+    ? await loadParentContactsForStudents(students.map((s) => s.id))
+    : null;
 
-  return { group, isClassTeacher, students, total: students.length };
+  return {
+    group,
+    isClassTeacher,
+    showParentContacts,
+    students: students.map((s) => ({
+      ...s,
+      parentContacts: showParentContacts
+        ? parentContactsByStudent?.get(s.id) ?? []
+        : undefined,
+    })),
+    total: students.length,
+  };
 }

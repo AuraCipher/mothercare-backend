@@ -16,10 +16,21 @@ export interface TeacherContext {
   academicYearId: string;
   academicYearStatus: string;
   academicYearLabel: string;
-  branch: { id: string; name: string; code: string };
+  branch: {
+    id: string;
+    name: string;
+    code: string;
+    teacherParentContactEnabled: boolean;
+    teachersCanMarkAttendance: boolean;
+    teachersCanEnterMarks: boolean;
+  };
   portalAccess: 'FULL' | 'READ_ONLY' | 'FROZEN';
   isReadOnly: boolean;
   freezeReason?: string;
+  canViewParentContact: boolean;
+  hodParentContactScope: 'ASSIGNED_ONLY' | 'DEPARTMENT_ALL';
+  hodSubjectIds: string[];
+  isHod: boolean;
   assignments: TeacherAssignmentRow[];
   classTeacherGroupIds: string[];
   assignmentGroupIds: string[];

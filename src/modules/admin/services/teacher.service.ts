@@ -52,6 +52,8 @@ export interface UpdateTeacherProfileInput {
   bio?: string;
   profilePhotoId?: string;
   portalAccess?: 'FULL' | 'READ_ONLY' | 'FROZEN';
+  canViewParentContact?: boolean;
+  hodParentContactScope?: 'ASSIGNED_ONLY' | 'DEPARTMENT_ALL';
   updatedById?: string;
 }
 
@@ -334,6 +336,12 @@ class TeacherProfileService {
         experience: data.experience,
         bio: data.bio,
         ...(data.portalAccess !== undefined && { portalAccess: data.portalAccess }),
+        ...(data.canViewParentContact !== undefined && {
+          canViewParentContact: data.canViewParentContact,
+        }),
+        ...(data.hodParentContactScope !== undefined && {
+          hodParentContactScope: data.hodParentContactScope,
+        }),
       },
       include: {
         user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true, profilePhotoId: true } },

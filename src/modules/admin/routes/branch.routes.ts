@@ -54,14 +54,24 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
 
 // PUT /admin/branches/:id — Update branch (BA-005)
 router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { name, address, phone, email, logoUrl } = req.body;
+  const { name, address, phone, email, logoUrl, teacherParentContactEnabled, teachersCanMarkAttendance, teachersCanEnterMarks } = req.body;
 
   if (name !== undefined && (typeof name !== 'string' || name.trim().length === 0)) {
     res.status(400).json({ success: false, message: 'Branch name cannot be empty' });
     return;
   }
 
-  const branch = await branchService.update(req.params.id, { name, address, phone, email, logoUrl, updatedById: (req as any).user?.id });
+  const branch = await branchService.update(req.params.id, {
+    name,
+    address,
+    phone,
+    email,
+    logoUrl,
+    teacherParentContactEnabled,
+    teachersCanMarkAttendance,
+    teachersCanEnterMarks,
+    updatedById: (req as any).user?.id,
+  });
   res.json({ success: true, data: branch });
 }));
 

@@ -368,6 +368,9 @@ model Branch {
   email     String?
   logoUrl   String?
   isActive  Boolean  @default(true)
+  teacherParentContactEnabled Boolean @default(false)
+  teachersCanMarkAttendance   Boolean @default(true)
+  teachersCanEnterMarks       Boolean @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -729,11 +732,18 @@ enum TeacherPortalAccess {
   FROZEN
 }
 
+enum HodParentContactScope {
+  ASSIGNED_ONLY
+  DEPARTMENT_ALL
+}
+
 model TeacherProfile {
   id               String               @id @default(uuid())
   userId           String               @unique
   employeeId       String?              @unique
-  portalAccess     TeacherPortalAccess  @default(FULL)
+  portalAccess           TeacherPortalAccess   @default(FULL)
+  canViewParentContact   Boolean               @default(false)
+  hodParentContactScope  HodParentContactScope @default(ASSIGNED_ONLY)
   qualification    String?
   specialization   String?
   joiningDate      DateTime?

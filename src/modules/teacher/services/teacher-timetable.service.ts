@@ -59,3 +59,12 @@ export async function getTeacherTimetable(
 
   return { timetableName: timetable.name, slots };
 }
+
+/** Periods scheduled for the current weekday (0=Sun … 6=Sat). */
+export function filterTimetableForToday(
+  slots: TeacherTimetableSlot[],
+  now = new Date(),
+): TeacherTimetableSlot[] {
+  const day = now.getDay();
+  return slots.filter((slot) => slot.activeDays.includes(day));
+}

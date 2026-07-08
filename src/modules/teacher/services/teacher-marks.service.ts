@@ -5,6 +5,7 @@ import {
   assertTeacherAssignedToSubject,
   TeacherAccessError,
 } from '../utils/teacher-assignment.guard';
+import { assertTeacherHodOrAssignedToSubject } from '../utils/teacher-hod.guard';
 
 async function getExamClassSubjectForTeacher(ctx: TeacherContext, examClassSubjectId: string) {
   const ecs = await prisma.examClassSubject.findFirst({
@@ -46,7 +47,7 @@ async function getExamClassSubjectForTeacher(ctx: TeacherContext, examClassSubje
   }
 
   try {
-    assertTeacherAssignedToSubject(ctx, ecs.examClass.class.id, ecs.subject.id);
+    assertTeacherHodOrAssignedToSubject(ctx, ecs.examClass.class.id, ecs.subject.id);
   } catch (err) {
     if (err instanceof TeacherAccessError) throw err;
     throw err;
@@ -71,6 +72,9 @@ function resolveTeacherMarksAccess(
   exam: { status: string; teacherMarksEntry: boolean },
   lockedByReportCards: boolean,
 ) {
+  if (!ctx.branch.teachersCanEnterMarks) {
+    return { canWrite: false, restrictReason: 'BRANCH_DISABLED' as const };
+  }
   if (ctx.isReadOnly) {
     return { canWrite: false, restrictReason: 'READ_ONLY_YEAR' as const };
   }
