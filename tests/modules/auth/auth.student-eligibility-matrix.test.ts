@@ -19,6 +19,8 @@ describe('Auth student eligibility matrix', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prismaMock.branchMember.findMany.mockResolvedValue([{ branchId: 'b-1' }] as any);
+    prismaMock.branchMember.findFirst.mockResolvedValue({ id: 'bm-t1', role: 'teacher', isActive: true } as any);
+    prismaMock.teacherProfile.findUnique.mockResolvedValue({ id: 'tp-1' } as any);
     prismaMock.user.update.mockResolvedValue({} as any);
   });
 

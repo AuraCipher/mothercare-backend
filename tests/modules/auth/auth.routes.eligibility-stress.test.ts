@@ -39,6 +39,11 @@ function setupLoginScenario(s: Scenario) {
   prismaMock.user.update.mockResolvedValue(user as any);
   prismaMock.branchMember.findMany.mockResolvedValue([{ branchId: 'b-1' }] as any);
 
+  if (s === 'eligible_non_student') {
+    prismaMock.teacherProfile.findUnique.mockResolvedValue({ id: 'tp-1' } as any);
+    prismaMock.branchMember.findFirst.mockResolvedValue({ id: 'bm-t1', role: 'teacher', isActive: true } as any);
+  }
+
   if (s === 'eligible_student') {
     prismaMock.student.findFirst.mockResolvedValueOnce({ id: 'st-1' } as any);
   } else if (s === 'no_enrollment_student') {
@@ -71,6 +76,11 @@ function setupRefreshScenario(s: Scenario) {
     schoolId: null,
   } as any);
   prismaMock.branchMember.findMany.mockResolvedValue([{ branchId: 'b-1' }] as any);
+
+  if (s === 'eligible_non_student') {
+    prismaMock.teacherProfile.findUnique.mockResolvedValue({ id: 'tp-1' } as any);
+    prismaMock.branchMember.findFirst.mockResolvedValue({ id: 'bm-t1', role: 'teacher', isActive: true } as any);
+  }
 
   if (s === 'eligible_student') {
     prismaMock.student.findFirst.mockResolvedValueOnce({ id: 'st-1' } as any);
