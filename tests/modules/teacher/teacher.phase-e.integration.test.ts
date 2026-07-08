@@ -156,8 +156,16 @@ describe('Teacher portal — Phase E', () => {
       section: 'A',
     });
     (prismaMock.student.findMany as jest.Mock).mockResolvedValue([
-      { id: 's1', name: 'Ali', rollNumber: '1', admissionNumber: null, gender: 'male' },
+      {
+        id: 's1',
+        name: 'Ali',
+        rollNumber: '1',
+        admissionNumber: null,
+        gender: 'male',
+        attendances: [],
+      },
     ]);
+    (prismaMock.attendance.findMany as jest.Mock).mockResolvedValue([]);
     (prismaMock.studentParent.findMany as jest.Mock).mockResolvedValue([
       {
         studentId: 's1',

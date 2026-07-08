@@ -216,8 +216,16 @@ describe('Teacher portal — Phase B', () => {
   test('GET /teacher/classes/:groupId/students 200 for assigned group', async () => {
     mockPhaseB();
     (prismaMock.student.findMany as jest.Mock).mockResolvedValue([
-      { id: 's1', name: 'Ali', rollNumber: '1', admissionNumber: 'ADM-1', gender: 'male' },
+      {
+        id: 's1',
+        name: 'Ali',
+        rollNumber: '1',
+        admissionNumber: 'ADM-1',
+        gender: 'male',
+        attendances: [],
+      },
     ]);
+    (prismaMock.attendance.findMany as jest.Mock).mockResolvedValue([]);
     const res = await request(app)
       .get('/teacher/classes/g1/students')
       .query(scopeQuery)

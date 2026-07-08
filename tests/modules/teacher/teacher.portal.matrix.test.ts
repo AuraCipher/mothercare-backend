@@ -109,6 +109,7 @@ function mockTeacherBase(portalAccess: PortalAccess) {
       attendances: [],
     },
   ]);
+  (prismaMock.attendance.findMany as jest.Mock).mockResolvedValue([]);
   (prismaMock.group.findFirst as jest.Mock).mockResolvedValue({
     id: 'g1',
     name: 'Class 5',

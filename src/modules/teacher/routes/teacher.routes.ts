@@ -15,7 +15,7 @@ import {
   getGroupAttendance,
   saveGroupAttendanceBatch,
 } from '../services/teacher-attendance.service';
-import { getTeacherProfile } from '../services/teacher-profile.service';
+import { getTeacherProfile, updateTeacherProfile } from '../services/teacher-profile.service';
 import {
   getTeacherMarksGrid,
   listTeacherExamSubjects,
@@ -103,6 +103,24 @@ router.get(
     assertFeatureAllowed(ctx.permissions, 'profile');
     const user = (req as any).teacherUser;
     const data = await getTeacherProfile(user.id);
+    res.json({ success: true, data });
+  }),
+);
+
+/** Writes — profile self-service (password uses /auth/password). */
+router.put(
+  '/profile',
+  teacherReadOnlyGuard,
+  asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'profile');
+    const user = (req as any).teacherUser;
+    const { phone, emergencyContact, address } = req.body ?? {};
+    const data = await updateTeacherProfile(user.id, {
+      phone,
+      emergencyContact,
+      address,
+    });
     res.json({ success: true, data });
   }),
 );
