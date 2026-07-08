@@ -742,6 +742,7 @@ model TeacherProfile {
   userId           String               @unique
   employeeId       String?              @unique
   portalAccess           TeacherPortalAccess   @default(FULL)
+  portalPermissions      Json?
   canViewParentContact   Boolean               @default(false)
   hodParentContactScope  HodParentContactScope @default(ASSIGNED_ONLY)
   qualification    String?
