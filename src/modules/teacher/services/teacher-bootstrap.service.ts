@@ -24,6 +24,9 @@ export interface TeacherBootstrapData {
   portal: {
     isReadOnly: boolean;
     canWrite: boolean;
+    portalAccess: 'FULL' | 'READ_ONLY' | 'FROZEN';
+    isFrozen: boolean;
+    freezeReason?: string;
     assignmentCount: number;
     classTeacherGroupIds: string[];
   };
@@ -45,7 +48,10 @@ export function buildBootstrapResponse(ctx: TeacherContext, user: TeacherBootstr
     },
     portal: {
       isReadOnly: ctx.isReadOnly,
-      canWrite: !ctx.isReadOnly,
+      canWrite: !ctx.isReadOnly && ctx.portalAccess === 'FULL',
+      portalAccess: ctx.portalAccess,
+      isFrozen: ctx.portalAccess === 'FROZEN',
+      freezeReason: ctx.freezeReason,
       assignmentCount: ctx.assignments.length,
       classTeacherGroupIds: ctx.classTeacherGroupIds,
     },

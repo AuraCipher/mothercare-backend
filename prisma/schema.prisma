@@ -723,10 +723,17 @@ model GroupSubject {
 // ║  Detailed profile for teacher role users.                       ║
 // ╚══════════════════════════════════════════════════════════════════╝
 
+enum TeacherPortalAccess {
+  FULL
+  READ_ONLY
+  FROZEN
+}
+
 model TeacherProfile {
-  id               String    @id @default(uuid())
-  userId           String    @unique
-  employeeId       String?   @unique
+  id               String               @id @default(uuid())
+  userId           String               @unique
+  employeeId       String?              @unique
+  portalAccess     TeacherPortalAccess  @default(FULL)
   qualification    String?
   specialization   String?
   joiningDate      DateTime?

@@ -51,6 +51,7 @@ export interface UpdateTeacherProfileInput {
   experience?: string;
   bio?: string;
   profilePhotoId?: string;
+  portalAccess?: 'FULL' | 'READ_ONLY' | 'FROZEN';
   updatedById?: string;
 }
 
@@ -332,6 +333,7 @@ class TeacherProfileService {
         severeDisease: data.severeDisease,
         experience: data.experience,
         bio: data.bio,
+        ...(data.portalAccess !== undefined && { portalAccess: data.portalAccess }),
       },
       include: {
         user: { select: { id: true, name: true, email: true, phone: true, username: true, role: true, status: true, profilePhotoId: true } },
@@ -668,6 +670,23 @@ class TeacherAssignmentService {
     return prisma.teacherAssignment.update({
       where: { id },
       data: { isClassTeacher: data.isClassTeacher },
+      include: {
+        teacher: { select: { id: true, name: true } },
+        group: { select: { id: true, name: true, section: true } },
+        subject: { select: { id: true, name: true, code: true } },
+      },
+    });
+  }
+
+  // End assignment by setting validTo (preserves history)
+  async end(id: string, validTo?: Date) {
+    const existing = await prisma.teacherAssignment.findUnique({ where: { id } });
+    if (!existing) throw { status: 404, message: 'Assignment not found' };
+
+    const endedAt = validTo ?? new Date();
+    return prisma.teacherAssignment.update({
+      where: { id },
+      data: { validTo: endedAt },
       include: {
         teacher: { select: { id: true, name: true } },
         group: { select: { id: true, name: true, section: true } },

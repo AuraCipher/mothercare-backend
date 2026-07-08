@@ -55,10 +55,10 @@ router.get('/teachers/:id', asyncHandler(async (req: Request, res: Response) => 
 
 // TC-014: PUT /admin/teachers/:id — Update teacher profile
 router.put('/teachers/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio, profilePhotoId } = req.body;
+  const { employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio, profilePhotoId, portalAccess } = req.body;
 
   const profile = await teacherProfileService.update(req.params.id, {
-    employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio, profilePhotoId,
+    employeeId, qualification, specialization, joiningDate, salary, phone, emergencyContact, address, dateOfBirth, gender, bloodGroup, fatherName, cardId, severeDisease, experience, bio, profilePhotoId, portalAccess,
     updatedById: (req as any).user?.id,
   });
 
@@ -145,6 +145,16 @@ router.put('/assignments/:id', asyncHandler(async (req: Request, res: Response) 
   const { isClassTeacher } = req.body;
 
   const assignment = await teacherAssignmentService.update(req.params.id, { isClassTeacher });
+  res.json({ success: true, data: assignment });
+}));
+
+// POST /admin/assignments/:id/end — End assignment (set validTo)
+router.post('/assignments/:id/end', asyncHandler(async (req: Request, res: Response) => {
+  const { validTo } = req.body ?? {};
+  const assignment = await teacherAssignmentService.end(
+    req.params.id,
+    validTo ? new Date(validTo) : undefined,
+  );
   res.json({ success: true, data: assignment });
 }));
 

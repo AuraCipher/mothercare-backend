@@ -6,7 +6,9 @@ import {
   teacherScopeMiddleware,
   teacherReadOnlyGuard,
 } from '../middleware/teacher-scope.middleware';
+import { teacherPortalAccessGuard } from '../middleware/teacher-portal-access.middleware';
 import { buildBootstrapResponse } from '../services/teacher-bootstrap.service';
+import { listTeacherAnnouncements } from '../services/teacher-announcements.service';
 import { getTeacherTimetable } from '../services/teacher-timetable.service';
 import { getClassStudents } from '../services/teacher-class.service';
 import {
@@ -74,8 +76,18 @@ router.get(
 );
 
 router.use(teacherScopeMiddleware);
+router.use(teacherPortalAccessGuard);
 
 /** GET routes below — read-only guard does not block GET. */
+router.get(
+  '/announcements',
+  asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    const data = await listTeacherAnnouncements(ctx);
+    res.json({ success: true, data });
+  }),
+);
+
 router.get(
   '/profile',
   asyncHandler(async (req, res) => {

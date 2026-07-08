@@ -35,6 +35,7 @@ const mockTeacherProfile = {
   id: 'tp-1',
   userId: 'teacher-u1',
   employeeId: 'TCH-001',
+  portalAccess: 'FULL',
 };
 
 const mockBranchMember = {
@@ -496,5 +497,92 @@ describe('Teacher portal — Phase C (marks)', () => {
       });
     expect(res.status).toBe(403);
     expect(res.body.message).toMatch(/disabled/i);
+  });
+});
+
+describe('Teacher portal — Phase D', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('GET /teacher/announcements 200 with school-wide items', async () => {
+    mockTeacherHappyPath();
+    (prismaMock.announcement.findMany as jest.Mock).mockResolvedValue([
+      {
+        id: 'ann-1',
+        title: 'Parent meeting',
+        content: 'Saturday 10am',
+        mediaUrl: null,
+        isPinned: true,
+        createdAt: new Date('2026-01-10'),
+        senderId: 'admin-1',
+      },
+    ]);
+    (prismaMock.user.findMany as jest.Mock).mockResolvedValue([
+      { id: 'admin-1', name: 'Principal', role: 'management' },
+    ]);
+
+    const res = await request(app)
+      .get('/teacher/announcements')
+      .query(scopeQuery)
+      .set(teacherToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].title).toBe('Parent meeting');
+    expect(res.body.data[0].scope).toBe('school');
+  });
+
+  test('GET /teacher/bootstrap frozen portal returns empty assignments', async () => {
+    mockActiveAcademicYear();
+    (prismaMock.user.findUnique as jest.Mock).mockResolvedValue(mockTeacherUser);
+    (prismaMock.teacherProfile.findUnique as jest.Mock).mockResolvedValue({
+      ...mockTeacherProfile,
+      portalAccess: 'FROZEN',
+    });
+    (prismaMock.branchMember.findUnique as jest.Mock).mockResolvedValue(mockBranchMember);
+    (prismaMock.teacherAssignment.findMany as jest.Mock).mockResolvedValue(mockAssignments);
+
+    const res = await request(app)
+      .get('/teacher/bootstrap')
+      .query(scopeQuery)
+      .set(teacherToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data.portal.isFrozen).toBe(true);
+    expect(res.body.data.portal.canWrite).toBe(false);
+    expect(res.body.data.assignments).toHaveLength(0);
+  });
+
+  test('GET /teacher/timetable 403 when portal frozen', async () => {
+    mockActiveAcademicYear();
+    (prismaMock.user.findUnique as jest.Mock).mockResolvedValue(mockTeacherUser);
+    (prismaMock.teacherProfile.findUnique as jest.Mock).mockResolvedValue({
+      ...mockTeacherProfile,
+      portalAccess: 'FROZEN',
+    });
+    (prismaMock.branchMember.findUnique as jest.Mock).mockResolvedValue(mockBranchMember);
+    (prismaMock.teacherAssignment.findMany as jest.Mock).mockResolvedValue(mockAssignments);
+
+    const res = await request(app)
+      .get('/teacher/timetable')
+      .query(scopeQuery)
+      .set(teacherToken);
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/frozen/i);
+  });
+
+  test('GET /teacher/bootstrap read-only when portal READ_ONLY', async () => {
+    mockActiveAcademicYear();
+    (prismaMock.user.findUnique as jest.Mock).mockResolvedValue(mockTeacherUser);
+    (prismaMock.teacherProfile.findUnique as jest.Mock).mockResolvedValue({
+      ...mockTeacherProfile,
+      portalAccess: 'READ_ONLY',
+    });
+    (prismaMock.branchMember.findUnique as jest.Mock).mockResolvedValue(mockBranchMember);
+    (prismaMock.teacherAssignment.findMany as jest.Mock).mockResolvedValue(mockAssignments);
+
+    const res = await request(app)
+      .get('/teacher/bootstrap')
+      .query(scopeQuery)
+      .set(teacherToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data.portal.isReadOnly).toBe(true);
+    expect(res.body.data.portal.canWrite).toBe(false);
   });
 });

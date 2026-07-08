@@ -17,7 +17,9 @@ export interface TeacherContext {
   academicYearStatus: string;
   academicYearLabel: string;
   branch: { id: string; name: string; code: string };
+  portalAccess: 'FULL' | 'READ_ONLY' | 'FROZEN';
   isReadOnly: boolean;
+  freezeReason?: string;
   assignments: TeacherAssignmentRow[];
   classTeacherGroupIds: string[];
   assignmentGroupIds: string[];

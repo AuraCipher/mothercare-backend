@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../../../lib/prisma';
-import { TEACHER_READ_ONLY_AY_STATUSES } from '../teacher.constants';
+import { TEACHER_READ_ONLY_AY_STATUSES, TEACHER_PORTAL_ACCESS } from '../teacher.constants';
 import type { TeacherContext } from '../services/teacher-context.service';
 
 function extractBranchId(req: Request): string | undefined {
@@ -110,11 +110,27 @@ export async function teacherScopeMiddleware(
       orderBy: [{ group: { displayOrder: 'asc' } }, { subject: { name: 'asc' } }],
     });
 
+    const profile = await prisma.teacherProfile.findUnique({
+      where: { userId },
+      select: { portalAccess: true },
+    });
+    const portalAccess = (profile?.portalAccess || TEACHER_PORTAL_ACCESS.FULL) as TeacherContext['portalAccess'];
+
     const classTeacherGroupIds = assignments
       .filter((a) => a.isClassTeacher)
       .map((a) => a.groupId);
 
-    const isReadOnly = TEACHER_READ_ONLY_AY_STATUSES.has(ay.status);
+    const ayReadOnly = TEACHER_READ_ONLY_AY_STATUSES.has(ay.status);
+    const portalReadOnly = portalAccess === TEACHER_PORTAL_ACCESS.READ_ONLY;
+    const isReadOnly = ayReadOnly || portalReadOnly;
+    const freezeReason =
+      portalAccess === TEACHER_PORTAL_ACCESS.FROZEN
+        ? 'Teacher portal access is frozen by administration.'
+        : portalReadOnly
+          ? 'Teacher portal is read-only by administration.'
+          : ayReadOnly
+            ? `Academic year is ${ay.status}`
+            : undefined;
 
     const ctx: TeacherContext = {
       userId,
@@ -124,10 +140,15 @@ export async function teacherScopeMiddleware(
       academicYearStatus: ay.status,
       academicYearLabel: ay.calendar?.label || academicYearId,
       branch: ay.branch,
+      portalAccess,
       isReadOnly,
-      assignments,
-      classTeacherGroupIds,
-      assignmentGroupIds: [...new Set(assignments.map((a) => a.groupId))],
+      freezeReason,
+      assignments: portalAccess === TEACHER_PORTAL_ACCESS.FROZEN ? [] : assignments,
+      classTeacherGroupIds: portalAccess === TEACHER_PORTAL_ACCESS.FROZEN ? [] : classTeacherGroupIds,
+      assignmentGroupIds:
+        portalAccess === TEACHER_PORTAL_ACCESS.FROZEN
+          ? []
+          : [...new Set(assignments.map((a) => a.groupId))],
     };
 
     (req as any).teacherContext = ctx;
