@@ -494,7 +494,12 @@ describe('Phase 02 — AcademicYear CRUD', () => {
       prismaMock.academicYear.findFirst
         .mockResolvedValueOnce(null) // no existing
         .mockResolvedValueOnce(null); // no existing BUILD_STAGE
-      prismaMock.academicYear.create.mockResolvedValue(mockAcademicYear as any);
+      prismaMock.academicYear.create.mockResolvedValue({
+        ...mockAcademicYear,
+        branch: { id: mockBranch.id, name: mockBranch.name, code: mockBranch.code },
+        calendar: { id: mockCalendar.id, label: mockCalendar.label },
+        _count: { groups: 0, students: 0 },
+      } as any);
 
       const res = await request(app)
         .post(`/admin/branches/${mockBranch.id}/academic-years`)
@@ -563,7 +568,12 @@ describe('Phase 02 — AcademicYear CRUD', () => {
       prismaMock.academicYear.findFirst
         .mockResolvedValueOnce(null) // no duplicate AY
         .mockResolvedValueOnce({ id: 'existing-build' } as any); // existing BUILD_STAGE
-      prismaMock.academicYear.create.mockResolvedValue(mockAcademicYear as any);
+      prismaMock.academicYear.create.mockResolvedValue({
+        ...mockAcademicYear,
+        branch: { id: mockBranch.id, name: mockBranch.name, code: mockBranch.code },
+        calendar: { id: mockCalendar.id, label: mockCalendar.label },
+        _count: { groups: 0, students: 0 },
+      } as any);
 
       const res = await request(app)
         .post(`/admin/branches/${mockBranch.id}/academic-years`)
@@ -763,10 +773,12 @@ describe('Phase 02 — AcademicYear CRUD', () => {
   });
 
   describe('DELETE /admin/academic-years/:id — Delete AY (BA-020, BA-014)', () => {
-    test('rejects deleting an ARCHIVED year (read-only guard)', async () => {
+    test('rejects deleting an ARCHIVED year without confirm label', async () => {
       prismaMock.academicYear.findUnique.mockResolvedValue({
         ...mockAcademicYear,
         status: 'ARCHIVED',
+        calendar: { label: '2025-2026' },
+        _count: { groups: 0, students: 0, members: 0 },
       } as any);
 
       const res = await request(app)
@@ -774,7 +786,7 @@ describe('Phase 02 — AcademicYear CRUD', () => {
         .set(adminToken);
 
       expect(res.status).toBe(400);
-      expect(res.body.message).toContain('archived');
+      expect(res.body.message).toMatch(/confirm|label/i);
     });
 
     test('returns 409 when deleting ACTIVE year', async () => {
@@ -1205,12 +1217,17 @@ describe('Admin — Students', () => {
   });
 
   test('POST /admin/students creates a student with academicYearId', async () => {
-    const activeAy = { id: 'ay-active', status: 'ACTIVE' };
+    const activeAy = { id: 'ay-active', branchId: mockBranch.id, status: 'ACTIVE' };
     prismaMock.academicYear.findFirst.mockResolvedValue(activeAy as any);
+    prismaMock.academicYear.findUnique.mockResolvedValue(activeAy as any);
+    prismaMock.studentPerson.create.mockResolvedValue({ id: 'person-1' } as any);
+    prismaMock.student.findFirst.mockResolvedValue(null);
+    prismaMock.student.count.mockResolvedValue(0);
     prismaMock.student.create.mockResolvedValue(mockStudent as any);
 
     const res = await request(app)
       .post('/admin/students')
+      .query({ branchId: mockBranch.id, academicYearId: activeAy.id })
       .set(adminToken)
       .send({ name: 'Test Student', groupId: mockStudent.groupId });
 
@@ -1228,6 +1245,7 @@ describe('Admin — Students', () => {
   test('POST /admin/students returns 400 when name is missing', async () => {
     const res = await request(app)
       .post('/admin/students')
+      .query({ branchId: mockBranch.id, academicYearId: 'ay-active' })
       .set(adminToken)
       .send({ groupId: mockStudent.groupId });
 
@@ -1235,9 +1253,10 @@ describe('Admin — Students', () => {
   });
 
   test('DELETE /admin/students/:id soft-deletes a student', async () => {
+    prismaMock.academicYear.findUnique.mockResolvedValue({ id: 'ay-active', branchId: mockBranch.id, status: 'ACTIVE' } as any);
     prismaMock.student.findUnique.mockResolvedValue(mockStudent as any);
     prismaMock.student.update.mockResolvedValue({ ...mockStudent, isActive: false } as any);
-    const res = await request(app).delete(`/admin/students/${mockStudent.id}`).set(adminToken);
+    const res = await request(app).delete(`/admin/students/${mockStudent.id}`).query({ branchId: mockBranch.id, academicYearId: 'ay-active' }).set(adminToken);
     expect(res.status).toBe(200);
     expect(res.body.message).toBe('Student deactivated');
   });
@@ -1567,6 +1586,7 @@ describe('Admin — Remove Admin (/admin/branches/:id/remove-admin/:userId)', ()
 // ═══════════════════════════════════════════════════════════════════
 
 describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
+  const teacherBranchId = 'branch-teachers-1';
   const mockUser = { id: 'teacher-u-1', name: 'Ms. Sarah', email: 'sarah@school.com', phone: null, role: 'teacher', status: 'active' };
   const mockProfile = {
     id: 'tp-1', userId: 'teacher-u-1', employeeId: 'TCH-001', qualification: 'M.Sc. Mathematics',
@@ -1589,8 +1609,9 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
 
       const res = await request(app)
         .post('/admin/teachers')
+        .query({ branchId: teacherBranchId })
         .send({
-          userId: 'teacher-u-1', employeeId: 'TCH-001', qualification: 'M.Sc. Mathematics',
+          userId: 'teacher-u-1', branchId: teacherBranchId, employeeId: 'TCH-001', qualification: 'M.Sc. Mathematics',
           specialization: 'Mathematics', joiningDate: '2024-01-15', phone: '1234567890',
           address: '123 School St', gender: 'female',
         })
@@ -1605,6 +1626,7 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
     test('returns 400 when userId is missing', async () => {
       const res = await request(app)
         .post('/admin/teachers')
+        .query({ branchId: teacherBranchId })
         .send({ qualification: 'M.Sc.' })
         .set(adminToken);
 
@@ -1617,6 +1639,7 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
 
       const res = await request(app)
         .post('/admin/teachers')
+        .query({ branchId: teacherBranchId })
         .send({ userId: 'teacher-u-1', employeeId: 'TCH-001' })
         .set(adminToken);
 
@@ -1630,6 +1653,7 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
 
       const res = await request(app)
         .post('/admin/teachers')
+        .query({ branchId: teacherBranchId })
         .send({ userId: 'teacher-u-1' })
         .set(adminToken);
 
@@ -1646,6 +1670,7 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
 
       const res = await request(app)
         .post('/admin/teachers')
+        .query({ branchId: teacherBranchId })
         .send({ userId: 'teacher-u-1', employeeId: 'TCH-001' })
         .set(adminToken);
 
@@ -1661,8 +1686,9 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
 
       const res = await request(app)
         .post('/admin/teachers')
+        .query({ branchId: teacherBranchId })
         .send({
-          userId: 'teacher-u-1', fatherName: 'Ahmed', cardId: 'CNIC-1234',
+          userId: 'teacher-u-1', branchId: teacherBranchId, fatherName: 'Ahmed', cardId: 'CNIC-1234',
           severeDisease: 'Diabetes', experience: '8 years', bio: 'Senior science teacher',
         })
         .set(adminToken);
@@ -1688,8 +1714,9 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
 
       const res = await request(app)
         .post('/admin/teachers')
+        .query({ branchId: teacherBranchId })
         .send({
-          userId: 'teacher-u-1', employeeId: 'TCH-999', qualification: 'PhD',
+          userId: 'teacher-u-1', branchId: teacherBranchId, employeeId: 'TCH-999', qualification: 'PhD',
           specialization: 'Physics', joiningDate: '2024-01-15', phone: '1234567890',
           address: '456 School Rd', gender: 'male', bloodGroup: 'B+',
           fatherName: 'Khalid', cardId: 'CNIC-9999',
@@ -1734,8 +1761,16 @@ describe('Admin — Teacher Profile CRUD (/admin/teachers)', () => {
       expect(prismaMock.teacherProfile.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            OR: expect.arrayContaining([
-              expect.objectContaining({ user: expect.objectContaining({ name: expect.objectContaining({ contains: 'Sarah' }) }) }),
+            AND: expect.arrayContaining([
+              expect.objectContaining({
+                OR: expect.arrayContaining([
+                  expect.objectContaining({
+                    user: expect.objectContaining({
+                      name: expect.objectContaining({ contains: 'Sarah' }),
+                    }),
+                  }),
+                ]),
+              }),
             ]),
           }),
         }),
@@ -3260,6 +3295,7 @@ describe('Admin — File Upload', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('Admin — Teacher Profile Photo', () => {
+  const teacherBranchId = 'branch-teachers-1';
   const mockUser = { id: 'teacher-u-1', name: 'Ms. Sarah', email: 'sarah@school.com', phone: null, role: 'teacher', status: 'active', profilePhotoId: null };
   const mockProfile = {
     id: 'tp-1', userId: 'teacher-u-1', employeeId: 'TCH-001', qualification: 'M.Sc. Mathematics',
@@ -3286,7 +3322,8 @@ describe('Admin — Teacher Profile Photo', () => {
 
     const res = await request(app)
       .post('/admin/teachers')
-      .send({ userId: 'teacher-u-1', profilePhotoId: 'file-123' })
+      .query({ branchId: teacherBranchId })
+      .send({ userId: 'teacher-u-1', branchId: teacherBranchId, profilePhotoId: 'file-123' })
       .set(adminToken);
 
     expect(res.status).toBe(201);

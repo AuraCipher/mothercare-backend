@@ -11,9 +11,23 @@ import { prismaMock } from '../mocks/prisma';
 import request from 'supertest';
 import app from '../../src/app';
 import { generateTestToken, getAuthHeader } from '../helpers/auth';
+import { mockActiveAcademicYear, scopeQuery } from '../helpers/integration';
+
+jest.mock('../../src/modules/admin/services/staff.service', () => ({
+  staffService: {
+    resolveUserAccess: jest.fn().mockResolvedValue({
+      isRestricted: false,
+      isFullAdmin: false,
+      permissions: [{ module: 'ATTENDANCE', actions: ['read', 'write'] }],
+    }),
+  },
+}));
 
 describe('Auth enforcement — Attendance routes', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockActiveAcademicYear();
+  });
 
   test('GET /admin/attendance returns 401 without token', async () => {
     const res = await request(app).get('/admin/attendance?date=2026-06-24');
@@ -22,7 +36,7 @@ describe('Auth enforcement — Attendance routes', () => {
 
   test('GET /admin/attendance returns 403 for teacher role', async () => {
     const token = getAuthHeader(generateTestToken('t1', 'teacher'));
-    const res = await request(app).get('/admin/attendance?date=2026-06-24').set(token);
+    const res = await request(app).get('/admin/attendance').query({ ...scopeQuery, date: '2026-06-24' }).set(token);
     expect(res.status).toBe(403);
   });
 
@@ -33,7 +47,7 @@ describe('Auth enforcement — Attendance routes', () => {
       return Promise.resolve({ id, branchId: 'b1' } as any);
     });
     const token = getAuthHeader(generateTestToken('m1', 'management'));
-    const res = await request(app).get('/admin/attendance?date=2026-06-24').set(token);
+    const res = await request(app).get('/admin/attendance').query({ ...scopeQuery, date: '2026-06-24' }).set(token);
     expect(res.status).toBe(200);
   });
 

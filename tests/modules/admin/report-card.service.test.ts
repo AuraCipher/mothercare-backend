@@ -6,7 +6,7 @@ import { prismaMock } from '../../mocks/prisma';
 import { computeOverallPercentage, reportCardService } from '../../../src/modules/admin/services/report-card.service';
 import { logAudit } from '../../../src/services/audit.service';
 
-const scope = { academicYearId: 'ay1', branchId: 'b1' };
+const scope = { academicYearId: 'ay1', branchId: 'b1', academicYearStatus: 'ACTIVE' as const, isArchived: false };
 
 function mockScopeChain() {
   (prismaMock.examSession.findFirst as jest.Mock).mockResolvedValue({

@@ -44,8 +44,9 @@ export const getMe = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const changePassword = asyncHandler(async (req: Request, res: Response) => {
+  const { currentPassword, newPassword } = req.body;
   // @ts-ignore: req.user is set by auth middleware
-  const result = await authService.changePassword(req.user.id, req.body);
+  const result = await authService.changePassword(req.user.id, currentPassword, newPassword);
   res.status(200).json(result);
 });
 

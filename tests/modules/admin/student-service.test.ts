@@ -84,7 +84,9 @@ describe('StudentService.findAll', () => {
 describe('StudentService.create — rollNumber auto-assignment', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    (prismaMock.academicYear.findFirst as jest.Mock).mockResolvedValue({ id: 'ay1' });
+    (prismaMock.academicYear.findFirst as jest.Mock).mockResolvedValue({ id: 'ay1', branchId: 'b1' });
+    (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({ id: 'ay1', branchId: 'b1' });
+    (prismaMock.studentPerson.create as jest.Mock).mockResolvedValue({ id: 'person-1' });
   });
 
   test('auto-assigns rollNumber sequentially within group', async () => {

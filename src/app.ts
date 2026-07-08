@@ -121,9 +121,10 @@ app.get('/health', (_req, res) => {
 app.use('/auth', authRoutes);
 app.use('/api-keys', apiKeyRoutes);
 app.use('/setup', setupRoutes);
-app.use('/admin', adminRoutes);
+// Invitation public token routes — mounted only under /admin/invitations (no global /admin middleware).
 app.use('/admin/canteen', canteenRoutes);
-app.use('/admin', invitationRoutes);
+app.use('/admin/invitations', invitationRoutes);
+app.use('/admin', adminRoutes);
 app.use('/me', meRouter);
 app.use('/branches', branchAdminRoutes);
 

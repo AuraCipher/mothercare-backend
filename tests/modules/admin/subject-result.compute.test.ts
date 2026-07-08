@@ -6,7 +6,7 @@ import { prismaMock } from '../../mocks/prisma';
 import { subjectResultService } from '../../../src/modules/admin/services/subject-result.service';
 import { logAudit } from '../../../src/services/audit.service';
 
-const scope = { academicYearId: 'ay1', branchId: 'b1' };
+const scope = { academicYearId: 'ay1', branchId: 'b1', academicYearStatus: 'ACTIVE' as const, isArchived: false };
 
 const DEFAULT_BANDS_FALLBACK = null;
 

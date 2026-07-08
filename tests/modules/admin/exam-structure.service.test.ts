@@ -2,7 +2,11 @@ import { prismaMock } from '../../mocks/prisma';
 import { examStructureService } from '../../../src/modules/admin/services/exam-structure.service';
 
 describe('ExamStructureService', () => {
-  beforeEach(() => { jest.clearAllMocks(); });
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.examClassSubject.findUnique.mockReset();
+    prismaMock.examClassSubject.update.mockReset();
+  });
 
   const mockExam = { id: 'exam-1', examSessionId: 's1' };
   const mockSession = { academicYearId: 'ay-1' };

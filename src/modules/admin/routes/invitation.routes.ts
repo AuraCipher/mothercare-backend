@@ -12,18 +12,11 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
     fn(req, res, next).catch(next);
   };
 
-// ─── Public routes (no auth) ─────────────────────────
-
-/**
- * GET /admin/invitations/:token
- * Validate an invitation token — returns email + branch info.
- * Supports ?html=1 to return the full email template as HTML.
- */
-router.get('/invitations/:token', asyncHandler(async (req: Request, res: Response) => {
+/** Public — validate invitation token */
+router.get('/:token', asyncHandler(async (req: Request, res: Response) => {
   const { token } = req.params;
   const result = await invitationService.validateInvitation(token);
 
-  // If ?html=1, render the email template
   if (req.query.html === '1') {
     const frontendUrl = env.FRONTEND_URL || 'http://localhost:3000';
     const html = adminInvitationEmailHtml(
@@ -41,11 +34,8 @@ router.get('/invitations/:token', asyncHandler(async (req: Request, res: Respons
   res.json({ success: true, data: result });
 }));
 
-/**
- * POST /admin/invitations/:token/complete
- * Complete registration with name, username, password, phone.
- */
-router.post('/invitations/:token/complete', asyncHandler(async (req: Request, res: Response) => {
+/** Public — complete registration */
+router.post('/:token/complete', asyncHandler(async (req: Request, res: Response) => {
   const { token } = req.params;
   const { name, username, password, phone } = req.body;
 
@@ -62,15 +52,8 @@ router.post('/invitations/:token/complete', asyncHandler(async (req: Request, re
   });
 }));
 
-// ─── Protected routes (super_admin only) ─────────────
-router.use(auth);
-router.use(roleMiddleware(['super_admin']));
-
-/**
- * POST /admin/invitations
- * Create a new invitation for a branch admin.
- */
-router.post('/invitations', asyncHandler(async (req: Request, res: Response) => {
+/** Protected — super_admin only */
+router.post('/', auth, roleMiddleware(['super_admin']), asyncHandler(async (req: Request, res: Response) => {
   const { email, branchId } = req.body;
 
   if (!email || !branchId) {
@@ -82,11 +65,7 @@ router.post('/invitations', asyncHandler(async (req: Request, res: Response) => 
   res.status(201).json({ success: true, data: result });
 }));
 
-/**
- * GET /admin/invitations
- * List pending invitations and existing admins.
- */
-router.get('/invitations', asyncHandler(async (_req: Request, res: Response) => {
+router.get('/', auth, roleMiddleware(['super_admin']), asyncHandler(async (_req: Request, res: Response) => {
   const [pendingInvitations, admins] = await Promise.all([
     invitationService.listPendingInvitations(),
     invitationService.listAdmins(),

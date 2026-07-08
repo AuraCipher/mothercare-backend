@@ -13,27 +13,31 @@ import { prismaMock } from '../../mocks/prisma';
 import request from 'supertest';
 import app from '../../../src/app';
 import { generateTestToken, getAuthHeader } from '../../helpers/auth';
+import { mockActiveAcademicYear, scopeQuery } from '../../helpers/integration';
 
 const adminToken = getAuthHeader(generateTestToken('admin-1', 'super_admin'));
 
 describe('PUT /admin/students/:id/status — Update student status', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockActiveAcademicYear();
+  });
 
   test('changes status and logs it via transaction', async () => {
     prismaMock.student.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', isActive: true } as any);
     (prismaMock.$transaction as jest.Mock).mockResolvedValue([{ id: 's1' }, { id: 'log1' }]);
-    const res = await request(app).put('/admin/students/s1/status').set(adminToken).send({ status: 'SUSPENDED' });
+    const res = await request(app).put('/admin/students/s1/status').query(scopeQuery).set(adminToken).send({ status: 'SUSPENDED' });
     expect(res.status).toBe(200);
   });
 
   test('returns 400 for invalid status', async () => {
-    const res = await request(app).put('/admin/students/s1/status').set(adminToken).send({ status: 'INVALID' });
+    const res = await request(app).put('/admin/students/s1/status').query(scopeQuery).set(adminToken).send({ status: 'INVALID' });
     expect(res.status).toBe(400);
   });
 
   test('returns 404 for unknown student', async () => {
     prismaMock.student.findUnique.mockResolvedValue(null);
-    const res = await request(app).put('/admin/students/s1/status').set(adminToken).send({ status: 'SUSPENDED' });
+    const res = await request(app).put('/admin/students/s1/status').query(scopeQuery).set(adminToken).send({ status: 'SUSPENDED' });
     expect(res.status).toBe(404);
   });
 
@@ -44,21 +48,24 @@ describe('PUT /admin/students/:id/status — Update student status', () => {
 });
 
 describe('GET /admin/students/:id/status-logs — Status history', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockActiveAcademicYear();
+  });
 
   test('returns logs in descending order', async () => {
     prismaMock.studentStatusLog.findMany.mockResolvedValue([
       { id: 'log2', previousStatus: 'SUSPENDED', newStatus: 'ACTIVE', reason: null, createdAt: new Date(), changedById: null, studentId: 's1' },
       { id: 'log1', previousStatus: 'ACTIVE', newStatus: 'SUSPENDED', reason: 'Test', createdAt: new Date(), changedById: null, studentId: 's1' },
     ] as any);
-    const res = await request(app).get('/admin/students/s1/status-logs').set(adminToken);
+    const res = await request(app).get('/admin/students/s1/status-logs').query(scopeQuery).set(adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(2);
   });
 
   test('returns empty array when no logs exist', async () => {
     prismaMock.studentStatusLog.findMany.mockResolvedValue([]);
-    const res = await request(app).get('/admin/students/s1/status-logs').set(adminToken);
+    const res = await request(app).get('/admin/students/s1/status-logs').query(scopeQuery).set(adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([]);
   });
@@ -67,13 +74,16 @@ describe('GET /admin/students/:id/status-logs — Status history', () => {
     prismaMock.studentStatusLog.findMany.mockResolvedValue([
       { id: 'log1', previousStatus: 'ACTIVE', newStatus: 'SUSPENDED', reason: null, createdAt: new Date(), changedById: null, changedBy: { id: 'u1', name: 'Admin' }, studentId: 's1' },
     ] as any);
-    const res = await request(app).get('/admin/students/s1/status-logs').set(adminToken);
+    const res = await request(app).get('/admin/students/s1/status-logs').query(scopeQuery).set(adminToken);
     expect(res.body.data[0].changedBy.name).toBe('Admin');
   });
 });
 
 describe('DELETE /admin/students/:id — Delete student', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockActiveAcademicYear();
+  });
 
   test('deletes student and cascades related records', async () => {
     prismaMock.student.findUnique.mockResolvedValue({ id: 's1', name: 'Test Student' } as any);
@@ -81,14 +91,14 @@ describe('DELETE /admin/students/:id — Delete student', () => {
     (prismaMock.credentialSend.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
     (prismaMock.studentStatusLog.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
     (prismaMock.student.delete as jest.Mock).mockResolvedValue({ id: 's1', name: 'Test Student' });
-    const res = await request(app).delete('/admin/students/s1').set(adminToken);
+    const res = await request(app).delete('/admin/students/s1').query(scopeQuery).set(adminToken);
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
   });
 
   test('returns 404 for unknown student', async () => {
     prismaMock.student.findUnique.mockResolvedValue(null);
-    const res = await request(app).delete('/admin/students/s1').set(adminToken);
+    const res = await request(app).delete('/admin/students/s1').query(scopeQuery).set(adminToken);
     expect(res.status).toBe(404);
   });
 });
