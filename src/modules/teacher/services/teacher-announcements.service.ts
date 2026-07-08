@@ -1,9 +1,19 @@
 import { prisma } from '../../../lib/prisma';
 import type { TeacherContext } from './teacher-context.service';
 
+function formatGroupLabel(group: { name: string; section: string | null }) {
+  return group.section ? `${group.name} — ${group.section}` : group.name;
+}
+
+/** Teachers see school-wide announcements plus class-targeted ones for assigned groups only (read-only). */
 export async function listTeacherAnnouncements(ctx: TeacherContext) {
+  const groupIds = ctx.assignmentGroupIds;
+
   const rows = await prisma.announcement.findMany({
-    where: { academicYearId: ctx.academicYearId },
+    where: {
+      academicYearId: ctx.academicYearId,
+      OR: [{ groupId: null }, { groupId: { in: groupIds } }],
+    },
     orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
     select: {
       id: true,
@@ -13,6 +23,8 @@ export async function listTeacherAnnouncements(ctx: TeacherContext) {
       isPinned: true,
       createdAt: true,
       senderId: true,
+      groupId: true,
+      group: { select: { id: true, name: true, section: true } },
     },
   });
 
@@ -33,7 +45,14 @@ export async function listTeacherAnnouncements(ctx: TeacherContext) {
     mediaUrl: row.mediaUrl,
     isPinned: row.isPinned,
     createdAt: row.createdAt,
-    scope: 'school' as const,
-    sender: senderMap.get(row.senderId) || { id: row.senderId, name: 'Administration', role: 'management' },
+    scope: row.groupId ? ('class' as const) : ('school' as const),
+    group: row.group
+      ? { id: row.group.id, label: formatGroupLabel(row.group) }
+      : null,
+    sender: senderMap.get(row.senderId) || {
+      id: row.senderId,
+      name: 'Administration',
+      role: 'management',
+    },
   }));
 }

@@ -630,6 +630,7 @@ model Group {
   enrollments        Enrollment[]
   timetableEntries   TimetableEntry[]
   examClasses        ExamClass[]
+  announcements      Announcement[]
 
   createdById   String?
   updatedById   String?
@@ -1303,6 +1304,7 @@ model GroupSnapshot {
 model Announcement {
   id             String   @id @default(uuid())
   academicYearId String
+  groupId        String? // null = school-wide; set = class-targeted (teachers assigned to group only)
   senderId       String
   title          String
   content        String?
@@ -1311,10 +1313,11 @@ model Announcement {
   createdAt      DateTime @default(now())
 
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  group        Group?       @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   updatedAt DateTime @updatedAt
 
-  @@index([academicYearId, createdAt])
+  @@index([academicYearId, groupId, createdAt])
   @@map("announcements")
 }
 

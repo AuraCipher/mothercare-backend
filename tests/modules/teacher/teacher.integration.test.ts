@@ -525,6 +525,8 @@ describe('Teacher portal — Phase D', () => {
         isPinned: true,
         createdAt: new Date('2026-01-10'),
         senderId: 'admin-1',
+        groupId: null,
+        group: null,
       },
     ]);
     (prismaMock.user.findMany as jest.Mock).mockResolvedValue([

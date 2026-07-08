@@ -98,7 +98,7 @@ export const TEACHER_PERMISSION_CATALOG: PermissionGroupDef[] = [
   {
     id: 'announcements',
     label: 'Announcements',
-    description: 'School-wide announcements',
+    description: 'School-wide and class announcements (read-only)',
     parent: true,
     fields: [{ key: 'access', label: 'View announcements', description: 'Read school notices', kind: 'view' }],
   },
