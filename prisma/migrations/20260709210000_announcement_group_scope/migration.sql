@@ -1,10 +1,10 @@
--- Class-targeted announcements: null group_id = school-wide.
-ALTER TABLE "announcements" ADD COLUMN "group_id" TEXT;
+-- Class-targeted announcements: null groupId = school-wide.
+ALTER TABLE "announcements" ADD COLUMN "groupId" TEXT;
 
-ALTER TABLE "announcements" ADD CONSTRAINT "announcements_group_id_fkey"
-  FOREIGN KEY ("group_id") REFERENCES "groups"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "announcements" ADD CONSTRAINT "announcements_groupId_fkey"
+  FOREIGN KEY ("groupId") REFERENCES "groups"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
-DROP INDEX IF EXISTS "announcements_academic_year_id_created_at_idx";
+DROP INDEX IF EXISTS "announcements_academicYearId_createdAt_idx";
 
-CREATE INDEX "announcements_academic_year_id_group_id_created_at_idx"
-  ON "announcements"("academic_year_id", "group_id", "created_at");
+CREATE INDEX "announcements_academicYearId_groupId_createdAt_idx"
+  ON "announcements"("academicYearId", "groupId", "createdAt");
