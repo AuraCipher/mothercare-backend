@@ -75,6 +75,8 @@ function mockTeacherProfile(portalAccess: PortalAccess = 'FULL') {
     userId: 'teacher-u1',
     employeeId: 'TCH-001',
     portalAccess,
+    canViewParentContact: false,
+    hodParentContactScope: 'ASSIGNED_ONLY',
   };
 }
 
@@ -89,6 +91,7 @@ function mockTeacherBase(portalAccess: PortalAccess) {
   (prismaMock.teacherAssignment.findMany as jest.Mock).mockResolvedValue(
     portalAccess === 'FROZEN' ? [] : mockAssignments,
   );
+  (prismaMock.subject.findMany as jest.Mock).mockResolvedValue([]);
   (prismaMock.timetable.findFirst as jest.Mock).mockResolvedValue({
     id: 'tt1',
     name: 'Regular Timetable',

@@ -36,6 +36,8 @@ const mockTeacherProfile = {
   userId: 'teacher-u1',
   employeeId: 'TCH-001',
   portalAccess: 'FULL',
+  canViewParentContact: false,
+  hodParentContactScope: 'ASSIGNED_ONLY',
 };
 
 const mockBranchMember = {
@@ -70,6 +72,7 @@ function mockTeacherHappyPath() {
   (prismaMock.teacherProfile.findUnique as jest.Mock).mockResolvedValue(mockTeacherProfile);
   (prismaMock.branchMember.findUnique as jest.Mock).mockResolvedValue(mockBranchMember);
   (prismaMock.teacherAssignment.findMany as jest.Mock).mockResolvedValue(mockAssignments);
+  (prismaMock.subject.findMany as jest.Mock).mockResolvedValue([]);
 }
 
 describe('Teacher portal — Phase 0', () => {
