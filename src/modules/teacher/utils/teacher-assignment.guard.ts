@@ -1,4 +1,5 @@
 import type { TeacherContext } from '../services/teacher-context.service';
+import type { Request } from 'express';
 
 export class TeacherAccessError extends Error {
   status: number;
@@ -43,8 +44,8 @@ export function assertClassTeacher(ctx: TeacherContext, groupId: string): void {
   }
 }
 
-export function getTeacherContext(req: { teacherContext?: TeacherContext }): TeacherContext {
-  const ctx = req.teacherContext;
+export function getTeacherContext(req: Request): TeacherContext {
+  const ctx = (req as any).teacherContext as TeacherContext | undefined;
   if (!ctx) {
     throw new TeacherAccessError(500, 'Teacher context not initialized');
   }

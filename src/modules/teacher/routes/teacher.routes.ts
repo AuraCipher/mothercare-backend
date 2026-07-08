@@ -7,6 +7,14 @@ import {
   teacherReadOnlyGuard,
 } from '../middleware/teacher-scope.middleware';
 import { buildBootstrapResponse } from '../services/teacher-bootstrap.service';
+import { getTeacherTimetable } from '../services/teacher-timetable.service';
+import { getClassStudents } from '../services/teacher-class.service';
+import {
+  getGroupAttendance,
+  saveGroupAttendanceBatch,
+} from '../services/teacher-attendance.service';
+import { getTeacherProfile } from '../services/teacher-profile.service';
+import { getTeacherContext, TeacherAccessError } from '../utils/teacher-assignment.guard';
 import type { TeacherContext } from '../services/teacher-context.service';
 import { prisma } from '../../../lib/prisma';
 
@@ -14,7 +22,17 @@ const router = Router();
 
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
   (req: Request, res: Response, next: NextFunction) => {
-    fn(req, res, next).catch(next);
+    fn(req, res, next).catch((err) => {
+      if (err instanceof TeacherAccessError) {
+        res.status(err.status).json({ success: false, message: err.message });
+        return;
+      }
+      if (err?.status && err?.message) {
+        res.status(err.status).json({ success: false, message: err.message });
+        return;
+      }
+      next(err);
+    });
   };
 
 router.use(auth);
@@ -23,7 +41,6 @@ router.use(teacherActiveMiddleware);
 
 /**
  * GET /teacher/bootstrap?branchId=&academicYearId=
- * Portal shell data: user, AY, branch, assignments, read-only flags.
  */
 router.get(
   '/bootstrap',
@@ -51,8 +68,67 @@ router.get(
   }),
 );
 
-/** Future write routes mount after scope + read-only guard. */
 router.use(teacherScopeMiddleware);
+
+/** GET routes below — read-only guard does not block GET. */
+router.get(
+  '/profile',
+  asyncHandler(async (req, res) => {
+    const user = (req as any).teacherUser;
+    const data = await getTeacherProfile(user.id);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/timetable',
+  asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    const data = await getTeacherTimetable(ctx.userId, ctx.academicYearId);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/classes/:groupId/students',
+  asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    const data = await getClassStudents(ctx, req.params.groupId);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/attendance',
+  asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    const groupId = req.query.groupId as string;
+    const date = req.query.date as string;
+    if (!groupId || !date) {
+      res.status(400).json({ success: false, message: 'groupId and date are required' });
+      return;
+    }
+    const data = await getGroupAttendance(ctx, groupId, date);
+    res.json({ success: true, data });
+  }),
+);
+
+/** Writes — blocked when AY is read-only. */
 router.use(teacherReadOnlyGuard);
+
+router.post(
+  '/attendance/batch',
+  asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    const user = (req as any).teacherUser;
+    const { groupId, date, records } = req.body ?? {};
+    if (!groupId || !date) {
+      res.status(400).json({ success: false, message: 'groupId and date are required' });
+      return;
+    }
+    const data = await saveGroupAttendanceBatch(ctx, groupId, date, records ?? [], user.id);
+    res.json({ success: true, data });
+  }),
+);
 
 export default router;
