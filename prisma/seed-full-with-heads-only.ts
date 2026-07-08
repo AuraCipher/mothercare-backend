@@ -18,6 +18,8 @@
 
 import { PrismaClient, AcademicYearStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { SEED_TEACHER_PORTAL_LOGINS } from './seed-teacher-logins.config';
+import { seedTeacherPortalLogins } from './seed-teacher-logins.lib';
 
 const prisma = new PrismaClient();
 
@@ -66,11 +68,18 @@ const DEFAULT_SUBJECTS = [
   { name: 'Arts',        code: 'ART' },
 ];
 
-const DEFAULT_TEACHERS = [
-  { name: 'Ms. Fatima Ali',   username: 'fatima_teacher',   empId: 'TCH-001', qual: 'M.Sc. Mathematics',   spec: 'Mathematics' },
-  { name: 'Mr. Usman Khan',   username: 'usman_teacher',   empId: 'TCH-002', qual: 'M.A. English',         spec: 'English Literature' },
-  { name: 'Ms. Ayesha Ahmed', username: 'ayesha_teacher',  empId: 'TCH-003', qual: 'M.Sc. Physics',        spec: 'Physics' },
-];
+const DEFAULT_TEACHERS = SEED_TEACHER_PORTAL_LOGINS.slice(0, 3).map((t) => ({
+  name: t.name,
+  username: t.username,
+  empId: t.employeeId,
+  qual: t.qualification,
+  spec: t.specialization,
+  password: t.password,
+}));
+
+function portalPasswordForUsername(username: string, fallback = 'teacher123') {
+  return SEED_TEACHER_PORTAL_LOGINS.find((t) => t.username === username)?.password ?? fallback;
+}
 
 const TIMETABLE_SLOTS = [
   { lecture: 1, start: '08:00', end: '08:40' },
@@ -198,17 +207,42 @@ async function ensureSubjects(academicYearId: string) {
 async function ensureTeachers() {
   for (const t of DEFAULT_TEACHERS) {
     const existing = await prisma.teacherProfile.findUnique({ where: { employeeId: t.empId } });
-    if (existing) continue;
+    const passwordHash = await bcrypt.hash(t.password, 12);
+    if (existing) {
+      await prisma.user.update({
+        where: { id: existing.userId },
+        data: { passwordHash },
+      });
+      await prisma.teacherProfile.update({
+        where: { id: existing.id },
+        data: { passwordSetAt: new Date(), credentialStatus: 'active' },
+      });
+      continue;
+    }
     const user = await prisma.user.upsert({
       where: { username: t.username },
-      update: {},
-      create: { name: t.name, username: t.username, passwordHash: '$2a$12$placeholder', role: 'teacher', status: 'active' },
+      update: { passwordHash },
+      create: {
+        name: t.name,
+        username: t.username,
+        passwordHash,
+        role: 'teacher',
+        status: 'active',
+      },
     });
     await prisma.teacherProfile.create({
-      data: { userId: user.id, employeeId: t.empId, qualification: t.qual, specialization: t.spec, phone: '+92 300 0000000' },
+      data: {
+        userId: user.id,
+        employeeId: t.empId,
+        qualification: t.qual,
+        specialization: t.spec,
+        phone: '+92 300 0000000',
+        passwordSetAt: new Date(),
+        credentialStatus: 'active',
+      },
     });
   }
-  console.log(`  ✓ ${DEFAULT_TEACHERS.length} teachers ensured`);
+  console.log(`  ✓ ${DEFAULT_TEACHERS.length} teachers ensured (with portal passwords)`);
 }
 
 async function ensureTimetable(academicYearId: string, name: string, type: string, slots: any[], activeDays: number[]) {
@@ -697,7 +731,7 @@ async function main() {
 
     let teacherId = (await prisma.user.findUnique({ where: { username }, select: { id: true } }))?.id;
     if (!teacherId) {
-      const hash = await bcrypt.hash('teacher123', 12);
+      const hash = await bcrypt.hash(portalPasswordForUsername(username), 12);
       const user = await prisma.user.create({
         data: { name: teacherName, username, passwordHash: hash, role: 'teacher', status: 'active' },
       });
@@ -709,7 +743,7 @@ async function main() {
           specialization: spec, phone: empPhone, joiningDate: new Date('2025-08-01'),
         },
       });
-      console.log(`  ✓ Created "${teacherName}" (${username} / teacher123)`);
+      console.log(`  ✓ Created "${teacherName}" (${username} / ${portalPasswordForUsername(username)})`);
 
       await prisma.groupMember.upsert({
         where: { groupId_userId: { groupId: group.id, userId: user.id } },
@@ -852,7 +886,7 @@ async function main() {
       await prisma.user.update({ where: { id: existing.id }, data: { name: t.name } });
       teacherIds[t.uname] = existing.id;
     } else {
-      const hash = await bcrypt.hash('teacher123', 12);
+      const hash = await bcrypt.hash(portalPasswordForUsername(username), 12);
       const user = await prisma.user.create({
         data: { name: t.name, username: t.uname, passwordHash: hash, role: 'teacher', status: 'active' },
       });
@@ -990,6 +1024,10 @@ async function main() {
     }
   }
 
+  // ─── Step 15b: Sync portal logins (passwords + branch membership) ──
+  console.log('\n[15b/16] Teacher Portal Logins');
+  await seedTeacherPortalLogins(prisma, { verbose: true });
+
   // ─── Step 16: Fee Heads Only (no structures, no generation, no payments) ──
   console.log('\n[16/16] Fee Heads (only)');
 
@@ -1030,6 +1068,11 @@ async function main() {
   console.log('    Password: admin123');
   console.log('    Role:     management + branch_admin (Principal)');
   console.log('    Note:     NOT super_admin — only this branch');
+  console.log('');
+  console.log('  Teacher portal (sample):');
+  for (const t of SEED_TEACHER_PORTAL_LOGINS) {
+    console.log(`    ${t.username} / ${t.password}  (${t.name})`);
+  }
   console.log('───────────────────────────────────────────────\n');
 }
 

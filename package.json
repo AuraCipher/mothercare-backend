@@ -16,6 +16,7 @@
     "backup": "bash scripts/backup.sh",
     "cleanup:fee-structures": "npx ts-node scripts/cleanup-fee-structure-duplicates.ts",
     "cleanup:fee-breakdowns": "npx ts-node scripts/cleanup-student-fee-breakdowns.ts",
+    "seed:teacher-logins": "npx ts-node scripts/seed-teacher-logins.ts",
     "lint": "eslint src --ext .ts",
     "test": "jest",
     "test:coverage": "jest --coverage",

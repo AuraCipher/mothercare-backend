@@ -13,6 +13,8 @@
 
 import { PrismaClient, AcademicYearStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { SEED_TEACHER_PORTAL_LOGINS } from './seed-teacher-logins.config';
+import { seedTeacherPortalLogins } from './seed-teacher-logins.lib';
 
 const prisma = new PrismaClient();
 
@@ -59,12 +61,6 @@ const DEFAULT_SUBJECTS = [
   { name: 'Quran',       code: 'QRN' },
   { name: 'Biology',     code: 'BIO' },
   { name: 'Arts',        code: 'ART' },
-];
-
-const DEFAULT_TEACHERS = [
-  { name: 'Ms. Fatima Ali',   username: 'fatima_teacher',   empId: 'TCH-001', qual: 'M.Sc. Mathematics',   spec: 'Mathematics' },
-  { name: 'Mr. Usman Khan',   username: 'usman_teacher',   empId: 'TCH-002', qual: 'M.A. English',         spec: 'English Literature' },
-  { name: 'Ms. Ayesha Ahmed', username: 'ayesha_teacher',  empId: 'TCH-003', qual: 'M.Sc. Physics',        spec: 'Physics' },
 ];
 
 const TIMETABLE_SLOTS = [
@@ -137,19 +133,6 @@ async function ensureSubjects(academicYearId: string) {
     if (!existing) { await prisma.subject.create({ data: { academicYearId, name: sub.name, code: sub.code } }); created++; }
   }
   console.log(`  ✓ ${created} subjects created (${DEFAULT_SUBJECTS.length - created} already exist)`);
-}
-
-async function ensureTeachers() {
-  for (const t of DEFAULT_TEACHERS) {
-    const existing = await prisma.teacherProfile.findUnique({ where: { employeeId: t.empId } });
-    if (existing) continue;
-    const user = await prisma.user.upsert({
-      where: { username: t.username }, update: {},
-      create: { name: t.name, username: t.username, passwordHash: '$2a$12$placeholder', role: 'teacher', status: 'active' },
-    });
-    await prisma.teacherProfile.create({ data: { userId: user.id, employeeId: t.empId, qualification: t.qual, specialization: t.spec, phone: '+92 300 0000000' } });
-  }
-  console.log(`  ✓ ${DEFAULT_TEACHERS.length} teachers ensured`);
 }
 
 async function ensureTimetable(academicYearId: string, name: string, type: string, slots: any[], activeDays: number[]) {
@@ -553,10 +536,6 @@ async function main() {
   console.log('\n[Subjects]');
   await ensureSubjects(academicYear.id);
 
-  // ─── Teachers ──────────────────────────────────────
-  console.log('\n[Teachers]');
-  await ensureTeachers();
-
   // ─── Timetable ─────────────────────────────────────
   console.log('\n[Timetable]');
   await ensureTimetable(academicYear.id, 'Regular Timetable', 'timetable', TIMETABLE_SLOTS, [1,2,3,4,5,6]);
@@ -591,6 +570,11 @@ async function main() {
     }
   }
   console.log(`  ✓ ${links} subject-group links`);
+
+  // ─── Teachers (portal logins + assignments) ────────
+  console.log('\n[Teachers]');
+  const teacherLoginResult = await seedTeacherPortalLogins(prisma, { verbose: true });
+  console.log(`  ✓ ${teacherLoginResult.teachers.length} teacher portal logins ensured`);
 
   // ─── Students + Attendance ─────────────────────────
   console.log('\n[Students & Attendance]');
@@ -647,6 +631,9 @@ async function main() {
   console.log('  ── User Credentials ──');
   console.log('  CEO:    ceo@mothercareschool.com / Ceo@098765');
   console.log('  Admin:  admin / admin123');
+  for (const t of SEED_TEACHER_PORTAL_LOGINS) {
+    console.log(`  Teacher: ${t.username} / ${t.password}  (${t.name})`);
+  }
   console.log('───────────────────────────────────────────────\n');
 }
 
