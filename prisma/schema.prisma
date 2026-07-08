@@ -1518,8 +1518,9 @@ model Exam {
   weightOverride Float?
   startDate      DateTime
   endDate        DateTime?
-  status         ExamStatus @default(DRAFT)
-  createdAt      DateTime   @default(now())
+  status            ExamStatus @default(DRAFT)
+  teacherMarksEntry Boolean    @default(true)
+  createdAt         DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
   createdById String?

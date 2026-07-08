@@ -5,6 +5,10 @@ import {
 } from '../../admin/utils/attendance-scope';
 import type { TeacherContext } from './teacher-context.service';
 import { assertTeacherAssignedToGroup } from '../utils/teacher-assignment.guard';
+import {
+  teacherCanMarkAttendanceToday,
+  validateTeacherAttendanceDate,
+} from '../utils/teacher-attendance.guard';
 
 function parseAttendanceDate(date: string): Date {
   const dateObj = new Date(`${date}T00:00:00`);
@@ -50,6 +54,7 @@ export async function getGroupAttendance(
     date,
     groupId,
     isClassTeacher: ctx.classTeacherGroupIds.includes(groupId),
+    canMarkToday: teacherCanMarkAttendanceToday(),
     records: students.map((s) => ({
       studentId: s.id,
       name: s.name,
@@ -76,6 +81,10 @@ export async function saveGroupAttendanceBatch(
   }
 
   const dateObj = parseAttendanceDate(date);
+  const teacherDateErr = validateTeacherAttendanceDate(date);
+  if (teacherDateErr) {
+    throw { status: 400, message: teacherDateErr };
+  }
   const dateErr = await validateAttendanceDate(ctx.academicYearId, dateObj);
   if (dateErr) {
     throw { status: 400, message: dateErr };

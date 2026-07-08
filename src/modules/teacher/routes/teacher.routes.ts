@@ -14,6 +14,11 @@ import {
   saveGroupAttendanceBatch,
 } from '../services/teacher-attendance.service';
 import { getTeacherProfile } from '../services/teacher-profile.service';
+import {
+  getTeacherMarksGrid,
+  listTeacherExamSubjects,
+  saveTeacherMarks,
+} from '../services/teacher-marks.service';
 import { getTeacherContext, TeacherAccessError } from '../utils/teacher-assignment.guard';
 import type { TeacherContext } from '../services/teacher-context.service';
 import { prisma } from '../../../lib/prisma';
@@ -113,6 +118,24 @@ router.get(
   }),
 );
 
+router.get(
+  '/marks/subjects',
+  asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    const data = await listTeacherExamSubjects(ctx);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/marks/grid/:examClassSubjectId',
+  asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    const data = await getTeacherMarksGrid(ctx, req.params.examClassSubjectId);
+    res.json({ success: true, data });
+  }),
+);
+
 /** Writes — blocked when AY is read-only. */
 router.use(teacherReadOnlyGuard);
 
@@ -127,6 +150,22 @@ router.post(
       return;
     }
     const data = await saveGroupAttendanceBatch(ctx, groupId, date, records ?? [], user.id);
+    res.json({ success: true, data });
+  }),
+);
+
+router.post(
+  '/marks/grid/:examClassSubjectId',
+  asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    const user = (req as any).teacherUser;
+    const { totalMarks, passingMarks, entries } = req.body ?? {};
+    const data = await saveTeacherMarks(
+      ctx,
+      req.params.examClassSubjectId,
+      { totalMarks, passingMarks, entries: entries ?? [] },
+      user.id,
+    );
     res.json({ success: true, data });
   }),
 );

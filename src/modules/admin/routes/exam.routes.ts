@@ -84,7 +84,7 @@ router.patch('/exams/:examId', asyncHandler(async (req: Request, res: Response) 
   const scope = await requireScope(req, res);
   if (!scope) return;
   await assertExamInScope(req.params.examId, scope);
-  const { name, examTypeId, weightOverride, startDate, endDate, status } = req.body;
+  const { name, examTypeId, weightOverride, startDate, endDate, status, teacherMarksEntry } = req.body;
 
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     res.status(400).json({ success: false, message: 'Exam name cannot be empty' });
@@ -102,6 +102,11 @@ router.patch('/exams/:examId', asyncHandler(async (req: Request, res: Response) 
     }
   }
 
+  if (teacherMarksEntry !== undefined && typeof teacherMarksEntry !== 'boolean') {
+    res.status(400).json({ success: false, message: 'teacherMarksEntry must be a boolean' });
+    return;
+  }
+
   const exam = await examService.update(req.params.examId, {
     ...(name !== undefined && { name }),
     ...(examTypeId !== undefined && { examTypeId }),
@@ -109,6 +114,7 @@ router.patch('/exams/:examId', asyncHandler(async (req: Request, res: Response) 
     ...(startDate !== undefined && { startDate: new Date(startDate) }),
     ...(endDate !== undefined && { endDate: endDate ? new Date(endDate) : null }),
     ...(status !== undefined && { status }),
+    ...(teacherMarksEntry !== undefined && { teacherMarksEntry }),
   });
 
   res.json({ success: true, data: exam });

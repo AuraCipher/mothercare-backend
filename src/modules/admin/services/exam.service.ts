@@ -18,6 +18,7 @@ export interface UpdateExamInput {
   startDate?: Date;
   endDate?: Date | null;
   status?: 'DRAFT' | 'ACTIVE';
+  teacherMarksEntry?: boolean;
 }
 
 // ─── Service ──────────────────────────────────────────────────────────
@@ -118,6 +119,15 @@ class ExamService {
       }
     }
 
+    if (data.teacherMarksEntry === true && existing.status === 'ACTIVE') {
+      throw {
+        status: 400,
+        message: 'Teacher marks entry can only be enabled while the exam is in Draft (build stage).',
+      };
+    }
+
+    const publishToActive = data.status === 'ACTIVE' && existing.status === 'DRAFT';
+
     const updated = await prisma.exam.update({
       where: { id },
       data: {
@@ -127,6 +137,8 @@ class ExamService {
         ...(data.startDate !== undefined && { startDate: data.startDate }),
         ...(data.endDate !== undefined && { endDate: data.endDate }),
         ...(data.status !== undefined && { status: data.status }),
+        ...(data.teacherMarksEntry !== undefined && { teacherMarksEntry: data.teacherMarksEntry }),
+        ...(publishToActive && { teacherMarksEntry: false }),
       },
     });
 
@@ -137,6 +149,7 @@ class ExamService {
         startDate: existing.startDate,
         endDate: existing.endDate,
         status: existing.status,
+        teacherMarksEntry: existing.teacherMarksEntry,
       },
       {
         name: updated.name,
@@ -144,6 +157,7 @@ class ExamService {
         startDate: updated.startDate,
         endDate: updated.endDate,
         status: updated.status,
+        teacherMarksEntry: updated.teacherMarksEntry,
       },
     );
     await logAudit({

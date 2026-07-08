@@ -73,7 +73,12 @@ class MarksEntryService {
     };
   }
 
-  async saveMarks(examClassSubjectId: string, data: SaveMarksData, enteredById: string) {
+  async saveMarks(
+    examClassSubjectId: string,
+    data: SaveMarksData,
+    enteredById: string,
+    options?: { allowStatuses?: string[] },
+  ) {
     const ecs = await prisma.examClassSubject.findUnique({
       where: { id: examClassSubjectId },
       include: {
@@ -86,8 +91,12 @@ class MarksEntryService {
     if (!ecs.isActive) throw { status: 400, message: 'This subject is disabled. Enable it first.' };
 
     const exam = ecs.examClass.exam;
-    if (exam.status !== 'DRAFT') {
-      throw { status: 400, message: `Cannot edit marks: exam "${exam.name}" is ${exam.status}. Only DRAFT exams can be edited.` };
+    const allowedStatuses = options?.allowStatuses ?? ['DRAFT'];
+    if (!allowedStatuses.includes(exam.status)) {
+      throw {
+        status: 400,
+        message: `Cannot edit marks: exam "${exam.name}" is ${exam.status}.`,
+      };
     }
 
     const { totalMarks, passingMarks, entries } = data;

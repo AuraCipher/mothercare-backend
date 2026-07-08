@@ -58,6 +58,11 @@ const mockAssignments = [
   },
 ];
 
+function todayDateString() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function mockTeacherHappyPath() {
   mockActiveAcademicYear();
   (prismaMock.user.findUnique as jest.Mock).mockResolvedValue(mockTeacherUser);
@@ -231,11 +236,55 @@ describe('Teacher portal — Phase B', () => {
       .set(teacherToken)
       .send({
         groupId: 'g1',
-        date: '2026-01-15',
+        date: todayDateString(),
         records: [{ studentId: 's1', status: 'present' }],
       });
     expect(res.status).toBe(403);
     expect(res.body.message).toMatch(/read-only/i);
+  });
+
+  test('POST /teacher/attendance/batch 400 when date is not today', async () => {
+    mockPhaseB();
+    (prismaMock.student.findMany as jest.Mock).mockResolvedValue([{ id: 's1' }]);
+
+    const res = await request(app)
+      .post('/teacher/attendance/batch')
+      .query(scopeQuery)
+      .set(teacherToken)
+      .send({
+        groupId: 'g1',
+        date: '2020-01-15',
+        records: [{ studentId: 's1', status: 'present' }],
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/today/i);
+  });
+
+  test('POST /teacher/attendance/batch 400 on Sunday', async () => {
+    mockPhaseB();
+    (prismaMock.student.findMany as jest.Mock).mockResolvedValue([{ id: 's1' }]);
+
+    const sunday = new Date();
+    sunday.setDate(sunday.getDate() - sunday.getDay());
+    const sundayStr = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`;
+
+    const res = await request(app)
+      .post('/teacher/attendance/batch')
+      .query(scopeQuery)
+      .set(teacherToken)
+      .send({
+        groupId: 'g1',
+        date: sundayStr,
+        records: [{ studentId: 's1', status: 'present' }],
+      });
+
+    if (sundayStr === new Date().toISOString().slice(0, 10)) {
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/sunday/i);
+    } else {
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/today/i);
+    }
   });
 
   test('POST /teacher/attendance/batch 200 when AY active', async () => {
@@ -249,10 +298,203 @@ describe('Teacher portal — Phase B', () => {
       .set(teacherToken)
       .send({
         groupId: 'g1',
-        date: '2026-01-15',
+        date: todayDateString(),
         records: [{ studentId: 's1', status: 'present' }],
       });
     expect(res.status).toBe(200);
     expect(res.body.data.saved).toBe(1);
+  });
+});
+
+describe('Teacher portal — Phase C (marks)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  const mockEcsRow = {
+    id: 'ecs1',
+    totalMarks: 100,
+    passingMarks: 40,
+    isActive: true,
+    subjectId: 'sub1',
+    subject: { id: 'sub1', name: 'Mathematics', code: 'MATH' },
+    examClass: {
+      classId: 'g1',
+      class: { id: 'g1', name: 'Class 5', section: 'A' },
+      exam: {
+        id: 'exam1',
+        name: 'Mid Term',
+        status: 'DRAFT',
+        teacherMarksEntry: true,
+        startDate: new Date('2026-01-01'),
+        endDate: null,
+        examSessionId: 'sess1',
+        examSession: { id: 'sess1', name: 'Term 1' },
+        examType: { name: 'Written' },
+      },
+    },
+    _count: { marksEntries: 2 },
+  };
+
+  const mockActiveEcsRow = {
+    ...mockEcsRow,
+    examClass: {
+      ...mockEcsRow.examClass,
+      exam: {
+        ...mockEcsRow.examClass.exam,
+        status: 'ACTIVE',
+        teacherMarksEntry: false,
+      },
+    },
+  };
+
+  function mockPhaseC() {
+    mockTeacherHappyPath();
+    (prismaMock.examClassSubject.findMany as jest.Mock).mockResolvedValue([mockEcsRow]);
+    (prismaMock.reportCard.count as jest.Mock).mockResolvedValue(0);
+  }
+
+  test('GET /teacher/marks/subjects 200', async () => {
+    mockPhaseC();
+    const res = await request(app)
+      .get('/teacher/marks/subjects')
+      .query(scopeQuery)
+      .set(teacherToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].subject.name).toBe('Mathematics');
+    expect(res.body.data[0].canWrite).toBe(true);
+  });
+
+  test('GET /teacher/marks/grid/:id 403 for unassigned subject', async () => {
+    mockTeacherHappyPath();
+    (prismaMock.examClassSubject.findFirst as jest.Mock).mockResolvedValue({
+      ...mockEcsRow,
+      subjectId: 'other-sub',
+      subject: { id: 'other-sub', name: 'Science', code: 'SCI' },
+    });
+
+    const res = await request(app)
+      .get('/teacher/marks/grid/ecs1')
+      .query(scopeQuery)
+      .set(teacherToken);
+    expect(res.status).toBe(403);
+  });
+
+  test('GET /teacher/marks/grid/:id 200 for assigned subject', async () => {
+    mockPhaseC();
+    (prismaMock.examClassSubject.findFirst as jest.Mock).mockResolvedValue(mockEcsRow);
+    (prismaMock.examClassSubject.findUnique as jest.Mock).mockResolvedValue({
+      ...mockEcsRow,
+      examClass: {
+        ...mockEcsRow.examClass,
+        class: mockEcsRow.examClass.class,
+        exam: { id: 'exam1', name: 'Mid Term', status: 'DRAFT', teacherMarksEntry: true },
+      },
+    });
+    (prismaMock.student.findMany as jest.Mock).mockResolvedValue([
+      {
+        id: 's1',
+        name: 'Ali',
+        rollNumber: '1',
+        admissionNumber: 'ADM-1',
+        examMarks: [],
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/teacher/marks/grid/ecs1')
+      .query(scopeQuery)
+      .set(teacherToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data.students).toHaveLength(1);
+    expect(res.body.data.canWrite).toBe(true);
+  });
+
+  test('POST /teacher/marks/grid/:id 403 when AY archived', async () => {
+    mockActiveAcademicYear({ status: 'ARCHIVED' });
+    (prismaMock.user.findUnique as jest.Mock).mockResolvedValue(mockTeacherUser);
+    (prismaMock.teacherProfile.findUnique as jest.Mock).mockResolvedValue(mockTeacherProfile);
+    (prismaMock.branchMember.findUnique as jest.Mock).mockResolvedValue(mockBranchMember);
+    (prismaMock.teacherAssignment.findMany as jest.Mock).mockResolvedValue(mockAssignments);
+
+    const res = await request(app)
+      .post('/teacher/marks/grid/ecs1')
+      .query(scopeQuery)
+      .set(teacherToken)
+      .send({
+        totalMarks: 100,
+        entries: [{ studentId: 's1', marksObtained: 80, isAbsent: false }],
+      });
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/read-only/i);
+  });
+
+  test('GET /teacher/marks/subjects marks Active exams as not editable', async () => {
+    mockPhaseC();
+    (prismaMock.examClassSubject.findMany as jest.Mock).mockResolvedValue([mockActiveEcsRow]);
+
+    const res = await request(app)
+      .get('/teacher/marks/subjects')
+      .query(scopeQuery)
+      .set(teacherToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].canWrite).toBe(false);
+    expect(res.body.data[0].restrictReason).toBe('EXAM_ACTIVE');
+  });
+
+  test('POST /teacher/marks/grid/:id 403 when exam is Active', async () => {
+    mockPhaseC();
+    (prismaMock.examClassSubject.findFirst as jest.Mock).mockResolvedValue(mockActiveEcsRow);
+
+    const res = await request(app)
+      .post('/teacher/marks/grid/ecs1')
+      .query(scopeQuery)
+      .set(teacherToken)
+      .send({
+        totalMarks: 100,
+        entries: [{ studentId: 's1', marksObtained: 80, isAbsent: false }],
+      });
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/active/i);
+  });
+
+  test('POST /teacher/marks/grid/:id 403 when report cards published', async () => {
+    mockPhaseC();
+    (prismaMock.examClassSubject.findFirst as jest.Mock).mockResolvedValue(mockEcsRow);
+    (prismaMock.reportCard.count as jest.Mock).mockResolvedValue(3);
+
+    const res = await request(app)
+      .post('/teacher/marks/grid/ecs1')
+      .query(scopeQuery)
+      .set(teacherToken)
+      .send({
+        totalMarks: 100,
+        entries: [{ studentId: 's1', marksObtained: 80, isAbsent: false }],
+      });
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/locked/i);
+  });
+
+  test('POST /teacher/marks/grid/:id 403 when admin disabled teacher entry', async () => {
+    mockPhaseC();
+    const restrictedRow = {
+      ...mockEcsRow,
+      examClass: {
+        ...mockEcsRow.examClass,
+        exam: { ...mockEcsRow.examClass.exam, teacherMarksEntry: false },
+      },
+    };
+    (prismaMock.examClassSubject.findFirst as jest.Mock).mockResolvedValue(restrictedRow);
+    (prismaMock.reportCard.count as jest.Mock).mockResolvedValue(0);
+
+    const res = await request(app)
+      .post('/teacher/marks/grid/ecs1')
+      .query(scopeQuery)
+      .set(teacherToken)
+      .send({
+        totalMarks: 100,
+        entries: [{ studentId: 's1', marksObtained: 80, isAbsent: false }],
+      });
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/disabled/i);
   });
 });
