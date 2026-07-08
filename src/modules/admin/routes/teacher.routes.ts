@@ -1,5 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { teacherProfileService, teacherAssignmentService } from '../services/teacher.service';
+import {
+  getTeacherPortalPermissionsAdmin,
+  updateTeacherPortalPermissionsAdmin,
+} from '../services/teacher-portal-permissions.service';
 import { passwordSetLimiter } from '../../../middleware/security/rateLimiter';
 import { requireScope } from '../utils/scope-context';
 
@@ -51,6 +55,28 @@ router.get('/teachers', asyncHandler(async (req: Request, res: Response) => {
 router.get('/teachers/:id', asyncHandler(async (req: Request, res: Response) => {
   const profile = await teacherProfileService.findById(req.params.id);
   res.json({ success: true, data: profile });
+}));
+
+// GET /admin/teachers/:id/portal-permissions — Permission tree + effective access
+router.get('/teachers/:id/portal-permissions', asyncHandler(async (req: Request, res: Response) => {
+  const branchId = (req.query.branchId as string) || req.body?.branchId;
+  if (!branchId) {
+    res.status(400).json({ success: false, message: 'branchId is required' });
+    return;
+  }
+  const data = await getTeacherPortalPermissionsAdmin(req.params.id, branchId);
+  res.json({ success: true, data });
+}));
+
+// PUT /admin/teachers/:id/portal-permissions — Update portal mode + feature permissions
+router.put('/teachers/:id/portal-permissions', asyncHandler(async (req: Request, res: Response) => {
+  const { portalAccess, portalPermissions } = req.body ?? {};
+  const data = await updateTeacherPortalPermissionsAdmin(req.params.id, {
+    portalAccess,
+    portalPermissions,
+    updatedById: (req as any).user?.id,
+  });
+  res.json({ success: true, data });
 }));
 
 // TC-014: PUT /admin/teachers/:id — Update teacher profile

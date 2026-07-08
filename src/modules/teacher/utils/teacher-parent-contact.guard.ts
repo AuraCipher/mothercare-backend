@@ -5,12 +5,11 @@ export async function canViewParentContactsForGroup(
   ctx: TeacherContext,
   groupId: string,
 ): Promise<boolean> {
-  if (!ctx.branch.teacherParentContactEnabled) return false;
-  if (!ctx.canViewParentContact) return false;
+  if (!ctx.permissions.features.parentContact.canView) return false;
 
   if (ctx.classTeacherGroupIds.includes(groupId)) return true;
 
-  if (ctx.isHod && ctx.hodParentContactScope === 'DEPARTMENT_ALL') {
+  if (ctx.isHod && ctx.permissions.features.parentContact.hodScope === 'DEPARTMENT_ALL') {
     const match = await prisma.groupSubject.findFirst({
       where: {
         groupId,

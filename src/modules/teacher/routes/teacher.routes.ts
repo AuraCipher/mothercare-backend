@@ -28,6 +28,7 @@ import {
   markTeacherNotificationRead,
 } from '../services/teacher-notifications.service';
 import { getTeacherContext, TeacherAccessError } from '../utils/teacher-assignment.guard';
+import { assertFeatureAllowed } from '../permissions/teacher-feature.guard';
 import type { TeacherContext } from '../services/teacher-context.service';
 import { prisma } from '../../../lib/prisma';
 
@@ -89,6 +90,7 @@ router.get(
   '/announcements',
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'announcements');
     const data = await listTeacherAnnouncements(ctx);
     res.json({ success: true, data });
   }),
@@ -97,6 +99,8 @@ router.get(
 router.get(
   '/profile',
   asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'profile');
     const user = (req as any).teacherUser;
     const data = await getTeacherProfile(user.id);
     res.json({ success: true, data });
@@ -107,6 +111,7 @@ router.get(
   '/timetable',
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'timetable');
     const data = await getTeacherTimetable(ctx.userId, ctx.academicYearId);
     res.json({ success: true, data });
   }),
@@ -116,6 +121,8 @@ router.get(
   '/classes/:groupId/students',
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'classes');
+    assertFeatureAllowed(ctx.permissions, 'roster');
     const data = await getClassStudents(ctx, req.params.groupId);
     res.json({ success: true, data });
   }),
@@ -125,6 +132,7 @@ router.get(
   '/attendance',
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'attendance', 'view');
     const groupId = req.query.groupId as string;
     const date = req.query.date as string;
     if (!groupId || !date) {
@@ -140,6 +148,7 @@ router.get(
   '/marks/subjects',
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'marks', 'view');
     const data = await listTeacherExamSubjects(ctx);
     res.json({ success: true, data });
   }),
@@ -149,6 +158,7 @@ router.get(
   '/marks/grid/:examClassSubjectId',
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'marks', 'view');
     const data = await getTeacherMarksGrid(ctx, req.params.examClassSubjectId);
     res.json({ success: true, data });
   }),
@@ -158,10 +168,7 @@ router.get(
   '/hod/department',
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
-    if (!ctx.isHod) {
-      res.status(403).json({ success: false, message: 'HOD access only' });
-      return;
-    }
+    assertFeatureAllowed(ctx.permissions, 'hod', 'view');
     const data = await getHodDepartmentOverview(ctx);
     res.json({ success: true, data });
   }),
@@ -171,10 +178,7 @@ router.get(
   '/hod/marks/subjects',
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
-    if (!ctx.isHod) {
-      res.status(403).json({ success: false, message: 'HOD access only' });
-      return;
-    }
+    assertFeatureAllowed(ctx.permissions, 'hod', 'view');
     const data = await listHodExamSubjects(ctx);
     res.json({ success: true, data });
   }),
@@ -183,6 +187,8 @@ router.get(
 router.get(
   '/notifications',
   asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'notifications');
     const user = (req as any).teacherUser;
     const unreadOnly = req.query.unreadOnly === 'true';
     const limit = req.query.limit ? Number(req.query.limit) : undefined;
@@ -194,6 +200,8 @@ router.get(
 router.patch(
   '/notifications/:id/read',
   asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'notifications', 'markRead');
     const user = (req as any).teacherUser;
     const data = await markTeacherNotificationRead(user.id, req.params.id);
     res.json({ success: true, data });
@@ -203,6 +211,8 @@ router.patch(
 router.post(
   '/notifications/read-all',
   asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'notifications', 'markRead');
     const user = (req as any).teacherUser;
     const data = await markAllTeacherNotificationsRead(user.id);
     res.json({ success: true, data });
@@ -216,6 +226,7 @@ router.post(
   '/attendance/batch',
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'attendance', 'mark');
     const user = (req as any).teacherUser;
     const { groupId, date, records } = req.body ?? {};
     if (!groupId || !date) {
@@ -231,6 +242,7 @@ router.post(
   '/marks/grid/:examClassSubjectId',
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'marks', 'enter');
     const user = (req as any).teacherUser;
     const { totalMarks, passingMarks, entries } = req.body ?? {};
     const data = await saveTeacherMarks(

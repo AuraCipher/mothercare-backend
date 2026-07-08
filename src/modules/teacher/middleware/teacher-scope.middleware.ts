@@ -3,6 +3,10 @@ import { prisma } from '../../../lib/prisma';
 import { TEACHER_READ_ONLY_AY_STATUSES, TEACHER_PORTAL_ACCESS } from '../teacher.constants';
 import type { TeacherContext } from '../services/teacher-context.service';
 import { resolveHodSubjectIds } from '../utils/teacher-hod.guard';
+import {
+  normalizeStoredPermissions,
+  resolveTeacherPermissions,
+} from '../permissions/teacher-permissions.resolver';
 
 function extractBranchId(req: Request): string | undefined {
   return (
@@ -124,6 +128,7 @@ export async function teacherScopeMiddleware(
       where: { userId },
       select: {
         portalAccess: true,
+        portalPermissions: true,
         canViewParentContact: true,
         hodParentContactScope: true,
       },
@@ -150,6 +155,22 @@ export async function teacherScopeMiddleware(
             ? `Academic year is ${ay.status}`
             : undefined;
 
+    const canViewParentContact = profile?.canViewParentContact ?? false;
+    const hodParentContactScope = profile?.hodParentContactScope ?? 'ASSIGNED_ONLY';
+    const portalPermissions = normalizeStoredPermissions(profile?.portalPermissions, {
+      canViewParentContact,
+      hodParentContactScope,
+    });
+    const isHod = hodSubjectIds.length > 0;
+    const permissions = resolveTeacherPermissions({
+      portalAccess,
+      isReadOnly,
+      isHod,
+      stored: portalPermissions,
+      legacy: { canViewParentContact, hodParentContactScope },
+      branch: ay.branch,
+    });
+
     const ctx: TeacherContext = {
       userId,
       teacherProfileId: (req as any).teacherProfileId,
@@ -159,12 +180,14 @@ export async function teacherScopeMiddleware(
       academicYearLabel: ay.calendar?.label || academicYearId,
       branch: ay.branch,
       portalAccess,
+      portalPermissions,
+      permissions,
       isReadOnly,
       freezeReason,
-      canViewParentContact: profile?.canViewParentContact ?? false,
-      hodParentContactScope: profile?.hodParentContactScope ?? 'ASSIGNED_ONLY',
+      canViewParentContact,
+      hodParentContactScope,
       hodSubjectIds,
-      isHod: hodSubjectIds.length > 0,
+      isHod,
       assignments: portalAccess === TEACHER_PORTAL_ACCESS.FROZEN ? [] : assignments,
       classTeacherGroupIds: portalAccess === TEACHER_PORTAL_ACCESS.FROZEN ? [] : classTeacherGroupIds,
       assignmentGroupIds:

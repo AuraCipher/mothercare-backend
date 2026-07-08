@@ -1,3 +1,8 @@
+import type {
+  ResolvedTeacherPermissions,
+  TeacherPortalPermissionsStored,
+} from '../permissions/teacher-permissions.types';
+
 export interface TeacherAssignmentRow {
   id: string;
   academicYearId: string;
@@ -25,6 +30,8 @@ export interface TeacherContext {
     teachersCanEnterMarks: boolean;
   };
   portalAccess: 'FULL' | 'READ_ONLY' | 'FROZEN';
+  portalPermissions: TeacherPortalPermissionsStored | null;
+  permissions: ResolvedTeacherPermissions;
   isReadOnly: boolean;
   freezeReason?: string;
   canViewParentContact: boolean;

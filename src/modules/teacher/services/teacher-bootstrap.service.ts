@@ -1,4 +1,5 @@
 import type { TeacherContext } from './teacher-context.service';
+import type { ResolvedTeacherPermissions } from '../permissions/teacher-permissions.types';
 
 export type { TeacherContext };
 
@@ -34,18 +35,24 @@ export interface TeacherBootstrapData {
     canViewParentContact: boolean;
     teachersCanMarkAttendance: boolean;
     teachersCanEnterMarks: boolean;
+    permissions: ResolvedTeacherPermissions['features'];
   };
   assignments: TeacherContext['assignments'];
 }
 
 export function buildBootstrapResponse(ctx: TeacherContext, user: TeacherBootstrapData['user']): TeacherBootstrapData {
+  const p = ctx.permissions;
   return {
     user,
     teacherProfile: {
       id: ctx.teacherProfileId,
       employeeId: null,
     },
-    branch: ctx.branch,
+    branch: {
+      id: ctx.branch.id,
+      name: ctx.branch.name,
+      code: ctx.branch.code,
+    },
     academicYear: {
       id: ctx.academicYearId,
       label: ctx.academicYearLabel,
@@ -61,10 +68,10 @@ export function buildBootstrapResponse(ctx: TeacherContext, user: TeacherBootstr
       classTeacherGroupIds: ctx.classTeacherGroupIds,
       isHod: ctx.isHod,
       hodSubjectCount: ctx.hodSubjectIds.length,
-      canViewParentContact:
-        ctx.canViewParentContact && ctx.branch.teacherParentContactEnabled,
-      teachersCanMarkAttendance: ctx.branch.teachersCanMarkAttendance,
-      teachersCanEnterMarks: ctx.branch.teachersCanEnterMarks,
+      canViewParentContact: p.features.parentContact.canView,
+      teachersCanMarkAttendance: p.features.attendance.canMark,
+      teachersCanEnterMarks: p.features.marks.canEnter,
+      permissions: p.features,
     },
     assignments: ctx.assignments,
   };

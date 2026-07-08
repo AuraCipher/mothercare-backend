@@ -72,6 +72,9 @@ function resolveTeacherMarksAccess(
   exam: { status: string; teacherMarksEntry: boolean },
   lockedByReportCards: boolean,
 ) {
+  if (!ctx.permissions.features.marks.canEnter) {
+    return { canWrite: false, restrictReason: 'PERMISSION_DENIED' as const };
+  }
   if (!ctx.branch.teachersCanEnterMarks) {
     return { canWrite: false, restrictReason: 'BRANCH_DISABLED' as const };
   }
