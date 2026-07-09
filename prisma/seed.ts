@@ -118,44 +118,44 @@ const DEFAULT_STUDENT_PORTAL_PASSWORD = 'Student@123';
 
 const SEED_STUDENT_PORTAL_LOGINS: StudentPortalLoginSeed[] = [
   {
-    label: 'Jr Montessori — Ahmed',
+    label: 'Playgroup — Ahmed',
     studentName: 'Ahmed',
     username: 'student_ahmed',
     password: DEFAULT_STUDENT_PORTAL_PASSWORD,
-    groupDisplayOrder: 2,
+    groupDisplayOrder: 1,
     rollNumber: '1',
   },
   {
-    label: 'Jr Montessori — Sara',
+    label: 'Playgroup — Sara',
     studentName: 'Sara',
     username: 'student_sara',
     password: DEFAULT_STUDENT_PORTAL_PASSWORD,
-    groupDisplayOrder: 2,
+    groupDisplayOrder: 1,
     rollNumber: '3',
   },
   {
-    label: 'Class 3 — Aiman',
+    label: 'Class 2 — Aiman',
     studentName: 'Aiman',
     username: 'student_aiman',
     password: DEFAULT_STUDENT_PORTAL_PASSWORD,
-    groupDisplayOrder: 6,
+    groupDisplayOrder: 5,
     rollNumber: '1',
   },
   {
-    label: 'Class 7 — Abrar',
+    label: 'Class 6 — Abrar',
     studentName: 'Abrar',
     username: 'student_abrar',
     password: DEFAULT_STUDENT_PORTAL_PASSWORD,
-    groupDisplayOrder: 10,
+    groupDisplayOrder: 9,
     rollNumber: '1',
   },
   {
-    label: 'Class 9 ARTS — Adnan',
+    label: 'Class 8 CS — Adnan',
     studentName: 'Adnan',
     username: 'student_adnan',
     password: DEFAULT_STUDENT_PORTAL_PASSWORD,
-    groupDisplayOrder: 12,
-    groupSection: 'ARTS',
+    groupDisplayOrder: 11,
+    groupSection: 'CS',
     rollNumber: '1',
   },
 ];
@@ -1524,9 +1524,13 @@ async function main() {
   console.log('───────────────────────────────────────────────\n');
 }
 
-main()
-  .catch((e) => {
-    console.error('\n❌ Seed failed:', e.message);
-    process.exit(1);
-  })
-  .finally(() => prisma.$disconnect());
+export { seedStudentPortalLogins };
+
+if (require.main === module) {
+  main()
+    .catch((e) => {
+      console.error('\n❌ Seed failed:', e.message);
+      process.exit(1);
+    })
+    .finally(() => prisma.$disconnect());
+}
