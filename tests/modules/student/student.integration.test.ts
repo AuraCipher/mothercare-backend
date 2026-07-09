@@ -1,129 +1,222 @@
 /**
- * Student portal — bootstrap, announcements, read-only guard.
+ * Student portal — integration tests (auth, routes, read-only).
  */
 import { prismaMock } from '../../mocks/prisma';
 import request from 'supertest';
 import app from '../../../src/app';
-import { generateTestToken, getAuthHeader } from '../../helpers/auth';
-import { TEST_AY_ID, TEST_BRANCH_ID, mockActiveAcademicYear, scopeQuery } from '../../helpers/integration';
+import { TEST_AY_ID, TEST_BRANCH_ID, scopeQuery } from '../../helpers/integration';
+import {
+  adminToken,
+  mockStudentPortalReady,
+  mockStudentReadRoutes,
+  mockStudentRecord,
+  mockStudentUser,
+  studentToken,
+  teacherToken,
+} from './student.helpers';
 
-const studentToken = getAuthHeader(
-  generateTestToken('student-u1', 'student', {
-    name: 'Ali Student',
-    branchIds: [],
-  }),
-);
+describe('Student portal — integration', () => {
+  beforeEach(() => jest.clearAllMocks());
 
-const mockStudentUser = {
-  id: 'student-u1',
-  name: 'Ali Student',
-  email: null,
-  username: 'ali.s',
-  role: 'student',
-  status: 'active',
-  profilePhotoId: null,
-};
-
-const mockStudentRecord = {
-  id: 'stu-1',
-  name: 'Ali Student',
-  rollNumber: '12',
-  userId: 'student-u1',
-  academicYearId: TEST_AY_ID,
-  isActive: true,
-  status: 'ACTIVE',
-  credentialTag: 'CRED_NONE',
-  group: { id: 'g1', name: 'Class 5', section: 'A' },
-  academicYear: {
-    id: TEST_AY_ID,
-    branchId: TEST_BRANCH_ID,
-    status: 'ACTIVE',
-    calendar: { label: '2025-2026' },
-    branch: { id: TEST_BRANCH_ID, name: 'Test Branch', code: 'TST' },
-  },
-};
-
-function mockStudentBase() {
-  mockActiveAcademicYear();
-  (prismaMock.user.findUnique as jest.Mock).mockResolvedValue(mockStudentUser);
-  (prismaMock.student.findFirst as jest.Mock).mockResolvedValue(mockStudentRecord);
-  (prismaMock.canteenAccount.findFirst as jest.Mock).mockResolvedValue(null);
-}
-
-describe('Student portal', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
+  test('GET /student/bootstrap 401 without token', async () => {
+    const res = await request(app).get('/student/bootstrap').query(scopeQuery);
+    expect(res.status).toBe(401);
   });
 
-  it('GET /student/bootstrap returns student context', async () => {
-    mockStudentBase();
-    const res = await request(app)
-      .get('/student/bootstrap')
-      .set(studentToken)
-      .query(scopeQuery);
-
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.data.student.id).toBe('stu-1');
-    expect(res.body.data.branch.id).toBe(TEST_BRANCH_ID);
-    expect(res.body.data.features.showCanteen).toBe(false);
-  });
-
-  it('GET /student/announcements returns school-wide and class scoped', async () => {
-    mockStudentBase();
-    (prismaMock.announcement.findMany as jest.Mock).mockResolvedValue([
-      {
-        id: 'a1',
-        title: 'Holiday',
-        content: 'Monday off',
-        mediaUrl: null,
-        isPinned: false,
-        createdAt: new Date('2026-01-01'),
-        senderId: 'admin-1',
-        groupId: null,
-        group: null,
-      },
-    ]);
-    (prismaMock.user.findMany as jest.Mock).mockResolvedValue([
-      { id: 'admin-1', name: 'Admin', role: 'management' },
-    ]);
-
-    const res = await request(app)
-      .get('/student/announcements')
-      .set(studentToken)
-      .query(scopeQuery);
-
-    expect(res.status).toBe(200);
-    expect(res.body.data).toHaveLength(1);
-    expect(res.body.data[0].scope).toBe('school');
-  });
-
-  it('POST /student/profile returns 405 read-only', async () => {
-    mockStudentBase();
-    const res = await request(app)
-      .post('/student/profile')
-      .set(studentToken)
-      .query(scopeQuery)
-      .send({ name: 'Hack' });
-
-    expect(res.status).toBe(405);
-  });
-
-  it('rejects non-student role', async () => {
-    const teacherToken = getAuthHeader(
-      generateTestToken('teacher-u1', 'teacher', { branchIds: [TEST_BRANCH_ID] }),
-    );
+  test('GET /student/bootstrap 403 for teacher role', async () => {
     (prismaMock.user.findUnique as jest.Mock).mockResolvedValue({
       ...mockStudentUser,
       id: 'teacher-u1',
       role: 'teacher',
     });
-
     const res = await request(app)
       .get('/student/bootstrap')
-      .set(teacherToken)
+      .query(scopeQuery)
+      .set(teacherToken);
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/student portal/i);
+  });
+
+  test('GET /student/bootstrap 403 for management role', async () => {
+    (prismaMock.user.findUnique as jest.Mock).mockResolvedValue({
+      ...mockStudentUser,
+      id: 'admin-1',
+      role: 'management',
+    });
+    const res = await request(app)
+      .get('/student/bootstrap')
+      .query(scopeQuery)
+      .set(adminToken);
+    expect(res.status).toBe(403);
+  });
+
+  test('GET /student/bootstrap returns student context and feature flags', async () => {
+    mockStudentPortalReady();
+    const res = await request(app)
+      .get('/student/bootstrap')
+      .set(studentToken)
       .query(scopeQuery);
 
+    expect(res.status).toBe(200);
+    expect(res.body.data.student.id).toBe(mockStudentRecord.id);
+    expect(res.body.data.branch.id).toBe(TEST_BRANCH_ID);
+    expect(res.body.data.features.showCanteen).toBe(false);
+  });
+
+  test('GET /student/bootstrap showCanteen when account has activity', async () => {
+    mockStudentPortalReady({ showCanteen: true });
+    const res = await request(app)
+      .get('/student/bootstrap')
+      .set(studentToken)
+      .query(scopeQuery);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.features.showCanteen).toBe(true);
+  });
+
+  test('GET /student/profile returns read-only profile', async () => {
+    mockStudentPortalReady();
+    mockStudentReadRoutes();
+    const res = await request(app)
+      .get('/student/profile')
+      .set(studentToken)
+      .query(scopeQuery);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.name).toBe('Ali Student');
+    expect(res.body.data.group.label).toBe('Class 5 — A');
+    expect(prismaMock.student.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: mockStudentRecord.id } }),
+    );
+  });
+
+  test('GET /student/fees scopes to enrolled student', async () => {
+    mockStudentPortalReady();
+    mockStudentReadRoutes();
+    const res = await request(app)
+      .get('/student/fees')
+      .set(studentToken)
+      .query(scopeQuery);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.months).toHaveLength(1);
+    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { studentId: mockStudentRecord.id, academicYearId: TEST_AY_ID },
+      }),
+    );
+  });
+
+  test('GET /student/attendance returns summary', async () => {
+    mockStudentPortalReady();
+    mockStudentReadRoutes();
+    const res = await request(app)
+      .get('/student/attendance')
+      .set(studentToken)
+      .query(scopeQuery);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.summary.total).toBe(2);
+    expect(res.body.data.summary.present).toBe(1);
+    expect(prismaMock.attendance.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ studentId: mockStudentRecord.id }),
+      }),
+    );
+  });
+
+  test('GET /student/results/table returns published marks only', async () => {
+    mockStudentPortalReady();
+    mockStudentReadRoutes();
+    const res = await request(app)
+      .get('/student/results/table')
+      .set(studentToken)
+      .query(scopeQuery);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.rows).toHaveLength(1);
+    expect(res.body.data.rows[0].subjectName).toBe('Mathematics');
+    expect(prismaMock.reportCard.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { studentId: mockStudentRecord.id, status: 'PUBLISHED' },
+      }),
+    );
+    expect(prismaMock.marksEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ studentId: mockStudentRecord.id }),
+      }),
+    );
+  });
+
+  test('GET /student/timetable returns class schedule', async () => {
+    mockStudentPortalReady();
+    mockStudentReadRoutes();
+    const res = await request(app)
+      .get('/student/timetable')
+      .set(studentToken)
+      .query(scopeQuery);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.slots).toHaveLength(1);
+    expect(res.body.data.slots[0].subject.name).toBe('Mathematics');
+  });
+
+  test('GET /student/datesheets returns active datesheets', async () => {
+    mockStudentPortalReady();
+    mockStudentReadRoutes();
+    const res = await request(app)
+      .get('/student/datesheets')
+      .set(studentToken)
+      .query(scopeQuery);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].name).toBe('Mid Term Datesheet');
+    expect(prismaMock.timetable.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { academicYearId: TEST_AY_ID, type: 'datesheet', isActive: true },
+      }),
+    );
+  });
+
+  test('GET /student/canteen returns account when present', async () => {
+    mockStudentPortalReady({ showCanteen: true });
+    mockStudentReadRoutes();
+    const res = await request(app)
+      .get('/student/canteen')
+      .set(studentToken)
+      .query(scopeQuery);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.runningBalance).toBe(150);
+  });
+
+  test('POST /student/fees returns 405 read-only', async () => {
+    mockStudentPortalReady();
+    const res = await request(app)
+      .post('/student/fees')
+      .set(studentToken)
+      .query(scopeQuery)
+      .send({ amount: 100 });
+    expect(res.status).toBe(405);
+  });
+
+  test('PATCH /student/announcements returns 405 read-only', async () => {
+    mockStudentPortalReady();
+    const res = await request(app)
+      .patch('/student/announcements/ann-1')
+      .set(studentToken)
+      .query(scopeQuery)
+      .send({ title: 'Hack' });
+    expect(res.status).toBe(405);
+  });
+
+  test('GET /admin/students 403 for student token', async () => {
+    (prismaMock.user.findUnique as jest.Mock).mockResolvedValue(mockStudentUser);
+    const res = await request(app)
+      .get('/admin/students')
+      .set(studentToken)
+      .query(scopeQuery);
     expect(res.status).toBe(403);
   });
 });
