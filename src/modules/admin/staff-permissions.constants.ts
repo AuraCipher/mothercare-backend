@@ -12,6 +12,7 @@ export const STAFF_MODULE_KEYS = [
   'CANTEEN',
   'STATIONARY',
   'EXPENSES',
+  'DOCUMENTS',
 ] as const satisfies readonly StaffModule[];
 
 export type StaffModuleKey = (typeof STAFF_MODULE_KEYS)[number];
@@ -109,7 +110,7 @@ export function normalizePermissionInput(
     out.push({
       module: m.module,
       canCreate: !!m.canCreate,
-      canRead: true,
+      canRead: m.module === 'DOCUMENTS' ? !!m.canRead : true,
       canUpdate: !!m.canUpdate,
       canDelete: !!m.canDelete,
       archivedCanRead: archivedRead,

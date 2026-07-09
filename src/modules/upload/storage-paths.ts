@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 
-export const UPLOAD_ENTITY_TYPES = ['student', 'teacher', 'staff', 'chat', 'receipt', 'general'] as const;
+export const UPLOAD_ENTITY_TYPES = ['student', 'teacher', 'staff', 'canteen_supplier', 'stationary_supplier', 'chat', 'receipt', 'general'] as const;
 export type UploadEntityType = (typeof UPLOAD_ENTITY_TYPES)[number];
 
 export const UPLOAD_PURPOSES = [

@@ -57,6 +57,7 @@ enum StaffModule {
   CANTEEN
   STATIONARY
   EXPENSES
+  DOCUMENTS
 }
 
 // Academic Year lifecycle: BUILD_STAGE → ACTIVE → ARCHIVED

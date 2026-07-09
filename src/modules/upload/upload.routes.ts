@@ -1,11 +1,14 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import authMiddleware from '../../middleware/auth/auth.middleware';
+import { uploadDocumentPermissionMiddleware } from '../../middleware/auth/upload-document-permission.middleware';
 import { uploadLimiter } from '../../middleware/security/rateLimiter';
 import { uploadService } from './upload.service';
 import { UPLOAD_ENTITY_TYPES } from './storage-paths';
 
 const router = Router();
+
+router.use(authMiddleware, uploadDocumentPermissionMiddleware);
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -20,7 +23,7 @@ function isValidEntityType(value?: string): value is typeof UPLOAD_ENTITY_TYPES[
 }
 
 // ─── POST /api/upload — Upload a file (auth + rate limit) ──────────
-router.post('/upload', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/upload', uploadLimiter, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
   if (!req.file) {
     res.status(400).json({ success: false, message: 'No file provided' });
     return;
@@ -51,7 +54,7 @@ router.post('/upload', authMiddleware, uploadLimiter, upload.single('file'), asy
 }));
 
 // ─── GET /api/uploads — List files by entity (auth required) ─────────
-router.get('/uploads', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
+router.get('/uploads', asyncHandler(async (req: Request, res: Response) => {
   const entityType = req.query.entityType as string;
   const entityId = req.query.entityId as string;
   if (!entityType || !entityId) {
@@ -66,7 +69,7 @@ router.get('/uploads', authMiddleware, asyncHandler(async (req: Request, res: Re
   res.json({ success: true, data: records });
 }));
 
-router.put('/uploads/:id/rename', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
+router.put('/uploads/:id/rename', asyncHandler(async (req: Request, res: Response) => {
   const { originalName } = req.body;
   if (!originalName || !originalName.trim()) {
     res.status(400).json({ success: false, message: 'originalName is required' });
@@ -76,17 +79,17 @@ router.put('/uploads/:id/rename', authMiddleware, asyncHandler(async (req: Reque
   res.json({ success: true, data: result });
 }));
 
-router.delete('/uploads/:id', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
+router.delete('/uploads/:id', asyncHandler(async (req: Request, res: Response) => {
   await uploadService.deleteFile(req.params.id);
   res.json({ success: true, message: 'File deleted' });
 }));
 
-router.get('/uploads/:id/meta', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
+router.get('/uploads/:id/meta', asyncHandler(async (req: Request, res: Response) => {
   const result = await uploadService.getMeta(req.params.id);
   res.json({ success: true, data: result });
 }));
 
-router.get('/uploads/:id', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
+router.get('/uploads/:id', asyncHandler(async (req: Request, res: Response) => {
   const { buffer, mimeType, originalName } = await uploadService.getFile(req.params.id);
   res.setHeader('Content-Type', mimeType);
   res.setHeader('Cache-Control', 'private, max-age=3600');
