@@ -1326,7 +1326,7 @@ async function main() {
       await prisma.user.update({ where: { id: existing.id }, data: { name: t.name } });
       teacherIds[t.uname] = existing.id;
     } else {
-      const hash = await bcrypt.hash(portalPasswordForUsername(username), 12);
+      const hash = await bcrypt.hash(portalPasswordForUsername(t.uname), 12);
       const user = await prisma.user.create({
         data: { name: t.name, username: t.uname, passwordHash: hash, role: 'teacher', status: 'active' },
       });
