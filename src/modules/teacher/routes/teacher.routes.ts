@@ -21,6 +21,7 @@ import {
   listTeacherExamSubjects,
   saveTeacherMarks,
 } from '../services/teacher-marks.service';
+import { listTeacherMarksTable } from '../services/teacher-marks-table.service';
 import { getHodDepartmentOverview, listHodExamSubjects } from '../services/teacher-hod.service';
 import {
   listTeacherNotifications,
@@ -168,6 +169,22 @@ router.get(
     const ctx = getTeacherContext(req);
     assertFeatureAllowed(ctx.permissions, 'marks', 'view');
     const data = await listTeacherExamSubjects(ctx);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/marks/table',
+  asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    assertFeatureAllowed(ctx.permissions, 'marks', 'view');
+    const { sessionId, examTypeId, subjectId, studentId } = req.query;
+    const data = await listTeacherMarksTable(ctx, {
+      sessionId: sessionId as string | undefined,
+      examTypeId: examTypeId as string | undefined,
+      subjectId: subjectId as string | undefined,
+      studentId: studentId as string | undefined,
+    });
     res.json({ success: true, data });
   }),
 );

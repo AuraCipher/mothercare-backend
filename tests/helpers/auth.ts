@@ -24,7 +24,7 @@ const TEST_JWT_AUDIENCE = 'school-erp-clients';
 
 export interface TokenPayload {
   id: string;
-  role: 'super_admin' | 'management' | 'teacher' | 'parent';
+  role: 'super_admin' | 'management' | 'teacher' | 'parent' | 'student';
   name?: string;
   schoolId?: string;
   branchIds?: string[];

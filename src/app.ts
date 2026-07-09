@@ -13,6 +13,7 @@ import branchAdminRoutes from './modules/admin/routes/branch-admin.routes';
 import uploadRoutes from './modules/upload/upload.routes';
 import canteenRoutes from './modules/canteen/canteen.routes';
 import teacherPortalRoutes from './modules/teacher/routes/teacher.routes';
+import studentPortalRoutes from './modules/student/routes/student.routes';
 import errorHandler from './middleware/error/errorHandler';
 import requestLogger from './middleware/logging/requestLogger';
 import { auditContextMiddleware } from './middleware/auth/auditContext.middleware';
@@ -109,6 +110,7 @@ app.get('/', (_req, res) => {
       apiKeys: '/api-keys',
       admin: '/admin',
       teacher: '/teacher',
+      student: '/student',
       health: '/health',
       keyManager: '/key-manager',
     },
@@ -128,6 +130,7 @@ app.use('/admin/canteen', canteenRoutes);
 app.use('/admin/invitations', invitationRoutes);
 app.use('/admin', adminRoutes);
 app.use('/teacher', teacherPortalRoutes);
+app.use('/student', studentPortalRoutes);
 app.use('/me', meRouter);
 app.use('/branches', branchAdminRoutes);
 
