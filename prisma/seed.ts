@@ -2,8 +2,8 @@
  * Database Seed Script — MCS-App v2.0
  *
  * Creates: branch, calendar, AY, groups, CEO, admin,
- * subjects, section-subject links, teachers, timetable, 345+ students, full AY
- * attendance, teacher attendance, and fee heads.
+ * subjects, section-subject links, teachers, timetable, 345+ students, student portal
+ * test logins, full AY attendance, teacher attendance, and fee heads.
  *
  * Does NOT seed: fee structures, student fees, payments.
  *
@@ -15,6 +15,8 @@ import { PrismaClient, AcademicYearStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { SEED_TEACHER_PORTAL_LOGINS } from './seed-teacher-logins.config';
 import { seedTeacherPortalLogins } from './seed-teacher-logins.lib';
+import { SEED_STUDENT_PORTAL_LOGINS } from './seed-student-logins.config';
+import { seedStudentPortalLogins } from './seed-student-logins.lib';
 
 const prisma = new PrismaClient();
 
@@ -601,6 +603,10 @@ async function main() {
   ];
   for (const g of STUDENT_GROUPS) await seedDemoStudents(academicYear.id, g.order, g.names, g.section);
 
+  console.log('\n[Student Portal Logins]');
+  const studentLoginResult = await seedStudentPortalLogins(prisma, { verbose: true });
+  console.log(`  ✓ ${studentLoginResult.students.length} student portal logins ensured`);
+
   console.log('\n[Teacher Attendance]');
   await seedTeacherAttendance(academicYear.id);
 
@@ -633,6 +639,9 @@ async function main() {
   console.log('  Admin:  admin / admin123');
   for (const t of SEED_TEACHER_PORTAL_LOGINS) {
     console.log(`  Teacher: ${t.username} / ${t.password}  (${t.name})`);
+  }
+  for (const s of SEED_STUDENT_PORTAL_LOGINS) {
+    console.log(`  Student: ${s.username} / ${s.password}  (${s.label})`);
   }
   console.log('───────────────────────────────────────────────\n');
 }
