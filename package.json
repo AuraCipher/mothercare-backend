@@ -7,21 +7,13 @@
     "dev": "prisma generate && nodemon --watch src --watch server.ts --ext ts --exec \"npx ts-node server.ts\"",
     "build": "tsc",
     "start": "node dist/server.js",
-    "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "npx ts-node prisma/seed.ts",
-    "prisma:seed:result": "npx ts-node prisma/seed-result-analytics.ts",
     "prisma:studio": "prisma studio",
-    "setup": "bash scripts/setup.sh",
-    "backup": "bash scripts/backup.sh",
-    "cleanup:fee-structures": "npx ts-node scripts/cleanup-fee-structure-duplicates.ts",
-    "cleanup:fee-breakdowns": "npx ts-node scripts/cleanup-student-fee-breakdowns.ts",
-    "seed:teacher-logins": "npx ts-node scripts/seed-teacher-logins.ts",
-    "seed:student-logins": "npx ts-node scripts/seed-student-logins.ts",
     "lint": "eslint src --ext .ts",
-    "test": "jest",
-    "test:coverage": "jest --coverage",
-    "test:watch": "jest --watch"
+    "test:unit": "jest --testPathIgnorePatterns=/node_modules/ --testPathIgnorePatterns=/dist/ --testPathIgnorePatterns=integration\\.test",
+    "test:integration": "jest --testPathPatterns=integration\\.test --testPathIgnorePatterns=e2e-flow",
+    "test:e2e": "jest --testPathPatterns=e2e-flow\\.integration\\.test",
+    "test:all": "bash scripts/test-all.sh"
   },
   "prisma": {
     "seed": "npx ts-node prisma/seed.ts"
