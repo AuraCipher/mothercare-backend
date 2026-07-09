@@ -41,6 +41,14 @@ const envSchema = z.object({
 
   // Default school branch name for single-school auto-assignment
   DEFAULT_BRANCH_NAME: z.string().default('Mother Care Sohan'),
+
+  // Mobile chat + encrypted FCM (optional in dev)
+  PUSH_MASTER_SECRET: z.string().min(32).optional(),
+  FIREBASE_SERVICE_ACCOUNT_PATH: z.string().optional(),
+  FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
+  FCM_ENABLED: z.enum(['true', 'false']).default('false'),
+  SOCKET_PATH: z.string().default('/socket.io'),
+  CHAT_QUEUE_CONCURRENCY: z.string().default('5'),
 });
 
 const parsed = envSchema.safeParse(process.env);

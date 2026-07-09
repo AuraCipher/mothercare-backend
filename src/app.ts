@@ -11,6 +11,7 @@ import adminRoutes, { meRouter } from './modules/admin/routes/admin.routes';
 import invitationRoutes from './modules/admin/routes/invitation.routes';
 import branchAdminRoutes from './modules/admin/routes/branch-admin.routes';
 import uploadRoutes from './modules/upload/upload.routes';
+import chatRoutes from './modules/chat/routes/chat.routes';
 import canteenRoutes from './modules/canteen/canteen.routes';
 import teacherPortalRoutes from './modules/teacher/routes/teacher.routes';
 import studentPortalRoutes from './modules/student/routes/student.routes';
@@ -111,6 +112,7 @@ app.get('/', (_req, res) => {
       admin: '/admin',
       teacher: '/teacher',
       student: '/student',
+      chat: '/chat',
       health: '/health',
       keyManager: '/key-manager',
     },
@@ -131,6 +133,7 @@ app.use('/admin/invitations', invitationRoutes);
 app.use('/admin', adminRoutes);
 app.use('/teacher', teacherPortalRoutes);
 app.use('/student', studentPortalRoutes);
+app.use('/chat', chatRoutes);
 app.use('/me', meRouter);
 app.use('/branches', branchAdminRoutes);
 

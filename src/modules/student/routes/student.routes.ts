@@ -16,6 +16,7 @@ import { getStudentCanteen } from '../services/student-canteen.service';
 import { getStudentTimetable } from '../services/student-timetable.service';
 import { listStudentDatesheets } from '../services/student-datesheets.service';
 import { listStudentAnnouncements } from '../services/student-announcements.service';
+import { getStudentChatLanding } from '../services/student-chat.service';
 
 const router = Router();
 
@@ -127,6 +128,14 @@ router.get(
   '/announcements',
   asyncHandler(async (req, res) => {
     const data = await listStudentAnnouncements(getStudentContext(req));
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/chat/landing',
+  asyncHandler(async (req, res) => {
+    const data = await getStudentChatLanding(getStudentContext(req));
     res.json({ success: true, data });
   }),
 );

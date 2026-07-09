@@ -4,6 +4,7 @@ import { signToken, verifyToken } from '../../lib/jwt';
 import env from '../../config/env';
 import { z } from 'zod';
 import crypto from 'crypto';
+import { issuePushCryptoMaterial, isMobilePushRole } from '../chat/push/push-crypto.service';
 
 const prisma = new PrismaClient();
 
@@ -128,6 +129,11 @@ class AuthService {
     };
     const token = signToken(tokenPayload);
 
+    let push: Awaited<ReturnType<typeof issuePushCryptoMaterial>> | undefined;
+    if (isMobilePushRole(user.role)) {
+      push = await issuePushCryptoMaterial(user.id);
+    }
+
     // Handle remember me
     let rememberMeToken: string | null = null;
     if (data.rememberMe) {
@@ -145,6 +151,7 @@ class AuthService {
       success: true,
       token,
       rememberMeToken,
+      push,
       user: {
         id: user.id,
         name: user.name,

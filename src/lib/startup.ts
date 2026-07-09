@@ -3,7 +3,10 @@ import env from '../config/env';
 import { testRedisConnection } from '../config/redis';
 import { closeRedisConnection, testTcpRedisConnection } from '../config/redis-tcp';
 import { closeMessageQueue } from '../queues/message.queue';
+import { closeChatQueue } from '../queues/chat.queue';
 import { stopMessageWorker } from '../queues/message.worker';
+import { stopChatWorker } from '../queues/chat.worker';
+import { closeChatSocket } from '../modules/chat/socket/chat.socket';
 import { prisma } from './prisma';
 
 type CheckResult = { name: string; status: 'ok' | 'fail'; detail?: string };
@@ -119,7 +122,10 @@ export function setupGracefulShutdown(prisma: { $disconnect: () => Promise<void>
 
       try {
         await stopMessageWorker();
+        await stopChatWorker();
         await closeMessageQueue();
+        await closeChatQueue();
+        await closeChatSocket();
         await closeRedisConnection();
       } catch (e) {
         logger.error('Error closing message queue / Redis', e);
