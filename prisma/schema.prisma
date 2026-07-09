@@ -200,6 +200,42 @@ enum TenureEndReason {
   OTHER
 }
 
+// ─── Mobile chat / communities ───────────────────────────────────────
+
+enum ChatRoomKind {
+  school_announcement // whole-school broadcast (read-only for students)
+  class_announcement // class community broadcast
+  group_chat // dynamic hybrid groups (subject, diary, CR board, etc.)
+  direct_message // 1:1 student ↔ teacher / appointed class role
+  system_attendance // per-student fixed attendance feed
+  system_payment // per-student fixed payment/receipt feed
+}
+
+enum ChatRoomSource {
+  manual // teacher/admin created
+  subject_assignment // auto-created from TeacherAssignment + GroupSubject
+  system_bootstrap // attendance, payment, default announcement channels
+}
+
+enum ChatMemberAccess {
+  owner // room creator / class admin
+  moderator // teacher / staff moderator
+  poster // CR and similar — can post when canPost=true
+  member // default participant
+  observer // read-only
+}
+
+enum ChatMessageType {
+  text
+  image
+  video
+  audio
+  voice_note
+  document
+  system // attendance/payment/receipt system posts
+  announcement // structured broadcast (title + body)
+}
+
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║                           USERS                                 ║
 // ║  All credentials created by admin. No signup / forgot password. ║
@@ -237,7 +273,17 @@ model User {
   staffProfile        StaffProfile?
   parentProfile       ParentProfile?
   subjectsAsHod       Subject[]               @relation("SubjectHOD")
-  sentMessages        Message[]               @relation("SentMessages")
+  chatMessagesSent           ChatMessage[]           @relation("ChatMessagesSent")
+  chatRoomMembers            ChatRoomMember[]
+  classRolesCreated          ClassRoleDefinition[]   @relation("ClassRoleCreatedBy")
+  classRolesAssigned         ClassRoleAssignment[]   @relation("ClassRoleAssignedBy")
+  classRolesRemoved          ClassRoleAssignment[]   @relation("ClassRoleRemovedBy")
+  chatRoomsCreated           ChatRoom[]              @relation("ChatRoomCreatedBy")
+  pushCryptoKeys             UserPushCryptoKey[]
+  chatDmThreadsAsParticipantA ChatDmThread[]         @relation("ChatDmParticipantA")
+  chatDmThreadsAsParticipantB ChatDmThread[]         @relation("ChatDmParticipantB")
+  chatMessageReadStates       ChatMessageReadState[]
+  classRoleAssignmentsHeld    ClassRoleAssignment[]  @relation("ClassRoleHolder")
   notifications       NotificationRecipient[]
   deviceTokens        DeviceToken[]
   auditLogs           AuditLog[]
@@ -307,19 +353,24 @@ model User {
 model FileRecord {
   id           String   @id @default(uuid())
   originalName String
-  storagePath  String   @unique
+  storagePath  String   @unique // R2 object key or legacy local relative path
+  storageBucket String  @default("local") // "local" | "mcs-documents"
+  purpose      String?  // profile | document | chat | receipt | voice_note | general
+  publicUrl    String?  // canonical app URL saved at upload time
   mimeType     String
   size         Int
   width        Int?
   height       Int?
   uploadedById String?
-  entityType   String? // "student" | "teacher" — what entity this doc belongs to
-  entityId     String? // UUID of the student or teacher profile
+  entityType   String? // student | teacher | staff | chat | receipt | general
+  entityId     String?
+  metadata     Json?   // durationSeconds, roomId, academicYearId, etc.
   createdAt    DateTime @default(now())
 
   uploader       User?    @relation(fields: [uploadedById], references: [id])
   profileUser    User?    @relation("UserProfilePhoto")
   profileStudent Student? @relation("StudentProfilePhoto")
+  chatMessages   ChatMessage[] @relation("ChatMessageMedia")
 
   updatedAt DateTime @updatedAt
 
@@ -397,6 +448,7 @@ model Branch {
   payrollMonthBalances       PayrollMonthBalance[]
   payrollBulkRuns            PayrollBulkRun[]
   academicYearAuditLogs      AcademicYearAuditLog[]
+  chatRooms                  ChatRoom[]                 @relation("ChatRoomBranch")
 
   createdById String?
   updatedById String?
@@ -459,6 +511,8 @@ model AcademicYear {
   snapshots          AcademicYearSnapshot[] @relation("SourceAcademicYear")
   newSnapshots       AcademicYearSnapshot[] @relation("NewAcademicYear")
   announcements      Announcement[]
+  chatCommunities    ChatCommunity[]
+  chatRooms          ChatRoom[]
   timetables         Timetable[]
   attendances        Attendance[]
   teacherAttendances TeacherAttendance[]
@@ -623,7 +677,8 @@ model Group {
 
   academicYear       AcademicYear        @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   members            GroupMember[]
-  messages           Message[]
+  chatCommunity      ChatCommunity?
+  chatRooms          ChatRoom[]              @relation("ChatRoomClassGroup")
   students           Student[]
   groupSubjects      GroupSubject[]
   teacherAssignments TeacherAssignment[]
@@ -684,6 +739,7 @@ model Subject {
   academicYear       AcademicYear        @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   groupSubjects      GroupSubject[]
   teacherAssignments TeacherAssignment[]
+  chatRooms          ChatRoom[]          @relation("ChatRoomSubject")
   timetableEntries   TimetableEntry[]
   examClassSubjects  ExamClassSubject[]
   subjectResults     SubjectResult[]
@@ -831,6 +887,7 @@ model TeacherAssignment {
   teacher      User         @relation(fields: [teacherId], references: [id], onDelete: Cascade)
   group        Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
   subject      Subject      @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  chatRoom     ChatRoom?    @relation("TeacherAssignmentChatRoom")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1002,7 +1059,10 @@ model Student {
   credentialSends         CredentialSend[]
   statusLogs              StudentStatusLog[]
   attendanceNotifications AttendanceNotification[]
+  paymentNotifications    PaymentNotification[]
+  classRoleAssignments    ClassRoleAssignment[]
   classMovements          StudentClassMovement[]
+  chatSystemRooms         ChatRoom[]              @relation("ChatRoomStudentSystem")
   stationaryRecords       StudentStationaryRecord[]
 
   person            StudentPerson?     @relation(fields: [personId], references: [id], onDelete: SetNull)
@@ -1309,11 +1369,13 @@ model Announcement {
   title          String
   content        String?
   mediaUrl       String?
+  chatMessageId  String?  @unique // mirrored into chat when published to mobile
   isPinned       Boolean  @default(false)
   createdAt      DateTime @default(now())
 
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
   group        Group?       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  chatMessage  ChatMessage? @relation("AnnouncementChatMessage", fields: [chatMessageId], references: [id], onDelete: SetNull)
 
   updatedAt DateTime @updatedAt
 
@@ -1322,41 +1384,276 @@ model Announcement {
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
-// ║                     MESSAGES (GROUP CHAT)                       ║
+// ║              MOBILE CHAT — COMMUNITIES & ROOMS                    ║
+// ║  Class Group (academic) → ChatCommunity → dynamic ChatRooms      ║
 // ╚══════════════════════════════════════════════════════════════════╝
 
-model Message {
-  id        String   @id @default(uuid())
-  groupId   String
-  senderId  String
-  content   String?
-  isDeleted Boolean  @default(false)
+// One community wrapper per class/section (links to academic Group).
+model ChatCommunity {
+  id             String   @id @default(uuid())
+  academicYearId String
+  groupId        String   @unique
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  academicYear         AcademicYear          @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  group                Group                 @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  rooms                ChatRoom[]
+  classRoleDefinitions ClassRoleDefinition[]
+  classRoleAssignments ClassRoleAssignment[]
+
+  createdById String?
+  updatedById String?
+
+  @@index([academicYearId])
+  @@map("chat_communities")
+}
+
+// Unified room for announcements, dynamic groups, DMs, and system feeds.
+model ChatRoom {
+  id             String         @id @default(uuid())
+  academicYearId String
+  branchId       String?
+  communityId    String?
+  classGroupId   String?
+  studentId      String?
+  subjectId      String?
+  teacherAssignmentId String?    @unique
+  kind           ChatRoomKind
+  source         ChatRoomSource @default(manual)
+  name           String
+  description    String?
+  // Stable key for singleton/bootstrap rooms, e.g. ay:{id}:school_announcement
+  singletonKey   String?        @unique
+  onlyStaffCanPost Boolean      @default(false)
+  studentsCanPost  Boolean      @default(false)
+  isActive       Boolean        @default(true)
+  createdById    String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  academicYear      AcademicYear       @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  branch            Branch?            @relation("ChatRoomBranch", fields: [branchId], references: [id], onDelete: Cascade)
+  community         ChatCommunity?     @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  classGroup        Group?             @relation("ChatRoomClassGroup", fields: [classGroupId], references: [id], onDelete: Cascade)
+  student           Student?           @relation("ChatRoomStudentSystem", fields: [studentId], references: [id], onDelete: Cascade)
+  subject           Subject?           @relation("ChatRoomSubject", fields: [subjectId], references: [id], onDelete: SetNull)
+  teacherAssignment TeacherAssignment? @relation("TeacherAssignmentChatRoom", fields: [teacherAssignmentId], references: [id], onDelete: SetNull)
+  createdBy         User?              @relation("ChatRoomCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  members           ChatRoomMember[]
+  messages          ChatMessage[]
+  readStates        ChatMessageReadState[]
+  dmThread          ChatDmThread?
+  attendanceNotifications AttendanceNotification[]
+  paymentNotifications    PaymentNotification[]
+
+  @@index([academicYearId, kind])
+  @@index([communityId, kind])
+  @@index([classGroupId])
+  @@index([studentId, kind])
+  @@map("chat_rooms")
+}
+
+model ChatRoomMember {
+  id                    String           @id @default(uuid())
+  roomId                String
+  userId                String
+  access                ChatMemberAccess @default(observer)
+  canPost               Boolean          @default(false)
+  canRead               Boolean          @default(true)
+  isMuted               Boolean          @default(false)
+  isPostingRestricted   Boolean          @default(false)
+  displayTitle          String?
+  classRoleAssignmentId String?
+  joinedAt              DateTime         @default(now())
+  leftAt                DateTime?
+
+  room                ChatRoom             @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  classRoleAssignment ClassRoleAssignment? @relation(fields: [classRoleAssignmentId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  group  Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  sender User  @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
-
-  @@index([groupId, createdAt])
-  @@map("messages")
+  @@unique([roomId, userId])
+  @@index([userId, leftAt])
+  @@map("chat_room_members")
 }
 
-// Attendance notifications for parents (queued for chat app pickup)
+// Dedupes DM rooms between two users within an academic year.
+model ChatDmThread {
+  id             String   @id @default(uuid())
+  academicYearId String
+  roomId         String   @unique
+  participantAId String
+  participantBId String
+  createdAt      DateTime @default(now())
+
+  room         ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  participantA User     @relation("ChatDmParticipantA", fields: [participantAId], references: [id], onDelete: Cascade)
+  participantB User     @relation("ChatDmParticipantB", fields: [participantBId], references: [id], onDelete: Cascade)
+
+  @@unique([academicYearId, participantAId, participantBId])
+  @@index([participantAId])
+  @@index([participantBId])
+  @@map("chat_dm_threads")
+}
+
+model ChatMessage {
+  id              String          @id @default(uuid())
+  roomId          String
+  senderId        String?
+  type            ChatMessageType @default(text)
+  title           String?
+  content         String?
+  mediaFileId     String?
+  replyToId       String?
+  metadata        Json?
+  isDeleted       Boolean         @default(false)
+  deletedAt       DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  room            ChatRoom       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender          User?          @relation("ChatMessagesSent", fields: [senderId], references: [id], onDelete: SetNull)
+  mediaFile       FileRecord?    @relation("ChatMessageMedia", fields: [mediaFileId], references: [id], onDelete: SetNull)
+  replyTo         ChatMessage?   @relation("ChatMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies         ChatMessage[]  @relation("ChatMessageReplies")
+  announcement    Announcement?  @relation("AnnouncementChatMessage")
+  attendanceNotifications AttendanceNotification[]
+  paymentNotifications    PaymentNotification[]
+
+  @@index([roomId, createdAt])
+  @@index([senderId, createdAt])
+  @@map("chat_messages")
+}
+
+model ChatMessageReadState {
+  id                String   @id @default(uuid())
+  roomId            String
+  userId            String
+  lastReadMessageId String?
+  lastReadAt        DateTime @default(now())
+
+  room ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@map("chat_message_read_states")
+}
+
+// Dynamic class-level roles (CR, diary monitor, etc.) — created by teacher/admin.
+model ClassRoleDefinition {
+  id                  String   @id @default(uuid())
+  communityId         String
+  name                String
+  description         String?
+  canPostInGroups     Boolean  @default(false)
+  canReceiveDms       Boolean  @default(true)
+  canInitiateDms      Boolean  @default(false)
+  isActive            Boolean  @default(true)
+  createdById         String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  community   ChatCommunity         @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  createdBy   User?                 @relation("ClassRoleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  assignments ClassRoleAssignment[]
+
+  @@unique([communityId, name])
+  @@map("class_role_definitions")
+}
+
+model ClassRoleAssignment {
+  id                    String    @id @default(uuid())
+  communityId           String
+  roleDefinitionId      String
+  studentId             String
+  userId                String?
+  publicDisplayName     String
+  isMessagingRestricted Boolean   @default(false)
+  assignedAt            DateTime  @default(now())
+  assignedById          String?
+  removedAt             DateTime?
+  removedById           String?
+
+  community      ChatCommunity       @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  roleDefinition ClassRoleDefinition @relation(fields: [roleDefinitionId], references: [id], onDelete: Cascade)
+  student        Student             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  user           User?               @relation("ClassRoleHolder", fields: [userId], references: [id], onDelete: SetNull)
+  assignedBy     User?               @relation("ClassRoleAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+  removedBy      User?               @relation("ClassRoleRemovedBy", fields: [removedById], references: [id], onDelete: SetNull)
+  roomMembers    ChatRoomMember[]
+
+  @@unique([roleDefinitionId, studentId])
+  @@index([communityId, removedAt])
+  @@index([userId])
+  @@map("class_role_assignments")
+}
+
+// Per-user AES key material for encrypted FCM payloads (delivered at login).
+model UserPushCryptoKey {
+  id         String   @id @default(uuid())
+  userId     String
+  keyVersion Int
+  keyHash    String
+  createdAt  DateTime @default(now())
+  rotatedAt  DateTime?
+  expiresAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, keyVersion])
+  @@index([userId, createdAt])
+  @@map("user_push_crypto_keys")
+}
+
+// Attendance notifications for mobile chat feed pickup
 model AttendanceNotification {
-  id        String    @id @default(uuid())
-  studentId String
-  date      DateTime  @db.Date
-  status    String
-  message   String
-  sent      Boolean   @default(false)
-  sentAt    DateTime?
-  createdAt DateTime  @default(now())
+  id            String    @id @default(uuid())
+  studentId     String
+  roomId        String?
+  chatMessageId String?
+  date          DateTime  @db.Date
+  status        String
+  message       String
+  sent          Boolean   @default(false)
+  sentAt        DateTime?
+  createdAt     DateTime  @default(now())
 
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student     Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  room        ChatRoom?    @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  chatMessage ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: SetNull)
 
-  @@index([studentId])
+  @@index([studentId, date])
   @@index([sent])
   @@map("attendance_notifications")
+}
+
+// Payment / receipt notifications for mobile chat feed pickup
+model PaymentNotification {
+  id            String    @id @default(uuid())
+  studentId     String
+  paymentId     String?
+  roomId        String?
+  chatMessageId String?
+  title         String
+  message       String
+  amountPaise   Int?
+  receiptNumber String?
+  sent          Boolean   @default(false)
+  sentAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  student     Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  payment     Payment?     @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  room        ChatRoom?    @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  chatMessage ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: SetNull)
+
+  @@index([studentId, createdAt])
+  @@index([sent])
+  @@map("payment_notifications")
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -2162,6 +2459,7 @@ model Payment {
   receipt         PaymentReceipt? // One immutable receipt per payment
   auditLogs       PaymentAuditLog[]
   headAllocations PaymentHeadAllocation[]
+  paymentNotifications PaymentNotification[]
 
   recordedBy User  @relation("PaymentRecordedBy", fields: [recordedById], references: [id])
   revertedBy User? @relation("PaymentRevertedBy", fields: [revertedById], references: [id])

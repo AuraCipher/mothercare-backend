@@ -1,180 +1,109 @@
 import { prisma } from '../../lib/prisma';
-import { storage } from './storage.service';
-import sharp from 'sharp';
-import { fileTypeFromBuffer } from 'file-type';
-import { v4 as uuidv4 } from 'uuid';
-import path from 'path';
+import {
+  getDefaultDocumentsBucket,
+  storage,
+} from './storage';
+import { buildStoragePath, type UploadPurpose } from './storage-paths';
+import { buildFileServeUrl } from './file-url.util';
+import { normalizePurpose, processUploadBuffer } from './media.pipeline';
 
-const ALLOWED_MIMES = new Set([
-  // Images
-  'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/bmp', 'image/tiff', 'image/x-icon', 'image/vnd.microsoft.icon',
-  // Office / Documents
-  'application/pdf', 'application/rtf',
-  'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-excel.sheet.macroEnabled.12', 'application/vnd.ms-excel.sheet.binaryMacroEnabled.12',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.template', 'application/vnd.ms-excel.template.macroEnabled.12',
-  'application/vnd.ms-excel.addin.macroEnabled.12',
-  'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'application/vnd.oasis.opendocument.text', 'application/vnd.oasis.opendocument.spreadsheet', 'application/vnd.oasis.opendocument.presentation',
-  // Text / Code / Data
-  'text/plain', 'text/csv', 'text/html', 'text/markdown', 'text/css', 'text/javascript', 'text/yaml', 'text/xml',
-  'application/json', 'application/xml', 'application/typescript', 'application/x-yaml', 'application/x-toml',
-  // Archives
-  'application/zip', 'application/x-rar-compressed', 'application/x-7z-compressed', 'application/x-tar', 'application/gzip',
-  // Fonts
-  'font/ttf', 'font/otf', 'font/woff', 'font/woff2',
-  // Video (common school recordings)
-  'video/mp4', 'video/webm', 'video/x-msvideo',
-]);
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
+const MAX_VOICE_SIZE = 5 * 1024 * 1024;
 
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB (increased for videos & archives)
-const PROFILE_MAX_DIM = 300;
+export interface UploadFileOptions {
+  uploadedById?: string;
+  purpose?: string;
+  entityType?: string;
+  entityId?: string;
+  roomId?: string;
+  academicYearId?: string;
+  metadata?: Record<string, unknown>;
+}
 
 export class UploadService {
-  /**
-   * Upload a file buffer.
-   * @param purpose 'profile' — resize to 300×300 + WebP q80; 'document' — WebP q80 only, no resize; anything else defaults to document behavior.
-   * SVG/GIF bypass sharp entirely (preserve animation / unsupported format).
-   * Non-images are stored raw (PDF, DOCX, MP4, etc.).
-   * @param entityType 'student' | 'teacher' — what kind of profile this doc belongs to
-   * @param entityId UUID of the student or teacher profile
-   */
-  async uploadFile(buffer: Buffer, originalName: string, uploadedById?: string, purpose?: string, entityType?: string, entityId?: string) {
-    // 1. Size check
-    if (buffer.length > MAX_FILE_SIZE) {
-      throw { status: 413, message: `File too large (max ${MAX_FILE_SIZE / 1024 / 1024}MB)` };
-    }
+  async uploadFile(
+    buffer: Buffer,
+    originalName: string,
+    options: UploadFileOptions = {},
+  ) {
+    const requestedPurpose = options.purpose || 'document';
+    const maxBytes = requestedPurpose === 'voice_note' ? MAX_VOICE_SIZE : MAX_FILE_SIZE;
 
-    // 2. Magic byte validation
-    const type = await fileTypeFromBuffer(buffer);
-    let mime = type?.mime;
-    const fileExt = originalName.split('.').pop()?.toLowerCase();
-    // Extension-based fallback map (used when magic bytes fail or return uncommon types)
-    const extMap: Record<string, string> = {
-      jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
-      svg: 'image/svg+xml', bmp: 'image/bmp', tiff: 'image/tiff', tif: 'image/tiff', ico: 'image/x-icon',
-      pdf: 'application/pdf', rtf: 'application/rtf',
-      doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      xlsm: 'application/vnd.ms-excel.sheet.macroEnabled.12', xlsb: 'application/vnd.ms-excel.sheet.binaryMacroEnabled.12',
-      xltx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.template', xltm: 'application/vnd.ms-excel.template.macroEnabled.12',
-      xlt: 'application/vnd.ms-excel', xlam: 'application/vnd.ms-excel.addin.macroEnabled.12',
-      ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      odt: 'application/vnd.oasis.opendocument.text', ods: 'application/vnd.oasis.opendocument.spreadsheet', odp: 'application/vnd.oasis.opendocument.presentation',
-      txt: 'text/plain', csv: 'text/csv', html: 'text/html', htm: 'text/html', md: 'text/markdown',
-      css: 'text/css', js: 'text/javascript', ts: 'application/typescript', jsx: 'text/javascript', tsx: 'application/typescript',
-      json: 'application/json', xml: 'application/xml', yaml: 'application/x-yaml', yml: 'application/x-yaml', toml: 'application/x-toml',
-      zip: 'application/zip', rar: 'application/x-rar-compressed', '7z': 'application/x-7z-compressed',
-      tar: 'application/x-tar', gz: 'application/gzip', tgz: 'application/gzip',
-      mp4: 'video/mp4', webm: 'video/webm', avi: 'video/x-msvideo',
-      ttf: 'font/ttf', otf: 'font/otf', woff: 'font/woff', woff2: 'font/woff2',
-    };
-    // If magic bytes failed or returned a type not in our whitelist,
-    // try matching by extension (handles OLE2/CFB formats like .xls detected as "application/x-cfb")
-    if (!mime || !ALLOWED_MIMES.has(mime)) {
-      mime = fileExt ? (extMap[fileExt] || 'application/octet-stream') : 'application/octet-stream';
-    }
-    if (!ALLOWED_MIMES.has(mime)) {
-      throw { status: 400, message: `File type "${mime}" is not allowed` };
-    }
+    const processed = await processUploadBuffer({
+      buffer,
+      originalName,
+      purpose: requestedPurpose,
+      maxBytes,
+    });
 
-    let processedBuffer: Buffer;
-    let finalMime: string;
-    let ext: string;
-    let width: number | null = null;
-    let height: number | null = null;
+    const resolvedPurpose = normalizePurpose(options.purpose, processed.mimeType) as UploadPurpose;
+    const storagePath = buildStoragePath({
+      purpose: resolvedPurpose,
+      ext: processed.ext,
+      entityType: options.entityType,
+      entityId: options.entityId,
+      roomId: options.roomId,
+      academicYearId: options.academicYearId,
+    });
 
-    // 3. Process image files
-    if (mime.startsWith('image/')) {
-      // SVG/GIF — bypass sharp entirely (preserve animation / unsupported format)
-      if (mime === 'image/svg+xml' || mime === 'image/gif') {
-        processedBuffer = buffer;
-        finalMime = mime;
-        ext = type?.ext || (mime === 'image/svg+xml' ? 'svg' : 'gif');
-      } else {
-        const img = sharp(buffer).rotate(); // auto-rotate based on EXIF
-        const meta = await img.metadata();
-        width = meta.width || null;
-        height = meta.height || null;
+    const bucket = getDefaultDocumentsBucket();
+    await storage.save(storagePath, processed.buffer, { bucket });
 
-        if (purpose === 'profile') {
-          // Profile photo: resize to 300×300 + WebP q80
-          const resized = img.resize(PROFILE_MAX_DIM, PROFILE_MAX_DIM, {
-            fit: 'cover',
-            position: 'centre',
-            withoutEnlargement: true,
-          });
-          processedBuffer = await resized.webp({ quality: 80 }).toBuffer();
-        } else {
-          // Document / default: WebP q80 only, preserve original dimensions
-          processedBuffer = await img.webp({ quality: 80 }).toBuffer();
-        }
-        finalMime = 'image/webp';
-        ext = 'webp';
-      }
-    } else {
-      // Non-image — store as-is (PDF, DOCX, MP4, etc.)
-      processedBuffer = buffer;
-      finalMime = mime;
-      ext = type?.ext || 'bin';
-    }
-
-    // 4. Generate storage path
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const fileName = `${uuidv4()}.${ext}`;
-    const storagePath = `${year}/${month}/${fileName}`;
-
-    // 5. Save to disk
-    await storage.save(storagePath, processedBuffer);
-
-    // 6. Create FileRecord in DB
     const record = await prisma.fileRecord.create({
       data: {
         originalName,
         storagePath,
-        mimeType: finalMime,
-        size: processedBuffer.length,
-        width: mime.startsWith('image/') ? (width ?? undefined) : undefined,
-        height: mime.startsWith('image/') ? (height ?? undefined) : undefined,
-        uploadedById: uploadedById || undefined,
-        entityType: entityType || undefined,
-        entityId: entityId || undefined,
+        storageBucket: bucket,
+        purpose: resolvedPurpose,
+        mimeType: processed.mimeType,
+        size: processed.buffer.length,
+        width: processed.mimeType.startsWith('image/') ? (processed.width ?? undefined) : undefined,
+        height: processed.mimeType.startsWith('image/') ? (processed.height ?? undefined) : undefined,
+        uploadedById: options.uploadedById || undefined,
+        entityType: options.entityType || undefined,
+        entityId: options.entityId || undefined,
+        metadata: {
+          ...(options.metadata || {}),
+          ...(options.roomId ? { roomId: options.roomId } : {}),
+          ...(options.academicYearId ? { academicYearId: options.academicYearId } : {}),
+        },
+        publicUrl: undefined,
       },
+    });
+
+    const publicUrl = buildFileServeUrl(record.id);
+    await prisma.fileRecord.update({
+      where: { id: record.id },
+      data: { publicUrl },
     });
 
     return {
       id: record.id,
-      url: storage.url(storagePath),
-      mimeType: finalMime,
-      size: processedBuffer.length,
+      url: publicUrl,
+      storagePath,
+      storageBucket: bucket,
+      mimeType: processed.mimeType,
+      size: processed.buffer.length,
+      purpose: resolvedPurpose,
     };
   }
 
-  /**
-   * Get file metadata by record ID.
-   */
   async getMeta(fileId: string) {
     const record = await prisma.fileRecord.findUnique({ where: { id: fileId } });
     if (!record) throw { status: 404, message: 'File not found' };
-    return record;
+    return {
+      ...record,
+      url: record.publicUrl || buildFileServeUrl(record.id),
+    };
   }
 
-  /**
-   * Get file buffer by record ID.
-   */
   async getFile(fileId: string) {
     const record = await prisma.fileRecord.findUnique({ where: { id: fileId } });
     if (!record) throw { status: 404, message: 'File not found' };
-    const buffer = await storage.get(record.storagePath);
-    return { buffer, mimeType: record.mimeType, originalName: record.originalName };
+    const buffer = await storage.get(record.storagePath, { bucket: record.storageBucket });
+    return { buffer, mimeType: record.mimeType, originalName: record.originalName, record };
   }
 
-  /**
-   * List file records for a given entity (student or teacher profile).
-   */
   async listByEntity(entityType: string, entityId: string) {
     const records = await prisma.fileRecord.findMany({
       where: { entityType, entityId },
@@ -184,30 +113,28 @@ export class UploadService {
         originalName: true,
         mimeType: true,
         size: true,
+        purpose: true,
+        publicUrl: true,
         createdAt: true,
       },
     });
-    return records;
+    return records.map((record) => ({
+      ...record,
+      url: record.publicUrl || buildFileServeUrl(record.id),
+    }));
   }
 
-  /**
-   * Delete a file record and remove the physical file from disk.
-   * If the file no longer exists on disk, the DB record is still cleaned up.
-   */
   async deleteFile(fileId: string) {
     const record = await prisma.fileRecord.findUnique({ where: { id: fileId } });
     if (!record) throw { status: 404, message: 'File not found' };
-    // Delete physical file from disk (ignore if already gone)
     try {
-      await storage.delete(record.storagePath);
-    } catch { /* file may already be missing — still clean up DB */ }
-    // Delete DB record
+      await storage.delete(record.storagePath, { bucket: record.storageBucket });
+    } catch {
+      /* object may already be missing */
+    }
     await prisma.fileRecord.delete({ where: { id: fileId } });
   }
 
-  /**
-   * Rename a file record (update originalName).
-   */
   async renameFile(fileId: string, newName: string) {
     const record = await prisma.fileRecord.findUnique({ where: { id: fileId } });
     if (!record) throw { status: 404, message: 'File not found' };
@@ -221,3 +148,8 @@ export class UploadService {
 }
 
 export const uploadService = new UploadService();
+
+/** Delete physical object + DB row (use when replacing profile photos). */
+export async function deleteFileRecordById(fileId: string): Promise<void> {
+  await uploadService.deleteFile(fileId);
+}

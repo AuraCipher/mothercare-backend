@@ -1,5 +1,5 @@
 import { prisma } from '../../../lib/prisma';
-import { storage } from '../../upload/storage.service';
+import { deleteFileRecordById } from '../../upload/upload.service';
 import { generateUsername, generatePassword } from '../../../utils/username';
 import notificationService from '../../../services/notification.service';
 
@@ -252,7 +252,7 @@ class StudentService {
     if (data.profilePhotoId !== undefined && existing.profilePhotoId && data.profilePhotoId !== existing.profilePhotoId) {
       try {
         const oldRecord = await prisma.fileRecord.findUnique({ where: { id: existing.profilePhotoId } });
-        if (oldRecord) { await storage.delete(oldRecord.storagePath); await prisma.fileRecord.delete({ where: { id: oldRecord.id } }); }
+        if (oldRecord) { await deleteFileRecordById(oldRecord.id); }
       } catch (err) { console.warn('[Student] Failed to delete old photo:', err); }
     }
     const student = await prisma.student.update({

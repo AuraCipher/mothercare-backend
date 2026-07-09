@@ -1,5 +1,6 @@
 import { prisma } from '../../../lib/prisma';
 import { hashPassword } from '../../../lib/password';
+import { deleteFileRecordById } from '../../upload/upload.service';
 import type { StaffModule } from '@prisma/client';
 import {
   normalizePermissionInput,
@@ -303,10 +304,7 @@ class StaffService {
         try {
           const oldRecord = await prisma.fileRecord.findUnique({ where: { id: oldPhotoId } });
           if (oldRecord) {
-            const fs = await import('fs/promises');
-            const path = await import('path');
-            await fs.unlink(path.join(process.cwd(), oldRecord.storagePath)).catch(() => {});
-            await prisma.fileRecord.delete({ where: { id: oldPhotoId } }).catch(() => {});
+            await deleteFileRecordById(oldPhotoId).catch(() => {});
           }
         } catch { /* best-effort */ }
       }

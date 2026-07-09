@@ -3,17 +3,21 @@ import multer from 'multer';
 import authMiddleware from '../../middleware/auth/auth.middleware';
 import { uploadLimiter } from '../../middleware/security/rateLimiter';
 import { uploadService } from './upload.service';
+import { UPLOAD_ENTITY_TYPES } from './storage-paths';
 
 const router = Router();
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
-  // We validate by magic bytes (not extension), so no fileFilter needed here
+  limits: { fileSize: 20 * 1024 * 1024 },
 });
 
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
   (req: Request, res: Response, next: NextFunction) => { fn(req, res, next).catch(next); };
+
+function isValidEntityType(value?: string): value is typeof UPLOAD_ENTITY_TYPES[number] {
+  return Boolean(value && UPLOAD_ENTITY_TYPES.includes(value as typeof UPLOAD_ENTITY_TYPES[number]));
+}
 
 // ─── POST /api/upload — Upload a file (auth + rate limit) ──────────
 router.post('/upload', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
@@ -24,14 +28,25 @@ router.post('/upload', authMiddleware, uploadLimiter, upload.single('file'), asy
 
   const userId = (req as any).user?.id;
   const purpose = req.body?.purpose || 'document';
-  const entityType = req.body?.entityType || undefined;
-  const entityId = req.body?.entityId || undefined;
-  // Validate entityType if provided
-  if (entityType && !['student', 'teacher'].includes(entityType)) {
-    res.status(400).json({ success: false, message: 'entityType must be "student" or "teacher"' });
+  const entityTypeRaw = req.body?.entityType as string | undefined;
+  if (entityTypeRaw && !isValidEntityType(entityTypeRaw)) {
+    res.status(400).json({ success: false, message: `entityType must be one of: ${UPLOAD_ENTITY_TYPES.join(', ')}` });
     return;
   }
-  const result = await uploadService.uploadFile(req.file.buffer, req.file.originalname, userId, purpose, entityType, entityId);
+  const entityType = entityTypeRaw;
+  const entityId = req.body?.entityId || undefined;
+  const roomId = req.body?.roomId || undefined;
+  const academicYearId = req.body?.academicYearId || undefined;
+
+  const result = await uploadService.uploadFile(req.file.buffer, req.file.originalname, {
+    uploadedById: userId,
+    purpose,
+    entityType,
+    entityId,
+    roomId,
+    academicYearId,
+  });
+
   res.status(201).json({ success: true, data: result });
 }));
 
@@ -43,15 +58,14 @@ router.get('/uploads', authMiddleware, asyncHandler(async (req: Request, res: Re
     res.status(400).json({ success: false, message: 'entityType and entityId query params required' });
     return;
   }
-  if (!['student', 'teacher'].includes(entityType)) {
-    res.status(400).json({ success: false, message: 'entityType must be "student" or "teacher"' });
+  if (!isValidEntityType(entityType)) {
+    res.status(400).json({ success: false, message: `entityType must be one of: ${UPLOAD_ENTITY_TYPES.join(', ')}` });
     return;
   }
   const records = await uploadService.listByEntity(entityType, entityId);
   res.json({ success: true, data: records });
 }));
 
-// ─── PUT /api/uploads/:id/rename — Rename file (auth required) ────────────
 router.put('/uploads/:id/rename', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const { originalName } = req.body;
   if (!originalName || !originalName.trim()) {
@@ -62,23 +76,20 @@ router.put('/uploads/:id/rename', authMiddleware, asyncHandler(async (req: Reque
   res.json({ success: true, data: result });
 }));
 
-// ─── DELETE /api/uploads/:id — Delete file + disk cleanup (auth required) ─
 router.delete('/uploads/:id', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
   await uploadService.deleteFile(req.params.id);
   res.json({ success: true, message: 'File deleted' });
 }));
 
-// ─── GET /api/uploads/:id/meta — File metadata (auth required) ──────
 router.get('/uploads/:id/meta', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const result = await uploadService.getMeta(req.params.id);
   res.json({ success: true, data: result });
 }));
 
-// ─── GET /api/uploads/:id — Serve file (auth required) ──────────────
 router.get('/uploads/:id', authMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const { buffer, mimeType, originalName } = await uploadService.getFile(req.params.id);
   res.setHeader('Content-Type', mimeType);
-  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.setHeader('Cache-Control', 'private, max-age=3600');
   res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(originalName)}`);
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.send(buffer);

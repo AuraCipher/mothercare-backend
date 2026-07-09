@@ -1,5 +1,5 @@
 import { prisma } from '../../../lib/prisma';
-import { storage } from '../../upload/storage.service';
+import { deleteFileRecordById } from '../../upload/upload.service';
 import { syncTeachersForBranch } from '../../canteen/canteen-credit-rules';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -189,8 +189,7 @@ class TeacherProfileService {
         try {
           const oldRecord = await prisma.fileRecord.findUnique({ where: { id: existingUser.profilePhotoId } });
           if (oldRecord) {
-            await storage.delete(oldRecord.storagePath);
-            await prisma.fileRecord.delete({ where: { id: oldRecord.id } });
+            await deleteFileRecordById(oldRecord.id);
           }
         } catch (err) {
           console.warn('[Teacher] Failed to delete old profile photo:', err);
@@ -357,8 +356,7 @@ class TeacherProfileService {
         try {
           const oldRecord = await prisma.fileRecord.findUnique({ where: { id: oldPhotoId } });
           if (oldRecord) {
-            await storage.delete(oldRecord.storagePath);
-            await prisma.fileRecord.delete({ where: { id: oldRecord.id } });
+            await deleteFileRecordById(oldRecord.id);
           }
         } catch (err) {
           console.warn('[Teacher] Failed to delete old profile photo:', err);

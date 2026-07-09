@@ -137,7 +137,7 @@ app.use('/branches', branchAdminRoutes);
 // ─── Upload routes — GET (serving) is public for <img> tags, POST needs auth ──
 app.use('/api', uploadRoutes);
 
-// ─── Serve uploaded files statically ─────────────────────────
+// ─── Legacy local uploads (dev fallback when R2 is not configured) ─
 const uploadsDir = path.resolve(__dirname, '..', 'uploads');
 app.use('/uploads', express.static(uploadsDir, { maxAge: '1y', immutable: true }));
 

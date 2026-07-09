@@ -31,6 +31,14 @@ const envSchema = z.object({
   META_WHATSAPP_API_VERSION: z.string().default('v21.0'),
   ALLOWED_ORIGINS: z.string().optional(),
 
+  // Cloudflare R2 (optional — falls back to local uploads/ when unset)
+  R2_ACCOUNT_ID: z.string().optional(),
+  R2_ACCESS_KEY_ID: z.string().optional(),
+  R2_SECRET_ACCESS_KEY: z.string().optional(),
+  R2_DOCUMENTS_BUCKET: z.string().default('mcs-documents'),
+  R2_BACKUPS_BUCKET: z.string().default('mcs-backups'),
+  R2_PUBLIC_BASE_URL: z.string().url().optional(),
+
   // Default school branch name for single-school auto-assignment
   DEFAULT_BRANCH_NAME: z.string().default('Mother Care Sohan'),
 });

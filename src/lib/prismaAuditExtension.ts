@@ -17,7 +17,7 @@ import { auditContextStorage } from '../middleware/auth/auditContext.middleware'
  *    ("Unknown argument `createdById`") on every create/update.
  *
  * Skipped / pending:
- *   FeeHead, FeeStructure, StudentFee, Payment, Announcement, Message
+ *   FeeHead, FeeStructure, StudentFee, Payment, Announcement, ChatMessage
  *   — these models don't yet have createdById/updatedById fields.
  */
 const AUDITED_MODELS = new Set([
