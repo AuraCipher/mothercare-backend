@@ -132,4 +132,45 @@ describe('Admin — branch chat settings', () => {
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/active teachers/i);
   });
+
+  test('PATCH allow-all teachers announcement syncs memberships', async () => {
+    mockActiveAcademicYear();
+    mockBranchExists();
+
+    (prismaMock.branchChatSettings.upsert as jest.Mock).mockResolvedValue({
+      branchId: TEST_BRANCH_ID,
+      schoolAnnouncementPosterUserIds: [],
+      teacherAnnouncementPosterUserIds: [],
+      allowAllTeachersTeacherAnnouncement: true,
+    });
+
+    (prismaMock.chatRoom.findFirst as jest.Mock)
+      .mockResolvedValueOnce({
+        id: 'school-room-1',
+        kind: 'school_announcement',
+        branchId: TEST_BRANCH_ID,
+      })
+      .mockResolvedValueOnce({
+        id: 'teacher-room-1',
+        kind: 'teacher_announcement',
+        branchId: TEST_BRANCH_ID,
+      });
+
+    (prismaMock.branchMember.findMany as jest.Mock).mockResolvedValue([
+      { userId: 'teacher-2' },
+    ]);
+    (prismaMock.user.findMany as jest.Mock).mockResolvedValue([]);
+    (prismaMock.chatRoomMember.findMany as jest.Mock).mockResolvedValue([]);
+    (prismaMock.chatRoomMember.upsert as jest.Mock).mockResolvedValue({});
+
+    const res = await request(app)
+      .patch(`/admin/branches/${TEST_BRANCH_ID}/chat-settings`)
+      .query(scopeQuery)
+      .set(adminToken)
+      .send({ allowAllTeachersTeacherAnnouncement: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.allowAllTeachersTeacherAnnouncement).toBe(true);
+    expect(prismaMock.chatRoomMember.upsert).toHaveBeenCalled();
+  });
 });

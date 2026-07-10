@@ -8,7 +8,40 @@ export type BranchChatSettingsDto = {
   teacherAnnouncementPosterUserIds: string[];
   allowAllTeachersTeacherAnnouncement: boolean;
   schoolAnnouncementPosters: Array<{ id: string; name: string; username: string | null }>;
+  teacherAnnouncementPosters: Array<{ id: string; name: string; username: string | null }>;
 };
+
+async function validateTeacherPosterUserIds(branchId: string, userIds: string[]): Promise<void> {
+  if (userIds.length === 0) return;
+
+  const unique = [...new Set(userIds)];
+  if (unique.length !== userIds.length) {
+    throw { status: 400, message: 'Duplicate user IDs in teacherAnnouncementPosterUserIds' };
+  }
+
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: {
+      id: true,
+      role: true,
+      status: true,
+      branchMembers: { where: { branchId, isActive: true }, select: { id: true } },
+    },
+  });
+
+  if (users.length !== userIds.length) {
+    throw { status: 400, message: 'One or more appointed poster user IDs were not found' };
+  }
+
+  for (const user of users) {
+    if (user.role !== 'teacher' || user.status !== 'active') {
+      throw { status: 400, message: 'Teachers announcement posters must be active teachers' };
+    }
+    if (user.branchMembers.length === 0) {
+      throw { status: 400, message: 'Appointed teachers must be active members of this branch' };
+    }
+  }
+}
 
 async function validateSchoolPosterUserIds(branchId: string, userIds: string[]): Promise<void> {
   if (userIds.length === 0) return;
@@ -165,22 +198,31 @@ export async function syncTeacherAnnouncementMembers(branchId: string, academicY
 
 export async function getBranchChatSettings(branchId: string): Promise<BranchChatSettingsDto> {
   const settings = await getOrCreateBranchChatSettings(branchId);
-  const posterIds = settings.schoolAnnouncementPosterUserIds;
+  const schoolPosterIds = settings.schoolAnnouncementPosterUserIds;
+  const teacherPosterIds = settings.teacherAnnouncementPosterUserIds;
 
-  const posters =
-    posterIds.length === 0
+  const [schoolPosters, teacherPosters] = await Promise.all([
+    schoolPosterIds.length === 0
       ? []
-      : await prisma.user.findMany({
-          where: { id: { in: posterIds } },
+      : prisma.user.findMany({
+          where: { id: { in: schoolPosterIds } },
           select: { id: true, name: true, username: true },
-        });
+        }),
+    teacherPosterIds.length === 0
+      ? []
+      : prisma.user.findMany({
+          where: { id: { in: teacherPosterIds } },
+          select: { id: true, name: true, username: true },
+        }),
+  ]);
 
   return {
     branchId,
     schoolAnnouncementPosterUserIds: settings.schoolAnnouncementPosterUserIds,
     teacherAnnouncementPosterUserIds: settings.teacherAnnouncementPosterUserIds,
     allowAllTeachersTeacherAnnouncement: settings.allowAllTeachersTeacherAnnouncement,
-    schoolAnnouncementPosters: posters,
+    schoolAnnouncementPosters: schoolPosters,
+    teacherAnnouncementPosters: teacherPosters,
   };
 }
 
@@ -195,6 +237,9 @@ export async function updateBranchChatSettings(
 ): Promise<BranchChatSettingsDto> {
   if (input.schoolAnnouncementPosterUserIds !== undefined) {
     await validateSchoolPosterUserIds(branchId, input.schoolAnnouncementPosterUserIds);
+  }
+  if (input.teacherAnnouncementPosterUserIds !== undefined) {
+    await validateTeacherPosterUserIds(branchId, input.teacherAnnouncementPosterUserIds);
   }
 
   await prisma.branchChatSettings.upsert({
