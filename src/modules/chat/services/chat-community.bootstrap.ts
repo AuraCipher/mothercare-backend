@@ -19,7 +19,15 @@ type EnsureRoomInput = {
 
 async function ensureRoom(input: EnsureRoomInput) {
   const existing = await prisma.chatRoom.findUnique({ where: { singletonKey: input.singletonKey } });
-  if (existing) return existing;
+  if (existing) {
+    if (existing.name === 'Whole School' && input.name === 'School Announcement') {
+      return prisma.chatRoom.update({
+        where: { id: existing.id },
+        data: { name: input.name },
+      });
+    }
+    return existing;
+  }
 
   return prisma.chatRoom.create({
     data: {
@@ -71,7 +79,7 @@ export async function ensureStudentChatBootstrap(input: StudentChatBootstrapInpu
     academicYearId: input.academicYearId,
     branchId: input.branchId,
     kind: 'school_announcement',
-    name: 'Whole School',
+    name: 'School Announcement',
     singletonKey: `ay:${input.academicYearId}:branch:${input.branchId}:school_announcement`,
     onlyStaffCanPost: true,
     studentsCanPost: false,
@@ -204,7 +212,7 @@ export function groupRoomsForStudentLanding(
       }));
 
   return [
-    { key: 'school', title: 'Whole School', rooms: pick(['school_announcement']) },
+    { key: 'school', title: 'School Announcement', rooms: pick(['school_announcement']) },
     { key: 'class', title: 'Class Community', rooms: pick(['class_announcement', 'group_chat']) },
     { key: 'system', title: 'Updates', rooms: pick(['system_attendance', 'system_payment']) },
     { key: 'dm', title: 'Messages', rooms: pick(['direct_message']) },
