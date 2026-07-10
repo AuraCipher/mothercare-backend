@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { TenureEndReason } from '@prisma/client';
 import { tenureService } from '../services/tenure.service';
 import { prisma } from '../../../lib/prisma';
 import { requireScope } from '../utils/scope-context';
@@ -9,6 +10,13 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
   (req: Request, res: Response, next: NextFunction) => {
     fn(req, res, next).catch(next);
   };
+
+function parseEndReason(value: unknown): TenureEndReason | null {
+  if (typeof value !== 'string') return null;
+  return (Object.values(TenureEndReason) as string[]).includes(value)
+    ? (value as TenureEndReason)
+    : null;
+}
 
 router.get('/branch-members/:branchMemberId/tenures', asyncHandler(async (req: Request, res: Response) => {
   const data = await tenureService.listBranchTenures(req.params.branchMemberId);
@@ -28,14 +36,15 @@ router.post('/branch-members/:branchMemberId/tenures/join', asyncHandler(async (
 
 router.post('/branch-members/:branchMemberId/tenures/leave', asyncHandler(async (req: Request, res: Response) => {
   const { leftAt, endReason, notes } = req.body;
-  if (!endReason) {
-    res.status(400).json({ success: false, message: 'endReason is required' });
+  const parsedReason = parseEndReason(endReason);
+  if (!parsedReason) {
+    res.status(400).json({ success: false, message: 'Valid endReason is required' });
     return;
   }
   const data = await tenureService.recordBranchLeave(
     req.params.branchMemberId,
     leftAt ? new Date(leftAt) : new Date(),
-    endReason,
+    parsedReason,
     notes,
   );
   res.json({ success: true, data });
@@ -84,14 +93,15 @@ router.post('/students/:studentId/school-tenures/leave', asyncHandler(async (req
     return;
   }
   const { leftAt, endReason, notes } = req.body;
-  if (!endReason) {
-    res.status(400).json({ success: false, message: 'endReason is required' });
+  const parsedReason = parseEndReason(endReason);
+  if (!parsedReason) {
+    res.status(400).json({ success: false, message: 'Valid endReason is required' });
     return;
   }
   const data = await tenureService.recordStudentLeave(
     student.personId,
     leftAt ? new Date(leftAt) : new Date(),
-    endReason,
+    parsedReason,
     notes,
   );
   res.json({ success: true, data });
@@ -169,14 +179,15 @@ router.post('/teachers/:userId/tenures/leave', asyncHandler(async (req: Request,
     res.status(404).json({ success: false, message: 'Teacher is not assigned to this branch' });
     return;
   }
-  if (!req.body.endReason) {
-    res.status(400).json({ success: false, message: 'endReason is required' });
+  const parsedReason = parseEndReason(req.body.endReason);
+  if (!parsedReason) {
+    res.status(400).json({ success: false, message: 'Valid endReason is required' });
     return;
   }
   const data = await tenureService.recordBranchLeave(
     member.id,
     req.body.leftAt ? new Date(req.body.leftAt) : new Date(),
-    req.body.endReason,
+    parsedReason,
     req.body.notes,
   );
   res.json({ success: true, data });
