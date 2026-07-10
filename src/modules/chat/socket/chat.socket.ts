@@ -101,6 +101,14 @@ export async function initChatSocket(server: HttpServer): Promise<Server | null>
           title: message.title,
           content: message.content,
           mediaFileId: message.mediaFileId,
+          mediaFile: message.mediaFile
+            ? {
+                id: message.mediaFile.id,
+                mimeType: message.mediaFile.mimeType,
+                publicUrl: message.mediaFile.publicUrl,
+                purpose: message.mediaFile.purpose,
+              }
+            : null,
           sender: message.sender,
           createdAt: message.createdAt.toISOString(),
         };

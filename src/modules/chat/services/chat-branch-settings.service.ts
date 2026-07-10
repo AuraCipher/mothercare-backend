@@ -104,6 +104,65 @@ export async function syncSchoolAnnouncementMembers(branchId: string, academicYe
   return schoolRoom;
 }
 
+/** Sync teachers announcement room memberships. */
+export async function syncTeacherAnnouncementMembers(branchId: string, academicYearId: string) {
+  const settings = await getOrCreateBranchChatSettings(branchId);
+  const teacherRoom = await prisma.chatRoom.findFirst({
+    where: {
+      branchId,
+      academicYearId,
+      kind: 'teacher_announcement',
+      singletonKey: `ay:${academicYearId}:branch:${branchId}:teacher_announcement`,
+    },
+  });
+  if (!teacherRoom) return null;
+
+  const branchAdmins = await prisma.branchMember.findMany({
+    where: { branchId, isActive: true, role: { in: ['branch_admin', 'sub_admin'] } },
+    select: { userId: true },
+  });
+  const superAdmins = await prisma.user.findMany({
+    where: {
+      role: 'super_admin',
+      status: 'active',
+      branchMembers: { some: { branchId, isActive: true } },
+    },
+    select: { id: true },
+  });
+  const adminUserIds = new Set([
+    ...branchAdmins.map((m) => m.userId),
+    ...superAdmins.map((u) => u.id),
+  ]);
+  const posterUserIds = new Set(settings.teacherAnnouncementPosterUserIds);
+
+  const activeTeachers = await prisma.branchMember.findMany({
+    where: { branchId, isActive: true, role: 'teacher' },
+    select: { userId: true },
+  });
+
+  for (const adminId of adminUserIds) {
+    await ensureRoomMembership(teacherRoom.id, adminId, { access: 'moderator', canPost: true });
+  }
+
+  for (const teacher of activeTeachers) {
+    if (adminUserIds.has(teacher.userId)) continue;
+    const canPost =
+      settings.allowAllTeachersTeacherAnnouncement || posterUserIds.has(teacher.userId);
+    await ensureRoomMembership(teacherRoom.id, teacher.userId, {
+      access: canPost ? 'moderator' : 'member',
+      canPost,
+    });
+  }
+
+  for (const posterId of posterUserIds) {
+    if (!adminUserIds.has(posterId)) {
+      await ensureRoomMembership(teacherRoom.id, posterId, { access: 'moderator', canPost: true });
+    }
+  }
+
+  return teacherRoom;
+}
+
 export async function getBranchChatSettings(branchId: string): Promise<BranchChatSettingsDto> {
   const settings = await getOrCreateBranchChatSettings(branchId);
   const posterIds = settings.schoolAnnouncementPosterUserIds;
@@ -160,5 +219,8 @@ export async function updateBranchChatSettings(
   });
 
   await syncSchoolAnnouncementMembers(branchId, academicYearId);
+  if (input.teacherAnnouncementPosterUserIds !== undefined || input.allowAllTeachersTeacherAnnouncement !== undefined) {
+    await syncTeacherAnnouncementMembers(branchId, academicYearId);
+  }
   return getBranchChatSettings(branchId);
 }

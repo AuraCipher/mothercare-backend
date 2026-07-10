@@ -16,7 +16,7 @@ export async function listRoomMessages(
     take: limit,
     include: {
       sender: { select: { id: true, name: true, role: true, profilePhotoId: true } },
-      mediaFile: { select: { id: true, mimeType: true, publicUrl: true } },
+      mediaFile: { select: { id: true, mimeType: true, publicUrl: true, purpose: true } },
     },
   });
 
@@ -49,6 +49,7 @@ export async function createRoomMessage(input: {
     include: {
       sender: { select: { id: true, name: true, role: true } },
       room: { select: { academicYearId: true, name: true, kind: true } },
+      mediaFile: { select: { id: true, mimeType: true, publicUrl: true, purpose: true } },
     },
   });
 

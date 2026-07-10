@@ -43,7 +43,26 @@ async function canPostSchoolAnnouncement(
   return settings.schoolAnnouncementPosterUserIds.includes(userId);
 }
 
-/** Central posting decision — Phase 1 implements school_announcement; other kinds use member flags. */
+async function canPostTeacherAnnouncement(
+  userId: string,
+  branchId: string,
+  settings: {
+    teacherAnnouncementPosterUserIds: string[];
+    allowAllTeachersTeacherAnnouncement: boolean;
+  },
+): Promise<boolean> {
+  if (await isBranchChatAdmin(userId, branchId)) return true;
+  if (settings.allowAllTeachersTeacherAnnouncement) {
+    const membership = await prisma.branchMember.findUnique({
+      where: { branchId_userId: { branchId, userId } },
+      select: { role: true, isActive: true },
+    });
+    if (membership?.isActive && membership.role === 'teacher') return true;
+  }
+  return settings.teacherAnnouncementPosterUserIds.includes(userId);
+}
+
+/** Central posting decision — school + teacher announcement; other kinds use member flags. */
 export async function resolveCanPost(
   userId: string,
   room: Pick<ChatRoom, 'id' | 'kind' | 'branchId' | 'onlyStaffCanPost'>,
@@ -55,6 +74,12 @@ export async function resolveCanPost(
     if (!room.branchId) return false;
     const settings = await getOrCreateBranchChatSettings(room.branchId);
     return canPostSchoolAnnouncement(userId, room.branchId, settings);
+  }
+
+  if (room.kind === 'teacher_announcement') {
+    if (!room.branchId) return false;
+    const settings = await getOrCreateBranchChatSettings(room.branchId);
+    return canPostTeacherAnnouncement(userId, room.branchId, settings);
   }
 
   if (!member.canPost && member.access === 'observer') return false;

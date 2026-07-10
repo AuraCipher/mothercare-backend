@@ -17,7 +17,8 @@
 import { PrismaClient, type AcademicYearStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { ensureSchoolAnnouncementRoom } from '../src/modules/chat/services/chat-community.bootstrap';
-import { syncSchoolAnnouncementMembers } from '../src/modules/chat/services/chat-branch-settings.service';
+import { ensureTeacherAnnouncementRoom } from '../src/modules/chat/services/staff-chat-bootstrap.service';
+import { syncSchoolAnnouncementMembers, syncTeacherAnnouncementMembers } from '../src/modules/chat/services/chat-branch-settings.service';
 import { getOrCreateBranchChatSettings } from '../src/modules/chat/services/chat-permissions.service';
 
 const prisma = new PrismaClient();
@@ -557,8 +558,10 @@ async function main() {
   console.log('\n[6/8] Chat — school announcement room + admin memberships');
   await getOrCreateBranchChatSettings(branch.id);
   await ensureSchoolAnnouncementRoom(branch.id, academicYear.id);
+  await ensureTeacherAnnouncementRoom(branch.id, academicYear.id);
   await syncSchoolAnnouncementMembers(branch.id, academicYear.id);
-  console.log('  ✓ School announcement room ready (teachers read-only until appointed)');
+  await syncTeacherAnnouncementMembers(branch.id, academicYear.id);
+  console.log('  ✓ School + Teachers announcement rooms ready');
 
   console.log('\n[7/8] Portal credentials');
   console.log('  CEO:      demo_ceo / DemoCeo@123  (web only)');

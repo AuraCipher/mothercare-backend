@@ -205,6 +205,7 @@ enum TenureEndReason {
 
 enum ChatRoomKind {
   school_announcement // whole-school broadcast (read-only for students)
+  teacher_announcement // staff-only broadcast (teachers read; admin post)
   class_announcement // class community broadcast
   group_chat // dynamic hybrid groups (subject, diary, CR board, etc.)
   direct_message // 1:1 student ↔ teacher / appointed class role

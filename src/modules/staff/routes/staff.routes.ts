@@ -1,0 +1,63 @@
+import { Router, Request, Response, NextFunction } from 'express';
+import auth from '../../../middleware/auth/auth.middleware';
+import { staffAdminRoleMiddleware } from '../middleware/staff-role.middleware';
+import { getStaffChatLanding, openStaffDirectMessage } from '../services/staff-chat.service';
+
+const router = Router();
+
+const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
+  (req: Request, res: Response, next: NextFunction) => {
+    fn(req, res, next).catch((err) => {
+      if (err?.status && err?.message) {
+        res.status(err.status).json({ success: false, message: err.message });
+        return;
+      }
+      next(err);
+    });
+  };
+
+router.use(auth);
+router.use(staffAdminRoleMiddleware);
+
+router.get(
+  '/chat/landing',
+  asyncHandler(async (req, res) => {
+    const userId = (req as any).user.id;
+    const branchId = req.query.branchId as string;
+    const academicYearId = req.query.academicYearId as string;
+
+    if (!branchId || !academicYearId) {
+      res.status(400).json({ success: false, message: 'branchId and academicYearId are required' });
+      return;
+    }
+
+    const data = await getStaffChatLanding({ userId, branchId, academicYearId });
+    res.json({ success: true, data });
+  }),
+);
+
+router.post(
+  '/chat/dm',
+  asyncHandler(async (req, res) => {
+    const userId = (req as any).user.id;
+    const { branchId, academicYearId, participantUserId } = req.body;
+
+    if (!branchId || !academicYearId || !participantUserId) {
+      res.status(400).json({
+        success: false,
+        message: 'branchId, academicYearId, and participantUserId are required',
+      });
+      return;
+    }
+
+    const data = await openStaffDirectMessage({
+      userId,
+      branchId,
+      academicYearId,
+      participantUserId,
+    });
+    res.status(201).json({ success: true, data });
+  }),
+);
+
+export default router;
