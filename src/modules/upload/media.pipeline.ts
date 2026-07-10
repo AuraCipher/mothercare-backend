@@ -76,6 +76,21 @@ export async function processUploadBuffer(input: ProcessMediaInput): Promise<Pro
     throw { status: 400, message: `File type "${mime}" is not allowed` };
   }
 
+  if (purpose === 'voice_note') {
+    const ext = fileExt === 'm4a' ? 'm4a' : (type?.ext || fileExt || 'm4a');
+    const audioMime =
+      mime.startsWith('audio/') ? mime
+      : mime === 'video/mp4' || ext === 'm4a' ? 'audio/mp4'
+      : 'audio/mp4';
+    return {
+      buffer,
+      mimeType: audioMime,
+      ext,
+      width: null,
+      height: null,
+    };
+  }
+
   if (mime.startsWith('image/')) {
     if (mime === 'image/svg+xml' || mime === 'image/gif') {
       return {
@@ -138,6 +153,7 @@ export async function processUploadBuffer(input: ProcessMediaInput): Promise<Pro
 }
 
 export function normalizePurpose(purpose?: string, mimeType?: string): string {
+  if (purpose === 'voice_note') return 'voice_note';
   if (purpose && purpose !== 'document') return purpose;
   if (mimeType?.startsWith('audio/')) return 'voice_note';
   if (mimeType?.startsWith('video/')) return 'video';
