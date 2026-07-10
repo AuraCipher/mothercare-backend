@@ -23,6 +23,15 @@ export interface TeacherPortalPermissionsStored {
     view?: PermissionLevel;
     hodScope?: HodParentContactScope;
   };
+  app?: {
+    access?: PermissionLevel;
+    schoolAnnouncementPost?: PermissionLevel;
+    teachersAnnouncementPost?: PermissionLevel;
+    classAnnouncementPost?: PermissionLevel;
+    subjectGroupPost?: PermissionLevel;
+    directMessages?: PermissionLevel;
+    attachments?: PermissionLevel;
+  };
 }
 
 export interface FeatureAccess {
@@ -58,6 +67,15 @@ export interface ParentContactPermissions extends FeatureAccess {
   hodScope: HodParentContactScope;
 }
 
+export interface AppChatPermissions extends FeatureAccess {
+  canSchoolAnnouncementPost: boolean;
+  canTeachersAnnouncementPost: boolean;
+  canClassAnnouncementPost: boolean;
+  canSubjectGroupPost: boolean;
+  canDirectMessages: boolean;
+  canAttachments: boolean;
+}
+
 export interface ResolvedTeacherPermissions {
   portalAccess: 'FULL' | 'READ_ONLY' | 'FROZEN';
   isFrozen: boolean;
@@ -73,6 +91,7 @@ export interface ResolvedTeacherPermissions {
     notifications: NotificationsPermissions;
     profile: ProfilePermissions;
     parentContact: ParentContactPermissions;
+    app: AppChatPermissions;
   };
 }
 

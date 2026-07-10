@@ -113,6 +113,51 @@ export const TEACHER_PERMISSION_CATALOG: PermissionGroupDef[] = [
     ],
   },
   {
+    id: 'app',
+    label: 'Mobile app chat',
+    description: 'Flutter chat — channel access and posting (works with branch appointments & class roles)',
+    parent: true,
+    fields: [
+      { key: 'access', label: 'Open mobile chat', description: 'Use the chat section in the Flutter app', kind: 'access' },
+      {
+        key: 'schoolAnnouncementPost',
+        label: 'Post — School Announcement',
+        description: 'Post in whole-school channel (also requires branch appointment)',
+        kind: 'write',
+      },
+      {
+        key: 'teachersAnnouncementPost',
+        label: 'Post — Teachers Announcement',
+        description: 'Post in staff broadcast channel (also requires branch appointment or allow-all)',
+        kind: 'write',
+      },
+      {
+        key: 'classAnnouncementPost',
+        label: 'Post — Class Announcement',
+        description: 'Post in class announcement channel (also requires class teacher role)',
+        kind: 'write',
+      },
+      {
+        key: 'subjectGroupPost',
+        label: 'Post — Subject groups',
+        description: 'Post in subject group chats (also requires subject assignment)',
+        kind: 'write',
+      },
+      {
+        key: 'directMessages',
+        label: 'Direct messages',
+        description: 'Send and participate in staff DMs',
+        kind: 'write',
+      },
+      {
+        key: 'attachments',
+        label: 'Send photos, video, voice',
+        description: 'Upload media in chat rooms where posting is allowed',
+        kind: 'write',
+      },
+    ],
+  },
+  {
     id: 'profile',
     label: 'Profile',
     description: 'Own profile and account',

@@ -1,5 +1,6 @@
 import { prisma } from '../../../lib/prisma';
 import type { ChatRoom, ChatRoomMember, ChatRoomKind } from '@prisma/client';
+import { teacherAppChatAllowsPost } from './teacher-app-chat-permissions.service';
 
 const BRANCH_CHAT_ADMIN_ROLES = new Set(['branch_admin', 'sub_admin']);
 const STAFF_ROLES = new Set(['teacher', 'management', 'branch_admin', 'sub_admin', 'super_admin', 'staff']);
@@ -112,6 +113,16 @@ async function canPostGroupChat(
   return false;
 }
 
+async function applyTeacherAppPostGate(
+  userId: string,
+  branchId: string | null | undefined,
+  roomKind: ChatRoomKind,
+  roomAllowed: boolean,
+): Promise<boolean> {
+  if (!roomAllowed) return false;
+  return teacherAppChatAllowsPost(userId, branchId, roomKind);
+}
+
 /** Central posting decision per room kind. */
 export async function resolveCanPost(
   userId: string,
@@ -123,25 +134,30 @@ export async function resolveCanPost(
   if (room.kind === 'school_announcement') {
     if (!room.branchId) return false;
     const settings = await getOrCreateBranchChatSettings(room.branchId);
-    return canPostSchoolAnnouncement(userId, room.branchId, settings);
+    const roomAllowed = await canPostSchoolAnnouncement(userId, room.branchId, settings);
+    return applyTeacherAppPostGate(userId, room.branchId, room.kind, roomAllowed);
   }
 
   if (room.kind === 'teacher_announcement') {
     if (!room.branchId) return false;
     const settings = await getOrCreateBranchChatSettings(room.branchId);
-    return canPostTeacherAnnouncement(userId, room.branchId, settings);
+    const roomAllowed = await canPostTeacherAnnouncement(userId, room.branchId, settings);
+    return applyTeacherAppPostGate(userId, room.branchId, room.kind, roomAllowed);
   }
 
   if (room.kind === 'class_announcement') {
-    return canPostClassAnnouncement(userId, room);
+    const roomAllowed = await canPostClassAnnouncement(userId, room);
+    return applyTeacherAppPostGate(userId, room.branchId, room.kind, roomAllowed);
   }
 
   if (room.kind === 'group_chat') {
-    return canPostGroupChat(userId, room);
+    const roomAllowed = await canPostGroupChat(userId, room);
+    return applyTeacherAppPostGate(userId, room.branchId, room.kind, roomAllowed);
   }
 
   if (room.kind === 'direct_message') {
-    return member.canPost;
+    const roomAllowed = member.canPost;
+    return applyTeacherAppPostGate(userId, room.branchId, room.kind, roomAllowed);
   }
 
   if (!member.canPost && member.access === 'observer') return false;

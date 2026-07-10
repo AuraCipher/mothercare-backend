@@ -60,6 +60,17 @@ describe('chat permissions — school announcement', () => {
     (prismaMock.branchChatSettings.upsert as jest.Mock).mockResolvedValue({
       schoolAnnouncementPosterUserIds: [TEACHER_USER],
     });
+    (prismaMock.teacherProfile.findUnique as jest.Mock).mockResolvedValue({
+      portalAccess: 'FULL',
+      portalPermissions: {},
+      canViewParentContact: false,
+      hodParentContactScope: 'ASSIGNED_ONLY',
+    });
+    (prismaMock.branch.findUnique as jest.Mock).mockResolvedValue({
+      teacherParentContactEnabled: true,
+      teachersCanMarkAttendance: true,
+      teachersCanEnterMarks: true,
+    });
 
     const allowed = await resolveCanPost(TEACHER_USER, schoolRoom, {
       canPost: false,
@@ -70,6 +81,42 @@ describe('chat permissions — school announcement', () => {
     });
 
     expect(allowed).toBe(true);
+  });
+
+  test('appointed teacher blocked when app school post denied', async () => {
+    (prismaMock.user.findUnique as jest.Mock).mockResolvedValue({
+      id: TEACHER_USER,
+      role: 'teacher',
+      status: 'active',
+    });
+    (prismaMock.branchMember.findUnique as jest.Mock).mockResolvedValue({
+      role: 'teacher',
+      isActive: true,
+    });
+    (prismaMock.branchChatSettings.upsert as jest.Mock).mockResolvedValue({
+      schoolAnnouncementPosterUserIds: [TEACHER_USER],
+    });
+    (prismaMock.teacherProfile.findUnique as jest.Mock).mockResolvedValue({
+      portalAccess: 'FULL',
+      portalPermissions: { app: { schoolAnnouncementPost: 'deny' } },
+      canViewParentContact: false,
+      hodParentContactScope: 'ASSIGNED_ONLY',
+    });
+    (prismaMock.branch.findUnique as jest.Mock).mockResolvedValue({
+      teacherParentContactEnabled: true,
+      teachersCanMarkAttendance: true,
+      teachersCanEnterMarks: true,
+    });
+
+    const allowed = await resolveCanPost(TEACHER_USER, schoolRoom, {
+      canPost: false,
+      access: 'observer',
+      isMuted: false,
+      isPostingRestricted: false,
+      canRead: true,
+    });
+
+    expect(allowed).toBe(false);
   });
 
   test('regular teacher cannot post in school announcement', async () => {

@@ -78,4 +78,45 @@ describe('teacher permissions resolver', () => {
     });
     expect(p.features.parentContact.canView).toBe(false);
   });
+
+  test('app chat defaults allow posting sub-features when inherit', () => {
+    const p = resolveTeacherPermissions({
+      portalAccess: 'FULL',
+      isReadOnly: false,
+      isHod: false,
+      stored: {},
+      legacy: { canViewParentContact: false, hodParentContactScope: 'ASSIGNED_ONLY' },
+      branch: branchDefaults,
+    });
+    expect(p.features.app.allowed).toBe(true);
+    expect(p.features.app.canSchoolAnnouncementPost).toBe(true);
+    expect(p.features.app.canAttachments).toBe(true);
+  });
+
+  test('app school post deny blocks school channel write', () => {
+    const p = resolveTeacherPermissions({
+      portalAccess: 'FULL',
+      isReadOnly: false,
+      isHod: false,
+      stored: { app: { schoolAnnouncementPost: 'deny' } },
+      legacy: { canViewParentContact: false, hodParentContactScope: 'ASSIGNED_ONLY' },
+      branch: branchDefaults,
+    });
+    expect(p.features.app.allowed).toBe(true);
+    expect(p.features.app.canSchoolAnnouncementPost).toBe(false);
+    expect(p.features.app.canSubjectGroupPost).toBe(true);
+  });
+
+  test('app access deny blocks all mobile chat posting', () => {
+    const p = resolveTeacherPermissions({
+      portalAccess: 'FULL',
+      isReadOnly: false,
+      isHod: false,
+      stored: { app: { access: 'deny' } },
+      legacy: { canViewParentContact: false, hodParentContactScope: 'ASSIGNED_ONLY' },
+      branch: branchDefaults,
+    });
+    expect(p.features.app.allowed).toBe(false);
+    expect(p.features.app.canAttachments).toBe(false);
+  });
 });

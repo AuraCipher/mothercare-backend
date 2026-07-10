@@ -140,6 +140,15 @@ export function resolveTeacherPermissions(input: PermissionResolveInput): Resolv
     },
   );
 
+  const appParent = parentAllowed(stored, 'app', frozen);
+  const appAccess = childAllowed(appParent, stored.app?.access, { defaultAllow: true });
+  const appWrite = (level: PermissionLevel | undefined) =>
+    childAllowed(appParent && appAccess, level, {
+      defaultAllow: true,
+      isWrite: true,
+      readOnlyPortal,
+    });
+
   return {
     portalAccess: input.portalAccess,
     isFrozen: frozen,
@@ -205,6 +214,20 @@ export function resolveTeacherPermissions(input: PermissionResolveInput): Resolv
           ? 'Parent contacts denied'
           : !input.branch.teacherParentContactEnabled
             ? 'Branch parent contacts disabled'
+            : undefined,
+      },
+      app: {
+        allowed: appParent && appAccess,
+        canSchoolAnnouncementPost: appWrite(stored.app?.schoolAnnouncementPost),
+        canTeachersAnnouncementPost: appWrite(stored.app?.teachersAnnouncementPost),
+        canClassAnnouncementPost: appWrite(stored.app?.classAnnouncementPost),
+        canSubjectGroupPost: appWrite(stored.app?.subjectGroupPost),
+        canDirectMessages: appWrite(stored.app?.directMessages),
+        canAttachments: appWrite(stored.app?.attachments),
+        reason: frozen
+          ? 'Portal frozen'
+          : !appParent || !appAccess
+            ? 'Mobile chat access denied'
             : undefined,
       },
     },

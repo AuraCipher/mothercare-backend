@@ -5,6 +5,8 @@ import { uploadDocumentPermissionMiddleware } from '../../middleware/auth/upload
 import { uploadLimiter } from '../../middleware/security/rateLimiter';
 import { uploadService } from './upload.service';
 import { UPLOAD_ENTITY_TYPES } from './storage-paths';
+import { prisma } from '../../lib/prisma';
+import { teacherAppChatAllowsAttachments } from '../chat/services/teacher-app-chat-permissions.service';
 
 const router = Router();
 
@@ -45,6 +47,23 @@ router.post('/upload', uploadLimiter, upload.single('file'), asyncHandler(async 
     durationSecondsRaw != null && durationSecondsRaw !== ''
       ? parseFloat(String(durationSecondsRaw))
       : undefined;
+
+  if (entityType === 'chat' && roomId && userId) {
+    const room = await prisma.chatRoom.findUnique({
+      where: { id: roomId },
+      select: { branchId: true },
+    });
+    if (room?.branchId) {
+      const attachmentsOk = await teacherAppChatAllowsAttachments(userId, room.branchId);
+      if (!attachmentsOk) {
+        res.status(403).json({
+          success: false,
+          message: 'Sending chat attachments is not allowed for your account',
+        });
+        return;
+      }
+    }
+  }
 
   const result = await uploadService.uploadFile(req.file.buffer, req.file.originalname, {
     uploadedById: userId,
