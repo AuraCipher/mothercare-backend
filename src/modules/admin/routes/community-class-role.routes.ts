@@ -44,6 +44,16 @@ async function assertAdminCommunityScope(req: Request, res: Response, communityI
 }
 
 router.get(
+  '/by-group/:groupId',
+  asyncHandler(async (req, res) => {
+    const scope = await requireScope(req, res);
+    if (!scope) return;
+    const data = await resolveCommunityByGroupId(req.params.groupId, scope.academicYearId);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
   '/:communityId/roles',
   asyncHandler(async (req, res) => {
     const ctx = await assertAdminCommunityScope(req, res, req.params.communityId);
