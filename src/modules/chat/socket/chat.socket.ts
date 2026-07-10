@@ -7,6 +7,7 @@ import { getRedisConnectionConfig } from '../../../config/redis-tcp';
 import logger from '../../../lib/logger';
 import { verifyToken } from '../../../lib/jwt';
 import { createRoomMessage, markRoomRead, listOfflineRecipientUserIds } from '../services/chat-message.service';
+import { ensureStudentSystemRoomAccess } from '../services/chat-student-room-access.service';
 import { assertRoomMember, listUserRoomIds } from '../services/chat-access.service';
 import { enqueueChatPushFanout } from '../../../queues/chat.queue';
 import { prisma } from '../../../lib/prisma';
@@ -67,6 +68,7 @@ export async function initChatSocket(server: HttpServer): Promise<Server | null>
 
     socket.on('chat:room:join', async (payload: { roomId: string }) => {
       try {
+        await ensureStudentSystemRoomAccess(payload.roomId, user.id);
         await assertRoomMember(payload.roomId, user.id);
         socket.join(`room:${payload.roomId}`);
         socket.emit('chat:room:joined', { roomId: payload.roomId });

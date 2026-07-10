@@ -246,10 +246,9 @@ router.get(
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
     assertFeatureAllowed(ctx.permissions, 'notifications');
-    const user = (req as any).teacherUser;
     const unreadOnly = req.query.unreadOnly === 'true';
     const limit = req.query.limit ? Number(req.query.limit) : undefined;
-    const data = await listTeacherNotifications(user.id, { unreadOnly, limit });
+    const data = await listTeacherNotifications(ctx, { unreadOnly, limit });
     res.json({ success: true, data });
   }),
 );
@@ -259,8 +258,7 @@ router.patch(
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
     assertFeatureAllowed(ctx.permissions, 'notifications', 'markRead');
-    const user = (req as any).teacherUser;
-    const data = await markTeacherNotificationRead(user.id, req.params.id);
+    const data = await markTeacherNotificationRead(ctx, req.params.id);
     res.json({ success: true, data });
   }),
 );
@@ -270,8 +268,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const ctx = getTeacherContext(req);
     assertFeatureAllowed(ctx.permissions, 'notifications', 'markRead');
-    const user = (req as any).teacherUser;
-    const data = await markAllTeacherNotificationsRead(user.id);
+    const data = await markAllTeacherNotificationsRead(ctx);
     res.json({ success: true, data });
   }),
 );

@@ -11,6 +11,7 @@ import {
   mockActiveAcademicYear,
   scopeQuery,
 } from '../../helpers/integration';
+import { mockChatPortalNotifications } from '../../helpers/chat-notifications';
 
 const teacherToken = getAuthHeader(
   generateTestToken('teacher-u1', 'teacher', {
@@ -82,19 +83,15 @@ describe('Teacher portal — Phase E', () => {
 
   test('GET /teacher/notifications returns list', async () => {
     mockTeacherBase();
-    (prismaMock.notificationRecipient.findMany as jest.Mock).mockResolvedValue([
+    mockChatPortalNotifications([
       {
-        id: 'n1',
+        id: 'chat:n1',
         title: 'Test',
         body: 'Hello',
         type: 'announcement',
-        data: null,
         isRead: false,
-        readAt: null,
-        createdAt: new Date(),
       },
     ]);
-    (prismaMock.notificationRecipient.count as jest.Mock).mockResolvedValue(1);
 
     const res = await request(app)
       .get('/teacher/notifications')
@@ -191,19 +188,21 @@ describe('Teacher portal — Phase E', () => {
 
   test('PATCH /teacher/notifications/:id/read marks notification', async () => {
     mockTeacherBase();
-    (prismaMock.notificationRecipient.findFirst as jest.Mock).mockResolvedValue({
+    (prismaMock.chatMessage.findUnique as jest.Mock).mockResolvedValue({
       id: 'n1',
+      roomId: 'room-1',
+    });
+    (prismaMock.chatRoomMember.findFirst as jest.Mock).mockResolvedValue({
+      roomId: 'room-1',
       userId: 'teacher-u1',
-      isRead: false,
+      leftAt: null,
+      canRead: true,
+      room: { isActive: true, academicYearId: TEST_AY_ID },
     });
-    (prismaMock.notificationRecipient.update as jest.Mock).mockResolvedValue({
-      id: 'n1',
-      isRead: true,
-      readAt: new Date(),
-    });
+    (prismaMock.chatMessageReadState.upsert as jest.Mock).mockResolvedValue({});
 
     const res = await request(app)
-      .patch('/teacher/notifications/n1/read')
+      .patch('/teacher/notifications/chat:n1/read')
       .set(teacherToken)
       .query(scopeQuery);
 
