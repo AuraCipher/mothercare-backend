@@ -115,6 +115,17 @@ export async function initChatSocket(server: HttpServer): Promise<Server | null>
 
         io?.to(`room:${payload.roomId}`).emit('chat:message:new', envelope);
 
+        const roomKind = message.room.kind;
+        const pushKinds = new Set([
+          'school_announcement',
+          'class_announcement',
+          'teacher_announcement',
+          'direct_message',
+        ]);
+        if (!pushKinds.has(roomKind)) {
+          return;
+        }
+
         const recipients = await listOfflineRecipientUserIds(payload.roomId, user.id);
         const keyRow = await prisma.userPushCryptoKey.findFirst({
           where: { userId: recipients[0] },

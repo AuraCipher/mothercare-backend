@@ -2,7 +2,14 @@ import crypto from 'crypto';
 import env from '../../../config/env';
 import { prisma } from '../../../lib/prisma';
 
-const MOBILE_PUSH_ROLES = new Set(['student', 'teacher', 'parent']);
+const MOBILE_PUSH_ROLES = new Set([
+  'student',
+  'teacher',
+  'parent',
+  'branch_admin',
+  'sub_admin',
+  'management',
+]);
 
 export type PushCryptoMaterial = {
   algorithm: 'AES-256-GCM';
