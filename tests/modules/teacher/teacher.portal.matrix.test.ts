@@ -12,6 +12,7 @@ import {
   mockActiveAcademicYear,
   scopeQuery,
 } from '../../helpers/integration';
+import { mockChatAnnouncementFeed } from '../../helpers/chat-announcements';
 
 const teacherToken = getAuthHeader(
   generateTestToken('teacher-u1', 'teacher', {
@@ -115,21 +116,15 @@ function mockTeacherBase(portalAccess: PortalAccess) {
     name: 'Class 5',
     section: 'A',
   });
-  (prismaMock.announcement.findMany as jest.Mock).mockResolvedValue([
+  mockChatAnnouncementFeed([
     {
       id: 'ann-1',
       title: 'Exam week',
       content: 'Mid-term begins Monday',
-      mediaUrl: null,
       isPinned: true,
       createdAt: new Date('2026-01-01'),
-      senderId: 'admin-1',
-      groupId: null,
-      group: null,
+      scope: 'school',
     },
-  ]);
-  (prismaMock.user.findMany as jest.Mock).mockResolvedValue([
-    { id: 'admin-1', name: 'Principal', role: 'management' },
   ]);
   (prismaMock.examClassSubject.findMany as jest.Mock).mockResolvedValue([]);
   (prismaMock.examClassSubject.findFirst as jest.Mock).mockResolvedValue(null);

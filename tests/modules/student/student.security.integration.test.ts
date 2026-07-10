@@ -12,6 +12,7 @@ import {
   mockStudentUser,
   studentToken,
 } from './student.helpers';
+import { mockChatAnnouncementFeed } from '../../helpers/chat-announcements';
 
 describe('Student portal — security', () => {
   beforeEach(() => jest.clearAllMocks());
@@ -75,20 +76,21 @@ describe('Student portal — security', () => {
   test('GET /student/announcements scopes to school-wide and student class only', async () => {
     mockStudentPortalReady();
     mockStudentReadRoutes();
-    (prismaMock.announcement.findMany as jest.Mock).mockResolvedValue([]);
+    mockChatAnnouncementFeed([]);
 
     await request(app)
       .get('/student/announcements')
       .set(studentToken)
       .query(scopeQuery);
 
-    expect(prismaMock.announcement.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          academicYearId: TEST_AY_ID,
-          OR: [{ groupId: null }, { groupId: STUDENT_GROUP_ID }],
-        },
-      }),
+    expect(prismaMock.chatRoom.findMany).toHaveBeenCalled();
+    const roomCall = (prismaMock.chatRoom.findMany as jest.Mock).mock.calls[0][0];
+    const singletonKeys = roomCall.where.OR.map((clause: { singletonKey?: string }) => clause.singletonKey);
+    expect(singletonKeys).toEqual(
+      expect.arrayContaining([
+        `ay:${TEST_AY_ID}:branch:${TEST_BRANCH_ID}:school_announcement`,
+        `ay:${TEST_AY_ID}:group:${STUDENT_GROUP_ID}:class_announcement`,
+      ]),
     );
   });
 

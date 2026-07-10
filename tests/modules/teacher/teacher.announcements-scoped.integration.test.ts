@@ -11,6 +11,7 @@ import {
   mockActiveAcademicYear,
   scopeQuery,
 } from '../../helpers/integration';
+import { mockChatAnnouncementFeed } from '../../helpers/chat-announcements';
 
 const teacherToken = getAuthHeader(
   generateTestToken('teacher-u1', 'teacher', {
@@ -66,34 +67,23 @@ function mockTeacherBase() {
 describe('Teacher portal — scoped announcements', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  test('GET /teacher/announcements queries school-wide and assigned groups only', async () => {
+  test('GET /teacher/announcements reads chat messages from announcement rooms', async () => {
     mockTeacherBase();
-    (prismaMock.announcement.findMany as jest.Mock).mockResolvedValue([
+    mockChatAnnouncementFeed([
       {
-        id: 'ann-school',
-        title: 'School holiday',
+        id: 'msg-school',
         content: 'Monday off',
-        mediaUrl: null,
-        isPinned: true,
         createdAt: new Date('2026-01-05'),
-        senderId: 'admin-1',
-        groupId: null,
-        group: null,
+        scope: 'school',
       },
       {
-        id: 'ann-class',
+        id: 'msg-class',
         title: 'Class 5 trip',
         content: 'Bring permission slip',
-        mediaUrl: null,
-        isPinned: false,
         createdAt: new Date('2026-01-06'),
-        senderId: 'admin-1',
-        groupId: 'g1',
+        scope: 'class',
         group: { id: 'g1', name: 'Class 5', section: 'A' },
       },
-    ]);
-    (prismaMock.user.findMany as jest.Mock).mockResolvedValue([
-      { id: 'admin-1', name: 'Principal', role: 'management' },
     ]);
 
     const res = await request(app)
@@ -102,18 +92,12 @@ describe('Teacher portal — scoped announcements', () => {
       .query(scopeQuery);
 
     expect(res.status).toBe(200);
-    expect(prismaMock.announcement.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          academicYearId: TEST_AY_ID,
-          OR: [{ groupId: null }, { groupId: { in: ['g1'] } }],
-        },
-      }),
-    );
+    expect(prismaMock.chatRoom.findMany).toHaveBeenCalled();
+    expect(prismaMock.chatMessage.findMany).toHaveBeenCalled();
     expect(res.body.data).toHaveLength(2);
-    expect(res.body.data[0].scope).toBe('school');
-    expect(res.body.data[1].scope).toBe('class');
-    expect(res.body.data[1].group.label).toBe('Class 5 — A');
+    expect(res.body.data[0].scope).toBe('class');
+    expect(res.body.data[1].scope).toBe('school');
+    expect(res.body.data[0].group.label).toBe('Class 5 — A');
   });
 
   test('GET /teacher/announcements has no write routes', async () => {

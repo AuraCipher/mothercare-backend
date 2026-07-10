@@ -4,6 +4,7 @@
 import { prismaMock } from '../../mocks/prisma';
 import { generateTestToken, getAuthHeader } from '../../helpers/auth';
 import { TEST_AY_ID, TEST_BRANCH_ID, mockActiveAcademicYear } from '../../helpers/integration';
+import { mockChatAnnouncementFeed } from '../../helpers/chat-announcements';
 
 export const STUDENT_USER_ID = 'student-u1';
 export const STUDENT_RECORD_ID = 'stu-1';
@@ -159,20 +160,14 @@ export function mockStudentReadRoutes() {
       teacher: { id: 'teacher-u1', name: 'Ms. Sarah' },
     },
   ]);
-  (prismaMock.announcement.findMany as jest.Mock).mockResolvedValue([
+  mockChatAnnouncementFeed([
     {
       id: 'ann-1',
       title: 'School holiday',
       content: 'Monday off',
-      mediaUrl: null,
       isPinned: true,
       createdAt: new Date('2026-01-05'),
-      senderId: 'admin-1',
-      groupId: null,
-      group: null,
+      scope: 'school',
     },
-  ]);
-  (prismaMock.user.findMany as jest.Mock).mockResolvedValue([
-    { id: 'admin-1', name: 'Principal', role: 'management' },
   ]);
 }
