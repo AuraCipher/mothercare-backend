@@ -1,5 +1,6 @@
 import { prisma } from '../../../lib/prisma';
 import type { ChatMemberAccess, ChatRoomKind } from '@prisma/client';
+import { resolveCanPost } from './chat-permissions.service';
 
 export async function assertRoomMember(roomId: string, userId: string) {
   const member = await prisma.chatRoomMember.findFirst({
@@ -17,16 +18,13 @@ export async function assertCanPost(roomId: string, userId: string) {
   if (member.isPostingRestricted || member.isMuted) {
     throw { status: 403, message: 'Posting is restricted in this room' };
   }
-  if (!member.canPost && member.access === 'observer') {
-    throw { status: 403, message: 'Read-only access in this room' };
-  }
   const room = await prisma.chatRoom.findUnique({ where: { id: roomId } });
-  if (room?.onlyStaffCanPost) {
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
-    const staffRoles = new Set(['teacher', 'management', 'branch_admin', 'sub_admin', 'super_admin', 'staff']);
-    if (!user || !staffRoles.has(user.role)) {
-      throw { status: 403, message: 'Only staff can post in this room' };
-    }
+  if (!room) {
+    throw { status: 404, message: 'Room not found' };
+  }
+  const allowed = await resolveCanPost(userId, room, member);
+  if (!allowed) {
+    throw { status: 403, message: 'Posting is not allowed in this room' };
   }
   return member;
 }
@@ -135,7 +133,7 @@ export async function listRoomsForUser(userId: string, academicYearId: string): 
       classGroupId: m.room.classGroupId,
       onlyStaffCanPost: m.room.onlyStaffCanPost,
       studentsCanPost: m.room.studentsCanPost,
-      canPost: m.canPost && !m.isMuted && !m.isPostingRestricted,
+      canPost: await resolveCanPost(userId, m.room, m),
       lastMessageAt: m.room.messages[0]?.createdAt?.toISOString() ?? null,
       unreadCount,
     });

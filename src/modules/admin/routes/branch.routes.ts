@@ -2,6 +2,10 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { branchService } from '../services/branch.service';
 import { prisma } from '../../../lib/prisma';
 import { requireScope } from '../utils/scope-context';
+import {
+  getBranchChatSettings,
+  updateBranchChatSettings,
+} from '../../chat/services/chat-branch-settings.service';
 
 const router = Router();
 
@@ -44,6 +48,48 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
 router.get('/', asyncHandler(async (req: Request, res: Response) => {
   const branches = await branchService.findAll();
   res.json({ success: true, data: branches });
+}));
+
+// GET /admin/branches/:id/chat-settings — Branch chat permission config
+router.get('/:id/chat-settings', asyncHandler(async (req: Request, res: Response) => {
+  const branch = await prisma.branch.findUnique({ where: { id: req.params.id }, select: { id: true } });
+  if (!branch) {
+    res.status(404).json({ success: false, message: 'Branch not found' });
+    return;
+  }
+  const data = await getBranchChatSettings(req.params.id);
+  res.json({ success: true, data });
+}));
+
+// PATCH /admin/branches/:id/chat-settings — Appoint school announcement posters
+router.patch('/:id/chat-settings', asyncHandler(async (req: Request, res: Response) => {
+  const branch = await prisma.branch.findUnique({ where: { id: req.params.id }, select: { id: true } });
+  if (!branch) {
+    res.status(404).json({ success: false, message: 'Branch not found' });
+    return;
+  }
+  req.query.branchId = req.params.id;
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+
+  const {
+    schoolAnnouncementPosterUserIds,
+    teacherAnnouncementPosterUserIds,
+    allowAllTeachersTeacherAnnouncement,
+  } = req.body;
+
+  const data = await updateBranchChatSettings(req.params.id, scope.academicYearId, {
+    ...(schoolAnnouncementPosterUserIds !== undefined
+      ? { schoolAnnouncementPosterUserIds }
+      : {}),
+    ...(teacherAnnouncementPosterUserIds !== undefined
+      ? { teacherAnnouncementPosterUserIds }
+      : {}),
+    ...(allowAllTeachersTeacherAnnouncement !== undefined
+      ? { allowAllTeachersTeacherAnnouncement }
+      : {}),
+  });
+  res.json({ success: true, data });
 }));
 
 // GET /admin/branches/:id — Get branch detail (BA-004)

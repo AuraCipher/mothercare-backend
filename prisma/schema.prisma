@@ -450,11 +450,27 @@ model Branch {
   payrollBulkRuns            PayrollBulkRun[]
   academicYearAuditLogs      AcademicYearAuditLog[]
   chatRooms                  ChatRoom[]                 @relation("ChatRoomBranch")
+  chatSettings               BranchChatSettings?
 
   createdById String?
   updatedById String?
 
   @@map("branches")
+}
+
+// Per-branch chat permission config (school / teachers announcement posters).
+model BranchChatSettings {
+  id                                  String   @id @default(uuid())
+  branchId                            String   @unique
+  schoolAnnouncementPosterUserIds     String[] @default([])
+  teacherAnnouncementPosterUserIds    String[] @default([])
+  allowAllTeachersTeacherAnnouncement Boolean  @default(false)
+  createdAt                           DateTime @default(now())
+  updatedAt                           DateTime @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@map("branch_chat_settings")
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗

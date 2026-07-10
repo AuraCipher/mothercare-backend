@@ -16,6 +16,9 @@
 
 import { PrismaClient, type AcademicYearStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { ensureSchoolAnnouncementRoom } from '../src/modules/chat/services/chat-community.bootstrap';
+import { syncSchoolAnnouncementMembers } from '../src/modules/chat/services/chat-branch-settings.service';
+import { getOrCreateBranchChatSettings } from '../src/modules/chat/services/chat-permissions.service';
 
 const prisma = new PrismaClient();
 
@@ -490,23 +493,23 @@ async function ensureBranchAdmin(branchId: string) {
 async function main() {
   console.log('\n🌱 MCS Demo School Seed (standalone)\n');
 
-  console.log('[1/7] Branch + calendar + academic year');
+  console.log('[1/8] Branch + calendar + academic year');
   const branch = await ensureBranch();
   const calendar = await ensureCalendar();
   const academicYear = await ensureAcademicYear(branch.id, calendar.id);
   console.log(`  ✓ Academic year ${academicYear.id} (ACTIVE)`);
 
-  console.log('\n[2/7] CEO + branch admin');
+  console.log('\n[2/8] CEO + branch admin');
   await ensureCeo(branch.id);
   await ensureBranchAdmin(branch.id);
   console.log('  ✓ demo_ceo / DemoCeo@123');
   console.log('  ✓ demo_admin / DemoAdmin@123 (Principal)');
 
-  console.log('\n[3/7] Subjects');
+  console.log('\n[3/8] Subjects');
   await ensureSubjects(academicYear.id);
   console.log(`  ✓ Subject catalog for demo AY`);
 
-  console.log('\n[4/7] Classes, students, teachers');
+  console.log('\n[4/8] Classes, students, teachers');
   const numbers = await nextStudentNumbers(
     DEMO_CLASSES.reduce((sum, c) => sum + c.students.length, 0),
   );
@@ -539,7 +542,7 @@ async function main() {
     );
   }
 
-  console.log('\n[5/7] Summary');
+  console.log('\n[5/8] Summary');
   const groupCount = await prisma.group.count({ where: { academicYearId: academicYear.id, isActive: true } });
   const studentCount = await prisma.student.count({ where: { academicYearId: academicYear.id } });
   const loginCount = await prisma.student.count({
@@ -551,13 +554,19 @@ async function main() {
   });
   console.log(`  Groups: ${groupCount} | Students: ${studentCount} | Portal students: ${loginCount} | Teachers: ${teacherCount.length}`);
 
-  console.log('\n[6/7] Portal credentials');
+  console.log('\n[6/8] Chat — school announcement room + admin memberships');
+  await getOrCreateBranchChatSettings(branch.id);
+  await ensureSchoolAnnouncementRoom(branch.id, academicYear.id);
+  await syncSchoolAnnouncementMembers(branch.id, academicYear.id);
+  console.log('  ✓ School announcement room ready (teachers read-only until appointed)');
+
+  console.log('\n[7/8] Portal credentials');
   console.log('  CEO:      demo_ceo / DemoCeo@123  (web only)');
   console.log('  Admin:    demo_admin / DemoAdmin@123');
   console.log('  Teachers: demo_teacher_* / DemoTeacher@123');
   console.log('  Students: demo_* / DemoStudent@123');
 
-  console.log('\n[7/7] Done — branch code MCS-DEMO\n');
+  console.log('\n[8/8] Done — branch code MCS-DEMO\n');
 }
 
 main()

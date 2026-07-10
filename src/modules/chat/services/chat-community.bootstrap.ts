@@ -1,6 +1,7 @@
 import { prisma } from '../../../lib/prisma';
 import type { ChatMessageType, ChatRoomKind, ChatRoomSource } from '@prisma/client';
 import { ensureRoomMembership } from './chat-access.service';
+import { syncSchoolAnnouncementMembers } from './chat-branch-settings.service';
 
 type EnsureRoomInput = {
   academicYearId: string;
@@ -47,6 +48,20 @@ async function ensureRoom(input: EnsureRoomInput) {
   });
 }
 
+/** Ensure the singleton school announcement room for a branch + academic year. */
+export async function ensureSchoolAnnouncementRoom(branchId: string, academicYearId: string) {
+  return ensureRoom({
+    academicYearId,
+    branchId,
+    kind: 'school_announcement',
+    name: 'School Announcement',
+    singletonKey: `ay:${academicYearId}:branch:${branchId}:school_announcement`,
+    onlyStaffCanPost: true,
+    studentsCanPost: false,
+    description: 'School-wide announcements',
+  });
+}
+
 export type StudentChatBootstrapInput = {
   userId: string;
   studentId: string;
@@ -75,16 +90,7 @@ export async function ensureStudentChatBootstrap(input: StudentChatBootstrapInpu
     });
   }
 
-  const schoolRoom = await ensureRoom({
-    academicYearId: input.academicYearId,
-    branchId: input.branchId,
-    kind: 'school_announcement',
-    name: 'School Announcement',
-    singletonKey: `ay:${input.academicYearId}:branch:${input.branchId}:school_announcement`,
-    onlyStaffCanPost: true,
-    studentsCanPost: false,
-    description: 'School-wide announcements',
-  });
+  const schoolRoom = await ensureSchoolAnnouncementRoom(input.branchId, input.academicYearId);
 
   const classRoom = await ensureRoom({
     academicYearId: input.academicYearId,
@@ -179,6 +185,8 @@ export async function ensureStudentChatBootstrap(input: StudentChatBootstrapInpu
     await ensureRoomMembership(schoolRoom.id, parentUserId, { access: 'observer', canPost: false });
     await ensureRoomMembership(classRoom.id, parentUserId, { access: 'observer', canPost: false });
   }
+
+  await syncSchoolAnnouncementMembers(input.branchId, input.academicYearId);
 
   return { communityId: community.id };
 }
