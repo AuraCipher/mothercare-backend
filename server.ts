@@ -23,14 +23,27 @@ async function main() {
 
     await initChatSocket(server);
 
-    server.listen(PORT, HOST, () => {
-      logger.info(`🚀 Server running on http://${HOST}:${PORT}`);
-      logger.info(`📍 Environment: ${env.NODE_ENV}`);
-      logger.info(`🔧 App Mode: ${env.APP_MODE}`);
-      logger.info(`📅 Started at: ${new Date().toISOString()}`);
-      logger.info(`➡️  Health check:  http://${HOST}:${PORT}/health`);
-      logger.info(`➡️  Key Manager:   http://${HOST}:${PORT}/key-manager`);
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          reject(
+            new Error(
+              `Port ${PORT} is already in use. Stop the other process (e.g. kill $(lsof -t -i:${PORT})) or change PORT in .env`,
+            ),
+          );
+          return;
+        }
+        reject(err);
+      });
+      server.listen(PORT, HOST, () => resolve());
     });
+
+    logger.info(`🚀 Server running on http://${HOST}:${PORT}`);
+    logger.info(`📍 Environment: ${env.NODE_ENV}`);
+    logger.info(`🔧 App Mode: ${env.APP_MODE}`);
+    logger.info(`📅 Started at: ${new Date().toISOString()}`);
+    logger.info(`➡️  Health check:  http://${HOST}:${PORT}/health`);
+    logger.info(`➡️  Key Manager:   http://${HOST}:${PORT}/key-manager`);
 
     // ─── 3. Setup graceful shutdown ────────────────────────
     setupGracefulShutdown(prisma, server);
@@ -42,7 +55,6 @@ async function main() {
     if (env.APP_MODE === 'development') {
       logger.info('File watching enabled (ts-node-dev --respawn)');
     }
-
   } catch (err: any) {
     logger.error('Failed to start server:', err.message || err);
     process.exit(1);

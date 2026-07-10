@@ -153,7 +153,7 @@ export function setupGracefulShutdown(prisma: { $disconnect: () => Promise<void>
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('uncaughtException', (err) => {
     logger.error('Uncaught Exception', err);
-    throw err;
+    process.exit(1);
   });
   process.on('unhandledRejection', (reason) => {
     logger.error('Unhandled Rejection', reason as any);

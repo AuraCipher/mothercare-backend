@@ -15,7 +15,8 @@
     "test:e2e": "jest --testPathPatterns=e2e-flow\\.integration\\.test",
     "test:all": "bash scripts/test-all.sh",
     "backup:postgres": "npx ts-node scripts/backup-postgres-r2.ts",
-    "seed:demo": "npx ts-node prisma/seed-demo-school.ts"
+    "seed:demo": "npx ts-node prisma/seed-demo-school.ts",
+    "db:reset:demo": "prisma migrate reset --force --skip-seed && npm run seed:demo"
   },
   "prisma": {
     "seed": "npx ts-node prisma/seed.ts"
