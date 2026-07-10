@@ -16,7 +16,7 @@ import { getStudentCanteen } from '../services/student-canteen.service';
 import { getStudentTimetable } from '../services/student-timetable.service';
 import { listStudentDatesheets } from '../services/student-datesheets.service';
 import { listStudentAnnouncements } from '../services/student-announcements.service';
-import { getStudentChatLanding } from '../services/student-chat.service';
+import { getStudentChatLanding, openStudentDirectMessage } from '../services/student-chat.service';
 
 const router = Router();
 
@@ -137,6 +137,19 @@ router.get(
   asyncHandler(async (req, res) => {
     const data = await getStudentChatLanding(getStudentContext(req));
     res.json({ success: true, data });
+  }),
+);
+
+router.post(
+  '/chat/dm',
+  asyncHandler(async (req, res) => {
+    const { participantUserId } = req.body ?? {};
+    if (!participantUserId) {
+      res.status(400).json({ success: false, message: 'participantUserId is required' });
+      return;
+    }
+    const data = await openStudentDirectMessage(getStudentContext(req), participantUserId);
+    res.status(201).json({ success: true, data });
   }),
 );
 

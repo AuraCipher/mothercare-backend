@@ -1,8 +1,42 @@
 import { prisma } from '../../../lib/prisma';
 import { ensureRoomMembership } from './chat-access.service';
+import {
+  assertCanCreateDirectMessage,
+  canUserSendInDirectMessage,
+} from './chat-dm-policy.service';
 
 function orderedParticipants(userA: string, userB: string): [string, string] {
   return userA < userB ? [userA, userB] : [userB, userA];
+}
+
+async function syncDmMembershipCanPost(
+  roomId: string,
+  input: {
+    userId: string;
+    participantUserId: string;
+    branchId: string;
+    academicYearId: string;
+  },
+) {
+  const [initiatorCanPost, participantCanPost] = await Promise.all([
+    canUserSendInDirectMessage(input.userId, input.branchId, input.academicYearId),
+    canUserSendInDirectMessage(
+      input.participantUserId,
+      input.branchId,
+      input.academicYearId,
+    ),
+  ]);
+
+  await ensureRoomMembership(roomId, input.userId, {
+    access: 'member',
+    canPost: initiatorCanPost,
+    isPostingRestricted: !initiatorCanPost,
+  });
+  await ensureRoomMembership(roomId, input.participantUserId, {
+    access: 'member',
+    canPost: participantCanPost,
+    isPostingRestricted: !participantCanPost,
+  });
 }
 
 export async function ensureDirectMessageRoom(input: {
@@ -15,7 +49,10 @@ export async function ensureDirectMessageRoom(input: {
     throw { status: 400, message: 'Cannot message yourself' };
   }
 
-  const [participantAId, participantBId] = orderedParticipants(input.userId, input.participantUserId);
+  const [participantAId, participantBId] = orderedParticipants(
+    input.userId,
+    input.participantUserId,
+  );
 
   const existing = await prisma.chatDmThread.findUnique({
     where: {
@@ -27,7 +64,13 @@ export async function ensureDirectMessageRoom(input: {
     },
     include: { room: true },
   });
-  if (existing?.room) return existing.room;
+
+  if (existing?.room) {
+    await syncDmMembershipCanPost(existing.room.id, input);
+    return existing.room;
+  }
+
+  await assertCanCreateDirectMessage(input);
 
   const participant = await prisma.user.findUnique({
     where: { id: input.participantUserId },
@@ -58,8 +101,7 @@ export async function ensureDirectMessageRoom(input: {
     },
   });
 
-  await ensureRoomMembership(room.id, input.userId, { access: 'member', canPost: true });
-  await ensureRoomMembership(room.id, input.participantUserId, { access: 'member', canPost: true });
+  await syncDmMembershipCanPost(room.id, input);
 
   return room;
 }

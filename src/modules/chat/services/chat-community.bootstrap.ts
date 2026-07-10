@@ -212,6 +212,13 @@ export type ChatLandingSection = {
     lastMessageAt: string | null;
     canPost: boolean;
   }>;
+  contacts?: Array<{
+    userId: string;
+    name: string;
+    role: string;
+    roleLabel?: string;
+    dmRoomId: string | null;
+  }>;
 };
 
 export function groupRoomsForStudentLanding(

@@ -1,6 +1,7 @@
 import { prisma } from '../../../lib/prisma';
 import type { ChatRoom, ChatRoomMember, ChatRoomKind } from '@prisma/client';
 import { teacherAppChatAllowsPost } from './teacher-app-chat-permissions.service';
+import { canUserSendInDirectMessage } from './chat-dm-policy.service';
 
 const BRANCH_CHAT_ADMIN_ROLES = new Set(['branch_admin', 'sub_admin']);
 const STAFF_ROLES = new Set(['teacher', 'management', 'branch_admin', 'sub_admin', 'super_admin', 'staff']);
@@ -156,8 +157,13 @@ export async function resolveCanPost(
   }
 
   if (room.kind === 'direct_message') {
-    const roomAllowed = member.canPost;
-    return applyTeacherAppPostGate(userId, room.branchId, room.kind, roomAllowed);
+    const roomAllowed = await canUserSendInDirectMessage(
+      userId,
+      room.branchId,
+      room.academicYearId,
+    );
+    if (!roomAllowed) return false;
+    return applyTeacherAppPostGate(userId, room.branchId, room.kind, true);
   }
 
   if (!member.canPost && member.access === 'observer') return false;
