@@ -9,6 +9,8 @@ import { normalizePurpose, processUploadBuffer } from './media.pipeline';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const MAX_VOICE_SIZE = 5 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 1024 * 1024 * 1024; // 1GB — duration capped at 2 min instead of file size
+const MAX_VIDEO_DURATION_SECONDS = 120;
 
 export interface UploadFileOptions {
   uploadedById?: string;
@@ -17,6 +19,7 @@ export interface UploadFileOptions {
   entityId?: string;
   roomId?: string;
   academicYearId?: string;
+  durationSeconds?: number;
   metadata?: Record<string, unknown>;
 }
 
@@ -27,7 +30,22 @@ export class UploadService {
     options: UploadFileOptions = {},
   ) {
     const requestedPurpose = options.purpose || 'document';
-    const maxBytes = requestedPurpose === 'voice_note' ? MAX_VOICE_SIZE : MAX_FILE_SIZE;
+    const isVideo = requestedPurpose === 'video';
+    const maxBytes = requestedPurpose === 'voice_note'
+      ? MAX_VOICE_SIZE
+      : isVideo
+        ? MAX_VIDEO_BYTES
+        : MAX_FILE_SIZE;
+
+    if (isVideo) {
+      const duration = options.durationSeconds;
+      if (duration == null || Number.isNaN(duration) || duration <= 0) {
+        throw { status: 400, message: 'Video duration is required' };
+      }
+      if (duration > MAX_VIDEO_DURATION_SECONDS) {
+        throw { status: 400, message: 'Videos must be 2 minutes or shorter' };
+      }
+    }
 
     const processed = await processUploadBuffer({
       buffer,
@@ -66,6 +84,7 @@ export class UploadService {
           ...(options.metadata || {}),
           ...(options.roomId ? { roomId: options.roomId } : {}),
           ...(options.academicYearId ? { academicYearId: options.academicYearId } : {}),
+          ...(options.durationSeconds != null ? { durationSeconds: options.durationSeconds } : {}),
         },
         publicUrl: undefined,
       },

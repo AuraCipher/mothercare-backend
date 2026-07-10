@@ -13,6 +13,8 @@ const schoolRoom = {
   id: 'room-school',
   kind: 'school_announcement' as const,
   branchId: TEST_BRANCH,
+  academicYearId: 'ay-demo',
+  classGroupId: null,
   onlyStaffCanPost: true,
 };
 
@@ -130,6 +132,125 @@ describe('chat permissions — school announcement', () => {
       canRead: true,
     });
 
+    expect(allowed).toBe(false);
+  });
+});
+
+const classRoom = {
+  id: 'room-class',
+  kind: 'class_announcement' as const,
+  branchId: TEST_BRANCH,
+  academicYearId: 'ay-demo',
+  classGroupId: 'group-1',
+  onlyStaffCanPost: true,
+};
+
+const groupRoom = {
+  id: 'room-group',
+  kind: 'group_chat' as const,
+  branchId: TEST_BRANCH,
+  academicYearId: 'ay-demo',
+  classGroupId: 'group-1',
+  onlyStaffCanPost: false,
+};
+
+const activeMember = {
+  canPost: true,
+  access: 'moderator' as const,
+  isMuted: false,
+  isPostingRestricted: false,
+  canRead: true,
+};
+
+describe('chat permissions — class announcement', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('class teacher can post in class announcement', async () => {
+    (prismaMock.teacherAssignment.findFirst as jest.Mock).mockResolvedValue({ id: 'asgn-1' });
+
+    const allowed = await resolveCanPost(TEACHER_USER, classRoom, activeMember);
+    expect(allowed).toBe(true);
+  });
+
+  test('subject-only teacher cannot post in class announcement', async () => {
+    (prismaMock.teacherAssignment.findFirst as jest.Mock).mockResolvedValue(null);
+
+    const allowed = await resolveCanPost(TEACHER_USER, classRoom, activeMember);
+    expect(allowed).toBe(false);
+  });
+
+  test('branch admin can post in class announcement', async () => {
+    (prismaMock.user.findUnique as jest.Mock).mockResolvedValue({
+      id: ADMIN_USER,
+      role: 'management',
+      status: 'active',
+    });
+    (prismaMock.branchMember.findUnique as jest.Mock).mockResolvedValue({
+      role: 'branch_admin',
+      isActive: true,
+    });
+
+    const allowed = await resolveCanPost(ADMIN_USER, classRoom, activeMember);
+    expect(allowed).toBe(true);
+  });
+});
+
+describe('chat permissions — subject group', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (prismaMock.user.findUnique as jest.Mock).mockResolvedValue({
+      id: TEACHER_USER,
+      role: 'teacher',
+      status: 'active',
+    });
+    (prismaMock.branchMember.findUnique as jest.Mock).mockResolvedValue({
+      role: 'teacher',
+      isActive: true,
+    });
+  });
+
+  test('assigned subject teacher can post in group chat', async () => {
+    (prismaMock.chatRoom.findUnique as jest.Mock).mockResolvedValue({
+      teacherAssignmentId: 'asgn-math',
+      communityId: 'comm-1',
+    });
+    (prismaMock.teacherAssignment.findUnique as jest.Mock).mockResolvedValue({
+      teacherId: TEACHER_USER,
+    });
+
+    const allowed = await resolveCanPost(TEACHER_USER, groupRoom, activeMember);
+    expect(allowed).toBe(true);
+  });
+
+  test('student with class role can post when canPostInGroups is enabled', async () => {
+    (prismaMock.chatRoom.findUnique as jest.Mock).mockResolvedValue({
+      teacherAssignmentId: 'asgn-math',
+      communityId: 'comm-1',
+    });
+    (prismaMock.teacherAssignment.findUnique as jest.Mock).mockResolvedValue({
+      teacherId: 'other-teacher',
+    });
+    (prismaMock.classRoleAssignment.findFirst as jest.Mock).mockResolvedValue({ id: 'role-1' });
+
+    const allowed = await resolveCanPost(STUDENT_USER, groupRoom, {
+      ...activeMember,
+      canPost: false,
+      access: 'member',
+    });
+    expect(allowed).toBe(true);
+  });
+
+  test('unassigned teacher cannot post in group chat', async () => {
+    (prismaMock.chatRoom.findUnique as jest.Mock).mockResolvedValue({
+      teacherAssignmentId: 'asgn-math',
+      communityId: 'comm-1',
+    });
+    (prismaMock.teacherAssignment.findUnique as jest.Mock).mockResolvedValue({
+      teacherId: 'other-teacher',
+    });
+    (prismaMock.classRoleAssignment.findFirst as jest.Mock).mockResolvedValue(null);
+
+    const allowed = await resolveCanPost(TEACHER_USER, groupRoom, activeMember);
     expect(allowed).toBe(false);
   });
 });

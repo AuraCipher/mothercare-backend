@@ -62,10 +62,60 @@ async function canPostTeacherAnnouncement(
   return settings.teacherAnnouncementPosterUserIds.includes(userId);
 }
 
-/** Central posting decision — school + teacher announcement; other kinds use member flags. */
+async function canPostClassAnnouncement(
+  userId: string,
+  room: Pick<ChatRoom, 'id' | 'branchId' | 'classGroupId' | 'academicYearId'>,
+): Promise<boolean> {
+  if (room.branchId && (await isBranchChatAdmin(userId, room.branchId))) return true;
+  if (!room.classGroupId) return false;
+  const classTeacher = await prisma.teacherAssignment.findFirst({
+    where: {
+      groupId: room.classGroupId,
+      academicYearId: room.academicYearId,
+      teacherId: userId,
+      isClassTeacher: true,
+    },
+    select: { id: true },
+  });
+  return !!classTeacher;
+}
+
+async function canPostGroupChat(
+  userId: string,
+  room: Pick<ChatRoom, 'id' | 'branchId' | 'academicYearId'>,
+): Promise<boolean> {
+  if (room.branchId && (await isBranchChatAdmin(userId, room.branchId))) return true;
+  const full = await prisma.chatRoom.findUnique({
+    where: { id: room.id },
+    select: { teacherAssignmentId: true, communityId: true },
+  });
+  if (full?.teacherAssignmentId) {
+    const assignment = await prisma.teacherAssignment.findUnique({
+      where: { id: full.teacherAssignmentId },
+      select: { teacherId: true },
+    });
+    if (assignment?.teacherId === userId) return true;
+  }
+  if (full?.communityId) {
+    const rolePost = await prisma.classRoleAssignment.findFirst({
+      where: {
+        communityId: full.communityId,
+        removedAt: null,
+        isMessagingRestricted: false,
+        userId,
+        roleDefinition: { isActive: true, canPostInGroups: true },
+      },
+      select: { id: true },
+    });
+    if (rolePost) return true;
+  }
+  return false;
+}
+
+/** Central posting decision per room kind. */
 export async function resolveCanPost(
   userId: string,
-  room: Pick<ChatRoom, 'id' | 'kind' | 'branchId' | 'onlyStaffCanPost'>,
+  room: Pick<ChatRoom, 'id' | 'kind' | 'branchId' | 'classGroupId' | 'academicYearId' | 'onlyStaffCanPost'>,
   member: Pick<ChatRoomMember, 'canPost' | 'access' | 'isMuted' | 'isPostingRestricted' | 'canRead'>,
 ): Promise<boolean> {
   if (!member.canRead || member.isMuted || member.isPostingRestricted) return false;
@@ -80,6 +130,18 @@ export async function resolveCanPost(
     if (!room.branchId) return false;
     const settings = await getOrCreateBranchChatSettings(room.branchId);
     return canPostTeacherAnnouncement(userId, room.branchId, settings);
+  }
+
+  if (room.kind === 'class_announcement') {
+    return canPostClassAnnouncement(userId, room);
+  }
+
+  if (room.kind === 'group_chat') {
+    return canPostGroupChat(userId, room);
+  }
+
+  if (room.kind === 'direct_message') {
+    return member.canPost;
   }
 
   if (!member.canPost && member.access === 'observer') return false;

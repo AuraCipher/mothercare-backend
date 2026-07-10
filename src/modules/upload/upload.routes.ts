@@ -12,7 +12,7 @@ router.use(authMiddleware, uploadDocumentPermissionMiddleware);
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: 1024 * 1024 * 1024 },
 });
 
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
@@ -40,6 +40,11 @@ router.post('/upload', uploadLimiter, upload.single('file'), asyncHandler(async 
   const entityId = req.body?.entityId || undefined;
   const roomId = req.body?.roomId || undefined;
   const academicYearId = req.body?.academicYearId || undefined;
+  const durationSecondsRaw = req.body?.durationSeconds;
+  const durationSeconds =
+    durationSecondsRaw != null && durationSecondsRaw !== ''
+      ? parseFloat(String(durationSecondsRaw))
+      : undefined;
 
   const result = await uploadService.uploadFile(req.file.buffer, req.file.originalname, {
     uploadedById: userId,
@@ -48,6 +53,7 @@ router.post('/upload', uploadLimiter, upload.single('file'), asyncHandler(async 
     entityId,
     roomId,
     academicYearId,
+    durationSeconds,
   });
 
   res.status(201).json({ success: true, data: result });

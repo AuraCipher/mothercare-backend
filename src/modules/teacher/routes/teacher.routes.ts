@@ -31,6 +31,7 @@ import {
 import { getTeacherContext, TeacherAccessError } from '../utils/teacher-assignment.guard';
 import { assertFeatureAllowed } from '../permissions/teacher-feature.guard';
 import type { TeacherContext } from '../services/teacher-context.service';
+import { getTeacherChatLanding, openTeacherDirectMessage } from '../services/teacher-chat.service';
 import { prisma } from '../../../lib/prisma';
 
 const router = Router();
@@ -287,6 +288,40 @@ router.post(
       user.id,
     );
     res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/chat/landing',
+  teacherScopeMiddleware,
+  asyncHandler(async (req, res) => {
+    const ctx = (req as any).teacherContext as TeacherContext;
+    const data = await getTeacherChatLanding({
+      userId: ctx.userId,
+      branchId: ctx.branchId,
+      academicYearId: ctx.academicYearId,
+    });
+    res.json({ success: true, data });
+  }),
+);
+
+router.post(
+  '/chat/dm',
+  teacherScopeMiddleware,
+  asyncHandler(async (req, res) => {
+    const ctx = (req as any).teacherContext as TeacherContext;
+    const { participantUserId } = req.body;
+    if (!participantUserId) {
+      res.status(400).json({ success: false, message: 'participantUserId is required' });
+      return;
+    }
+    const data = await openTeacherDirectMessage({
+      userId: ctx.userId,
+      branchId: ctx.branchId,
+      academicYearId: ctx.academicYearId,
+      participantUserId,
+    });
+    res.status(201).json({ success: true, data });
   }),
 );
 

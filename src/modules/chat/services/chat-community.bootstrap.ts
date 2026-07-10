@@ -134,13 +134,23 @@ export async function ensureStudentChatBootstrap(input: StudentChatBootstrapInpu
   await ensureRoomMembership(attendanceRoom.id, input.userId, { access: 'observer', canPost: false });
   await ensureRoomMembership(paymentRoom.id, input.userId, { access: 'observer', canPost: false });
 
-  // Class teachers → moderators on class announcement
+  // Class teachers → class announcement post only if isClassTeacher
   const classTeachers = await prisma.teacherAssignment.findMany({
+    where: { groupId: input.groupId, academicYearId: input.academicYearId, isClassTeacher: true },
+    select: { teacherId: true },
+  });
+  const classTeacherIds = new Set(classTeachers.map((ta) => ta.teacherId));
+
+  const allTeachersInGroup = await prisma.teacherAssignment.findMany({
     where: { groupId: input.groupId, academicYearId: input.academicYearId },
     select: { teacherId: true },
   });
-  for (const ta of classTeachers) {
-    await ensureRoomMembership(classRoom.id, ta.teacherId, { access: 'moderator', canPost: true });
+  for (const ta of allTeachersInGroup) {
+    const isCt = classTeacherIds.has(ta.teacherId);
+    await ensureRoomMembership(classRoom.id, ta.teacherId, {
+      access: isCt ? 'moderator' : 'observer',
+      canPost: isCt,
+    });
     await ensureRoomMembership(schoolRoom.id, ta.teacherId, { access: 'observer', canPost: false });
   }
 
@@ -160,14 +170,14 @@ export async function ensureStudentChatBootstrap(input: StudentChatBootstrapInpu
       source: 'subject_assignment',
       communityId: community.id,
       classGroupId: input.groupId,
-      studentsCanPost: true,
+      studentsCanPost: false,
       description: `Subject group — ${assignment.subject.name}`,
     });
     await prisma.chatRoom.update({
       where: { id: subjectRoom.id },
       data: { teacherAssignmentId: assignment.id, subjectId: assignment.subject.id },
     });
-    await ensureRoomMembership(subjectRoom.id, input.userId, { access: 'member', canPost: true });
+    await ensureRoomMembership(subjectRoom.id, input.userId, { access: 'member', canPost: false });
     await ensureRoomMembership(subjectRoom.id, assignment.teacherId, {
       access: 'moderator',
       canPost: true,
