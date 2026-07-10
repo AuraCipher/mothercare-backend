@@ -16,7 +16,8 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
 router.get('/academic-year', asyncHandler(async (req: Request, res: Response) => {
   // req.user is set by auth middleware
   const userId = (req as any).user.id;
-  const activeAy = await academicYearService.findCurrentAcademicYear(userId);
+  const branchId = (req.query.branchId as string) || undefined;
+  const activeAy = await academicYearService.findCurrentAcademicYear(userId, branchId);
   res.json({ success: true, data: activeAy });
 }));
 

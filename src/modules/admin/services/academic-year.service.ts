@@ -527,21 +527,25 @@ class AcademicYearService {
 
   // ─── Current User's Academic Year ────────────────────────────
 
-  async findCurrentAcademicYear(userId: string) {
-    // Get the user's branch memberships
-    const branchMemberships = await prisma.branchMember.findMany({
-      where: { userId },
-      include: {
-        branch: { select: { id: true, name: true, code: true } },
-      },
-    });
+  async findCurrentAcademicYear(userId: string, preferredBranchId?: string) {
+    let branchId = preferredBranchId?.trim() || undefined;
 
-    if (branchMemberships.length === 0) {
-      throw { status: 404, message: 'User is not a member of any branch' };
+    if (!branchId) {
+      // Get the user's branch memberships
+      const branchMemberships = await prisma.branchMember.findMany({
+        where: { userId },
+        include: {
+          branch: { select: { id: true, name: true, code: true } },
+        },
+      });
+
+      if (branchMemberships.length === 0) {
+        throw { status: 404, message: 'User is not a member of any branch' };
+      }
+
+      branchId = branchMemberships[0].branch.id;
     }
 
-    // Find ACTIVE academic year for the first branch
-    const branchId = branchMemberships[0].branch.id;
     const activeAy = await prisma.academicYear.findFirst({
       where: { branchId, status: 'ACTIVE' },
       include: {
