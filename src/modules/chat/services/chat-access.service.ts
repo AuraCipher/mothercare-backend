@@ -35,9 +35,25 @@ export async function ensureRoomMembership(
   opts: {
     access?: ChatMemberAccess;
     canPost?: boolean;
-    displayTitle?: string;
+    displayTitle?: string | null;
+    classRoleAssignmentId?: string | null;
+    isPostingRestricted?: boolean;
   } = {},
 ) {
+  const update: Record<string, unknown> = {
+    leftAt: null,
+    canRead: true,
+  };
+  if (opts.access) update.access = opts.access;
+  if (opts.canPost !== undefined) update.canPost = opts.canPost;
+  if (opts.displayTitle !== undefined) update.displayTitle = opts.displayTitle;
+  if (opts.classRoleAssignmentId !== undefined) {
+    update.classRoleAssignmentId = opts.classRoleAssignmentId;
+  }
+  if (opts.isPostingRestricted !== undefined) {
+    update.isPostingRestricted = opts.isPostingRestricted;
+  }
+
   await prisma.chatRoomMember.upsert({
     where: { roomId_userId: { roomId, userId } },
     create: {
@@ -46,15 +62,11 @@ export async function ensureRoomMembership(
       access: opts.access ?? 'member',
       canPost: opts.canPost ?? false,
       canRead: true,
-      displayTitle: opts.displayTitle,
+      displayTitle: opts.displayTitle ?? undefined,
+      classRoleAssignmentId: opts.classRoleAssignmentId ?? undefined,
+      isPostingRestricted: opts.isPostingRestricted ?? false,
     },
-    update: {
-      leftAt: null,
-      canRead: true,
-      ...(opts.access ? { access: opts.access } : {}),
-      ...(opts.canPost !== undefined ? { canPost: opts.canPost } : {}),
-      ...(opts.displayTitle ? { displayTitle: opts.displayTitle } : {}),
-    },
+    update,
   });
 }
 

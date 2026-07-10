@@ -32,6 +32,17 @@ import { getTeacherContext, TeacherAccessError } from '../utils/teacher-assignme
 import { assertFeatureAllowed } from '../permissions/teacher-feature.guard';
 import type { TeacherContext } from '../services/teacher-context.service';
 import { getTeacherChatLanding, openTeacherDirectMessage } from '../services/teacher-chat.service';
+import {
+  assignClassRole,
+  createClassRoleDefinition,
+  deleteClassRoleDefinition,
+  getActiveCommunityOrThrow,
+  listClassRoleDefinitions,
+  removeClassRoleAssignment,
+  resolveCommunityByGroupId,
+  updateClassRoleDefinition,
+} from '../../chat/services/class-role.service';
+import { assertClassTeacher } from '../utils/teacher-assignment.guard';
 import { prisma } from '../../../lib/prisma';
 
 const router = Router();
@@ -144,6 +155,16 @@ router.get(
     assertFeatureAllowed(ctx.permissions, 'classes');
     assertFeatureAllowed(ctx.permissions, 'roster');
     const data = await getClassStudents(ctx, req.params.groupId);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/classes/:groupId/community',
+  asyncHandler(async (req, res) => {
+    const ctx = getTeacherContext(req);
+    assertClassTeacher(ctx, req.params.groupId);
+    const data = await resolveCommunityByGroupId(req.params.groupId, ctx.academicYearId);
     res.json({ success: true, data });
   }),
 );
@@ -322,6 +343,123 @@ router.post(
       participantUserId,
     });
     res.status(201).json({ success: true, data });
+  }),
+);
+
+async function assertTeacherCommunityAccess(
+  req: Request,
+  res: Response,
+  communityId: string,
+): Promise<boolean> {
+  const ctx = getTeacherContext(req);
+  const community = await getActiveCommunityOrThrow(communityId);
+  if (community.academicYearId !== ctx.academicYearId) {
+    res.status(400).json({
+      success: false,
+      message: 'Community does not belong to the selected academic year',
+    });
+    return false;
+  }
+  assertClassTeacher(ctx, community.groupId);
+  return true;
+}
+
+router.get(
+  '/communities/:communityId/roles',
+  asyncHandler(async (req, res) => {
+    if (!(await assertTeacherCommunityAccess(req, res, req.params.communityId))) return;
+    const data = await listClassRoleDefinitions(req.params.communityId);
+    res.json({ success: true, data });
+  }),
+);
+
+router.post(
+  '/communities/:communityId/roles',
+  teacherReadOnlyGuard,
+  asyncHandler(async (req, res) => {
+    if (!(await assertTeacherCommunityAccess(req, res, req.params.communityId))) return;
+    const user = (req as any).teacherUser;
+    const { name, description, canPostInGroups, canReceiveDms, canInitiateDms } = req.body ?? {};
+    const data = await createClassRoleDefinition({
+      communityId: req.params.communityId,
+      name,
+      description,
+      canPostInGroups,
+      canReceiveDms,
+      canInitiateDms,
+      createdById: user.id,
+    });
+    res.status(201).json({ success: true, data });
+  }),
+);
+
+router.patch(
+  '/communities/:communityId/roles/:roleId',
+  teacherReadOnlyGuard,
+  asyncHandler(async (req, res) => {
+    if (!(await assertTeacherCommunityAccess(req, res, req.params.communityId))) return;
+    const { name, description, canPostInGroups, canReceiveDms, canInitiateDms } = req.body ?? {};
+    const data = await updateClassRoleDefinition({
+      communityId: req.params.communityId,
+      roleDefinitionId: req.params.roleId,
+      name,
+      description,
+      canPostInGroups,
+      canReceiveDms,
+      canInitiateDms,
+    });
+    res.json({ success: true, data });
+  }),
+);
+
+router.delete(
+  '/communities/:communityId/roles/:roleId',
+  teacherReadOnlyGuard,
+  asyncHandler(async (req, res) => {
+    if (!(await assertTeacherCommunityAccess(req, res, req.params.communityId))) return;
+    await deleteClassRoleDefinition({
+      communityId: req.params.communityId,
+      roleDefinitionId: req.params.roleId,
+    });
+    res.json({ success: true, message: 'Role deleted' });
+  }),
+);
+
+router.post(
+  '/communities/:communityId/roles/:roleId/assign',
+  teacherReadOnlyGuard,
+  asyncHandler(async (req, res) => {
+    if (!(await assertTeacherCommunityAccess(req, res, req.params.communityId))) return;
+    const user = (req as any).teacherUser;
+    const { studentId, publicDisplayName, isMessagingRestricted } = req.body ?? {};
+    if (!studentId) {
+      res.status(400).json({ success: false, message: 'studentId is required' });
+      return;
+    }
+    const data = await assignClassRole({
+      communityId: req.params.communityId,
+      roleDefinitionId: req.params.roleId,
+      studentId,
+      publicDisplayName,
+      isMessagingRestricted,
+      assignedById: user.id,
+    });
+    res.status(201).json({ success: true, data });
+  }),
+);
+
+router.delete(
+  '/communities/:communityId/assignments/:assignmentId',
+  teacherReadOnlyGuard,
+  asyncHandler(async (req, res) => {
+    if (!(await assertTeacherCommunityAccess(req, res, req.params.communityId))) return;
+    const user = (req as any).teacherUser;
+    await removeClassRoleAssignment({
+      communityId: req.params.communityId,
+      assignmentId: req.params.assignmentId,
+      removedById: user.id,
+    });
+    res.json({ success: true, message: 'Assignment removed' });
   }),
 );
 

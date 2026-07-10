@@ -20,6 +20,7 @@ import staffRoutes from './staff.routes';
 import tenureRoutes from './tenure.routes';
 import stationaryRoutes from './stationary.routes';
 import expensesRoutes from './expenses.routes';
+import communityClassRoleRoutes from './community-class-role.routes';
 import { requireScope } from '../utils/scope-context';
 import { staffPermissionMiddleware } from '../../../middleware/auth/staff-permission.middleware';
 
@@ -62,6 +63,7 @@ router.use('/staff', staffRoutes); // Staff RBAC — create staff + module permi
 router.use(tenureRoutes); // Tenure history — join/leave/rejoin, class movements
 router.use(stationaryRoutes); // Stationary module (products, inventory, suppliers, sales records)
 router.use(expensesRoutes); // Branch outgoing payments (payroll, utilities, others)
+router.use('/communities', communityClassRoleRoutes); // Class chat role CRUD (Phase 4)
 
 // ═══════════════════════════════════════════════════════════════════
 // USERS (Create, Read, Delete)
