@@ -70,7 +70,12 @@ export async function ensureDirectMessageRoom(input: {
     return existing.room;
   }
 
-  await assertCanCreateDirectMessage(input);
+  await assertCanCreateDirectMessage({
+    initiatorUserId: input.userId,
+    participantUserId: input.participantUserId,
+    branchId: input.branchId,
+    academicYearId: input.academicYearId,
+  });
 
   const participant = await prisma.user.findUnique({
     where: { id: input.participantUserId },

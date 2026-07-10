@@ -204,9 +204,9 @@ export const GLOBAL_PORTAL_MODES = [
 ];
 
 export const PERMISSION_LEVEL_OPTIONS: { value: PermissionLevel; label: string }[] = [
-  { value: 'inherit', label: 'Inherit / default' },
+  { value: 'inherit', label: 'Use school default' },
   { value: 'allow', label: 'Allow' },
-  { value: 'deny', label: 'Deny' },
+  { value: 'deny', label: "Don't allow" },
 ];
 
 export const HOD_SCOPE_OPTIONS = [
