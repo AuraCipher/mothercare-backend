@@ -1,7 +1,10 @@
 node_modules/
 dist/
 coverage/
+tests/coverage/
 tests/results/
+*.pid
+.env.e2e-bak.*
 .env
 *.log
 .DS_Store
@@ -9,3 +12,4 @@ tests/results/
 # Uploaded files
 uploads/
 cloudflared.deb
+graphify-out/
