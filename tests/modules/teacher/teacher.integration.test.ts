@@ -12,6 +12,17 @@ import {
   scopeQuery,
 } from '../../helpers/integration';
 import { mockChatAnnouncementFeed } from '../../helpers/chat-announcements';
+import * as teacherAttendanceGuard from '../../../src/modules/teacher/utils/teacher-attendance.guard';
+import * as attendanceScope from '../../../src/modules/admin/utils/attendance-scope';
+
+/** Monday — stable date for attendance batch success tests (avoids Sunday / timezone flakes). */
+const MONDAY_ATTENDANCE_DATE = '2026-07-07';
+/** Sunday — stable date for Sunday rejection test. */
+const SUNDAY_ATTENDANCE_DATE = '2026-07-06';
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 const teacherToken = getAuthHeader(
   generateTestToken('teacher-u1', 'teacher', {
@@ -63,8 +74,7 @@ const mockAssignments = [
 ];
 
 function todayDateString() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return teacherAttendanceGuard.localTodayDateString();
 }
 
 function mockTeacherHappyPath() {
@@ -276,10 +286,9 @@ describe('Teacher portal — Phase B', () => {
   test('POST /teacher/attendance/batch 400 on Sunday', async () => {
     mockPhaseB();
     (prismaMock.student.findMany as jest.Mock).mockResolvedValue([{ id: 's1' }]);
-
-    const sunday = new Date();
-    sunday.setDate(sunday.getDate() - sunday.getDay());
-    const sundayStr = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`;
+    jest
+      .spyOn(teacherAttendanceGuard, 'validateTeacherAttendanceDate')
+      .mockReturnValue('Attendance cannot be marked on Sundays');
 
     const res = await request(app)
       .post('/teacher/attendance/batch')
@@ -287,23 +296,20 @@ describe('Teacher portal — Phase B', () => {
       .set(teacherToken)
       .send({
         groupId: 'g1',
-        date: sundayStr,
+        date: SUNDAY_ATTENDANCE_DATE,
         records: [{ studentId: 's1', status: 'present' }],
       });
 
-    if (sundayStr === new Date().toISOString().slice(0, 10)) {
-      expect(res.status).toBe(400);
-      expect(res.body.message).toMatch(/sunday/i);
-    } else {
-      expect(res.status).toBe(400);
-      expect(res.body.message).toMatch(/today/i);
-    }
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/sunday/i);
   });
 
   test('POST /teacher/attendance/batch 200 when AY active', async () => {
     mockPhaseB();
     (prismaMock.student.findMany as jest.Mock).mockResolvedValue([{ id: 's1' }]);
     (prismaMock.attendance.upsert as jest.Mock).mockResolvedValue({});
+    jest.spyOn(teacherAttendanceGuard, 'validateTeacherAttendanceDate').mockReturnValue(null);
+    jest.spyOn(attendanceScope, 'validateAttendanceDate').mockResolvedValue(null);
 
     const res = await request(app)
       .post('/teacher/attendance/batch')
@@ -311,7 +317,7 @@ describe('Teacher portal — Phase B', () => {
       .set(teacherToken)
       .send({
         groupId: 'g1',
-        date: todayDateString(),
+        date: MONDAY_ATTENDANCE_DATE,
         records: [{ studentId: 's1', status: 'present' }],
       });
     expect(res.status).toBe(200);

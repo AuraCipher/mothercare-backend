@@ -1,13 +1,17 @@
 import rateLimit from 'express-rate-limit';
 
+const passwordWindowMs = Number(process.env.RATE_LIMIT_PASSWORD_WINDOW_MS ?? 60_000);
+const passwordMax = Number(process.env.RATE_LIMIT_PASSWORD_MAX ?? 5);
+const uploadWindowMs = Number(process.env.RATE_LIMIT_UPLOAD_WINDOW_MS ?? 60_000);
+const uploadMax = Number(process.env.RATE_LIMIT_UPLOAD_MAX ?? 20);
+
 /**
  * Rate limiter for password set endpoint.
  * Prevents brute-force attacks against admin password verification.
- * 5 attempts per minute per IP — more than enough for legitimate use.
  */
 export const passwordSetLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 5,
+  windowMs: passwordWindowMs,
+  max: passwordMax,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -19,11 +23,10 @@ export const passwordSetLimiter = rateLimit({
 /**
  * Rate limiter for file upload endpoint.
  * Prevents disk space abuse by limiting upload frequency.
- * 20 uploads per minute per IP (~1 per 3 seconds).
  */
 export const uploadLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 20,
+  windowMs: uploadWindowMs,
+  max: uploadMax,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
