@@ -85,6 +85,56 @@ export async function markRoomRead(roomId: string, userId: string, messageId?: s
   });
 }
 
+const messageInclude = {
+  sender: { select: { id: true, name: true, role: true } },
+  mediaFile: { select: { id: true, mimeType: true, publicUrl: true, purpose: true } },
+} as const;
+
+export async function deleteRoomMessage(messageId: string, userId: string) {
+  const message = await prisma.chatMessage.findUnique({ where: { id: messageId } });
+  if (!message || message.isDeleted) {
+    throw { status: 404, message: 'Message not found' };
+  }
+  await ensureStudentSystemRoomAccess(message.roomId, userId);
+  await assertRoomMember(message.roomId, userId);
+  if (message.senderId !== userId) {
+    throw { status: 403, message: 'Only the sender can delete this message' };
+  }
+
+  return prisma.chatMessage.update({
+    where: { id: messageId },
+    data: { isDeleted: true, deletedAt: new Date() },
+    include: messageInclude,
+  });
+}
+
+export async function updateRoomMessage(messageId: string, userId: string, content: string) {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    throw { status: 400, message: 'Content is required' };
+  }
+
+  const message = await prisma.chatMessage.findUnique({ where: { id: messageId } });
+  if (!message || message.isDeleted) {
+    throw { status: 404, message: 'Message not found' };
+  }
+  if (message.type !== 'text' || message.mediaFileId) {
+    throw { status: 400, message: 'Only text messages can be edited' };
+  }
+  await ensureStudentSystemRoomAccess(message.roomId, userId);
+  await assertRoomMember(message.roomId, userId);
+  if (message.senderId !== userId) {
+    throw { status: 403, message: 'Only the sender can edit this message' };
+  }
+  await assertCanPost(message.roomId, userId);
+
+  return prisma.chatMessage.update({
+    where: { id: messageId },
+    data: { content: trimmed },
+    include: messageInclude,
+  });
+}
+
 export async function listOfflineRecipientUserIds(roomId: string, excludeUserId: string): Promise<string[]> {
   const members = await prisma.chatRoomMember.findMany({
     where: { roomId, leftAt: null, canRead: true, userId: { not: excludeUserId } },

@@ -1,5 +1,6 @@
 import { prisma } from '../../../lib/prisma';
 import { listRoomsForUser, type RoomSummary } from '../../chat/services/chat-access.service';
+import { filterLandingDirectMessageRooms } from '../../chat/services/chat-landing-dm.service';
 import { ensureTeacherChatBootstrap, groupLabel } from '../../chat/services/teacher-chat-bootstrap.service';
 import { ensureDirectMessageRoom } from '../../chat/services/chat-dm.service';
 import type { StaffChatContact, StaffClassCommunity } from '../../staff/services/staff-chat.service';
@@ -72,7 +73,11 @@ export async function getTeacherChatLanding(input: {
   const assignmentIds = new Set(assignments.map((a) => a.id));
   const taughtGroupIds = [...new Set(assignments.map((a) => a.groupId))];
 
-  const rooms = await listRoomsForUser(input.userId, input.academicYearId);
+  const rooms = await filterLandingDirectMessageRooms(
+    input.userId,
+    input.academicYearId,
+    await listRoomsForUser(input.userId, input.academicYearId),
+  );
   const roomMap = rooms.map(mapRoom);
 
   const roomAssignmentMap = new Map<string, string | null>();

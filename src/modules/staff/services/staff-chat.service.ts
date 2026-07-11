@@ -1,5 +1,6 @@
 import { prisma } from '../../../lib/prisma';
 import { listRoomsForUser, type RoomSummary } from '../../chat/services/chat-access.service';
+import { filterLandingDirectMessageRooms } from '../../chat/services/chat-landing-dm.service';
 import { ensureStaffChatBootstrap, groupLabel } from '../../chat/services/staff-chat-bootstrap.service';
 import { ensureDirectMessageRoom } from '../../chat/services/chat-dm.service';
 
@@ -96,7 +97,11 @@ export async function getStaffChatLanding(input: {
 }) {
   await ensureStaffChatBootstrap(input);
 
-  const rooms = await listRoomsForUser(input.userId, input.academicYearId);
+  const rooms = await filterLandingDirectMessageRooms(
+    input.userId,
+    input.academicYearId,
+    await listRoomsForUser(input.userId, input.academicYearId),
+  );
   const roomMap = rooms.map(mapRoom);
 
   const groups = await prisma.group.findMany({

@@ -4,6 +4,7 @@ import {
   groupRoomsForStudentLanding,
 } from '../../chat/services/chat-community.bootstrap';
 import { listRoomsForUser } from '../../chat/services/chat-access.service';
+import { filterLandingDirectMessageRooms } from '../../chat/services/chat-landing-dm.service';
 import { ensureDirectMessageRoom } from '../../chat/services/chat-dm.service';
 import { getStudentContactPicker } from '../../chat/services/chat-contact-picker.service';
 
@@ -22,7 +23,11 @@ export async function getStudentChatLanding(ctx: StudentContext) {
     studentName: ctx.studentName,
   });
 
-  const rooms = await listRoomsForUser(ctx.userId, ctx.academicYearId);
+  const rooms = await filterLandingDirectMessageRooms(
+    ctx.userId,
+    ctx.academicYearId,
+    await listRoomsForUser(ctx.userId, ctx.academicYearId),
+  );
 
   const sections = groupRoomsForStudentLanding(rooms);
 

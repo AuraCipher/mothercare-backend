@@ -1,9 +1,4 @@
-import env from '../../config/env';
-
+/** Relative path — clients prepend their own API origin (mobile uses API_BASE_URL). */
 export function buildFileServeUrl(fileId: string): string {
-  const base =
-    env.APP_URL ||
-    env.FRONTEND_URL ||
-    `http://${env.HOST}:${env.PORT}`;
-  return `${base.replace(/\/$/, '')}/api/uploads/${fileId}`;
+  return `/api/uploads/${fileId}`;
 }
