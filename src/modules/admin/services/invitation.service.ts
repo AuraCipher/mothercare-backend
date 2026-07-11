@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import type { Prisma } from '@prisma/client';
 import { basePrisma as prisma } from '../../../lib/prisma';
 import env from '../../../config/env';
+import { sendAdminInvitationEmail } from '../../../lib/email/resend.service';
 
 const INVITATION_EXPIRY_DAYS = 7;
 const BCRYPT_ROUNDS = 12;
@@ -13,16 +14,33 @@ class InvitationService {
    * Generates a one-time token, stores it, returns the registration link.
    */
   async createInvitation(email: string, branchId: string, createdById?: string) {
+    const branch = await prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { name: true, code: true },
+    });
+    const branchName = branch?.name || 'Unknown';
+    const branchCode = branch?.code || '';
+
     // Check if email already has a pending invitation
     const existing = await prisma.adminInvitation.findFirst({
       where: { email, usedAt: null, expiresAt: { gt: new Date() } },
     });
     if (existing) {
+      const emailResult = await sendAdminInvitationEmail({
+        to: email,
+        token: existing.token,
+        branchName,
+        branchCode,
+      });
       return {
         token: existing.token,
         link: `${this.getBaseUrl()}/register-admin?token=${existing.token}`,
         expiresAt: existing.expiresAt,
-        message: 'A pending invitation already exists for this email. The existing link is still valid.',
+        emailSent: emailResult.sent,
+        emailWarning: emailResult.warning,
+        message: emailResult.sent
+          ? 'A pending invitation already exists for this email. The invitation email was resent.'
+          : 'A pending invitation already exists for this email. The existing link is still valid.',
       };
     }
 
@@ -39,11 +57,22 @@ class InvitationService {
       data: { email, branchId, token, expiresAt, createdById },
     });
 
+    const emailResult = await sendAdminInvitationEmail({
+      to: email,
+      token,
+      branchName,
+      branchCode,
+    });
+
     return {
       token,
       link: `${this.getBaseUrl()}/register-admin?token=${token}`,
       expiresAt,
-      message: 'Invitation created successfully.',
+      emailSent: emailResult.sent,
+      emailWarning: emailResult.warning,
+      message: emailResult.sent
+        ? 'Invitation created and email sent successfully.'
+        : 'Invitation created successfully. Copy the link to share with the new admin.',
     };
   }
 

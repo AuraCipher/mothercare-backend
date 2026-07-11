@@ -513,6 +513,9 @@ describe('POST /admin/invitations', () => {
   test('creates new invitation and returns 201', async () => {
     prismaMock.adminInvitation.findFirst.mockResolvedValue(null);
     prismaMock.user.findUnique.mockResolvedValue(null);
+    prismaMock.branch.findUnique.mockResolvedValue({
+      id: 'branch-1', name: 'Main Campus', code: 'MAIN',
+    } as any);
     prismaMock.adminInvitation.create.mockResolvedValue({
       id: 'inv-new',
       email: 'new.admin@test.com',
