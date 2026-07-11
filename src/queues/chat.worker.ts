@@ -3,6 +3,8 @@ import env from '../config/env';
 import { getRedisConnectionConfig } from '../config/redis-tcp';
 import logger from '../lib/logger';
 import { sendEncryptedPushToUsers } from '../modules/chat/push/fcm.service';
+import { flushPendingSystemNotifications } from '../modules/chat/services/system-notification.service';
+import { runAttendanceDailyReport } from '../modules/chat/services/attendance-daily-report.service';
 import {
   ATTENDANCE_DAILY_REPORT_JOB,
   CHAT_OFFLINE_DELIVER_JOB,
@@ -26,8 +28,11 @@ async function handlePushFanout(data: ChatPushFanoutJob) {
 }
 
 async function handleAttendanceDailyReport(data: AttendanceDailyReportJob) {
-  // v0 placeholder — wired for BullMQ cron / admin trigger in Phase 1
-  logger.info('Attendance daily report job received', data);
+  await runAttendanceDailyReport(data);
+}
+
+async function handleOfflineDeliver() {
+  await flushPendingSystemNotifications();
 }
 
 export function startChatWorker(): Worker | null {
@@ -47,7 +52,7 @@ export function startChatWorker(): Worker | null {
           await handlePushFanout(job.data as ChatPushFanoutJob);
           break;
         case CHAT_OFFLINE_DELIVER_JOB:
-          logger.debug('Offline deliver job (v0 noop)', { jobId: job.id });
+          await handleOfflineDeliver();
           break;
         case ATTENDANCE_DAILY_REPORT_JOB:
           await handleAttendanceDailyReport(job.data as AttendanceDailyReportJob);

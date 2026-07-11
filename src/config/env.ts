@@ -49,6 +49,7 @@ const envSchema = z.object({
   FCM_ENABLED: z.enum(['true', 'false']).default('false'),
   SOCKET_PATH: z.string().default('/socket.io'),
   CHAT_QUEUE_CONCURRENCY: z.string().default('5'),
+  SENTRY_DSN: z.string().url().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

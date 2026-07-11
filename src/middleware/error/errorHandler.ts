@@ -1,9 +1,19 @@
 import { Request, Response, NextFunction } from 'express';
 import logger from '../../lib/logger';
+import { captureRequestError } from '../../lib/sentry';
 
 export default function errorHandler(err: any, req: Request, res: Response, _next: NextFunction) {
   const status = err.status || err.statusCode || 500;
   const message = err.message || 'Internal server error';
+
+  if (status >= 500) {
+    captureRequestError(err, {
+      method: req.method,
+      originalUrl: req.originalUrl,
+      // @ts-ignore
+      user: req.user,
+    });
+  }
 
   // Always log errors (production + development)
   logger.error('Request failed', {

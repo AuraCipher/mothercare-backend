@@ -2,6 +2,7 @@ import 'dotenv/config';
 import http from 'http';
 import app from './src/app';
 import env from './src/config/env';
+import { initSentry } from './src/lib/sentry';
 import { prisma } from './src/lib/prisma';
 import { runStartupChecks, printStartupBanner, setupGracefulShutdown } from './src/lib/startup';
 import logger from './src/lib/logger';
@@ -14,6 +15,7 @@ const HOST = (env as any).HOST || '0.0.0.0';
 
 async function main() {
   try {
+    initSentry();
     // ─── 1. Run startup health checks ──────────────────────
     const checks = await runStartupChecks();
     printStartupBanner(checks);
