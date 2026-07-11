@@ -6,10 +6,25 @@ export type CarryOptions = {
   timetableGrid: boolean;
   datesheets: boolean;
   feeStructures: boolean;
-  attendance: boolean;
-  examsResults: boolean;
-  announcementsMessages: boolean;
+  /** @deprecated Not implemented — kept for legacy run JSON only */
+  attendance?: boolean;
+  /** @deprecated Not implemented — kept for legacy run JSON only */
+  examsResults?: boolean;
+  /** @deprecated Not implemented — kept for legacy run JSON only */
+  announcementsMessages?: boolean;
 };
+
+/** Carry toggles shown in the admin promotion wizard */
+export const PROMOTION_UI_CARRY_KEYS = [
+  'classes',
+  'subjects',
+  'students',
+  'teacherAssignments',
+  'timetableGrid',
+  'feeStructures',
+] as const;
+
+export type PromotionUiCarryKey = (typeof PROMOTION_UI_CARRY_KEYS)[number];
 
 export const DEFAULT_CARRY_OPTIONS: CarryOptions = {
   classes: true,
@@ -19,12 +34,9 @@ export const DEFAULT_CARRY_OPTIONS: CarryOptions = {
   timetableGrid: true,
   datesheets: false,
   feeStructures: true,
-  attendance: false,
-  examsResults: false,
-  announcementsMessages: false,
 };
 
-export const CARRY_OPTION_LABELS: Record<keyof CarryOptions, string> = {
+export const CARRY_OPTION_LABELS: Record<PromotionUiCarryKey | 'datesheets', string> = {
   classes: 'Classes / sections (+1 promote, lowest empty, highest graduates)',
   subjects: 'Subjects linked to classes',
   students: 'Active students (fixed promotion rules)',
@@ -32,9 +44,6 @@ export const CARRY_OPTION_LABELS: Record<keyof CarryOptions, string> = {
   timetableGrid: 'Timetable periods & grid',
   datesheets: 'Datesheets (never carried — always empty)',
   feeStructures: 'Fee structure templates',
-  attendance: 'Attendance records',
-  examsResults: 'Exams & results',
-  announcementsMessages: 'Announcements & messages',
 };
 
 /** Rules that cannot be toggled off when students/classes are carried */
@@ -42,6 +51,7 @@ export const FIXED_STUDENT_RULES = [
   'Lowest class stays empty in the new year',
   'Highest class students graduate (no new-year record)',
   'All other active students move up one class automatically',
+  'Promoted students keep their existing login credentials in the new year',
   'Withdrawn / deceased / graduated students are skipped',
 ] as const;
 

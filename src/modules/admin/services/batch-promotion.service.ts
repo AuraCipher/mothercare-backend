@@ -61,7 +61,8 @@ class BatchPromotionService {
       defaultCarryOptions: DEFAULT_CARRY_OPTIONS,
       acknowledgements: [
         'The current ACTIVE year stays live until you publish the new year.',
-        'Graduated students will lose login after publish.',
+        'Graduated, withdrawn, and deceased students are frozen — they cannot log in after publish.',
+        'Promoted students keep their existing login credentials in the new year.',
         'Outstanding fees remain in the old year unless manually carried forward.',
         'Class promotion rules are automatic (+1 / empty lowest / graduate highest).',
       ],
@@ -362,7 +363,12 @@ class BatchPromotionService {
           if (s.group.displayOrder >= maxOrder) {
             await tx.student.update({
               where: { id: s.id },
-              data: { status: 'GRADUATED', isActive: false, credentialTag: 'NO_LOGIN' },
+              data: {
+                status: 'GRADUATED',
+                isActive: false,
+                credentialTag: 'NO_LOGIN',
+                userId: null,
+              },
             });
             continue;
           }
@@ -386,6 +392,13 @@ class BatchPromotionService {
           }
 
           const credTag: StudentCredentialTag = s.credentialSentAt ? 'CRED_CARRIED' : 'CRED_NEW';
+          const linkedUserId = s.userId;
+
+          // Student.userId is globally unique — move link from archived source row to new ACTIVE row.
+          await tx.student.update({
+            where: { id: s.id },
+            data: { userId: null },
+          });
 
           await tx.student.create({
             data: {
@@ -419,7 +432,7 @@ class BatchPromotionService {
               tcNumber: s.tcNumber,
               referredBy: s.referredBy,
               profilePhotoId: null,
-              userId: null,
+              userId: linkedUserId,
               username: s.username,
               studentNumber: null,
               status: 'ACTIVE',

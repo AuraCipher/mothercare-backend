@@ -17,6 +17,7 @@
     "benchmark:year-end": "npx ts-node scripts/benchmark-year-end.ts",
     "load-test": "npx ts-node scripts/load-test.ts",
     "load-test:suite": "bash scripts/load-test-suite.sh",
+    "openapi:generate": "npx ts-node scripts/generate-openapi.ts",
     "backup:postgres": "npx ts-node scripts/backup-postgres-r2.ts",
     "seed:demo": "npx ts-node prisma/seed-demo-school.ts",
     "db:reset:demo": "prisma migrate reset --force --skip-seed && npm run seed:demo"

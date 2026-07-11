@@ -36,14 +36,21 @@ class AuthService {
         userId,
         OR: [
           { credentialTag: 'NO_LOGIN' },
-          { status: 'GRADUATED' },
+          {
+            status: {
+              in: ['GRADUATED', 'WITHDRAWN', 'DECEASED', 'TRANSFERRED', 'SUSPENDED', 'EXPELED'],
+            },
+          },
         ],
       },
-      select: { id: true },
+      select: { id: true, status: true },
     });
 
     if (blocked) {
-      throw { status: 403, message: 'Student login is disabled after graduation' };
+      if (blocked.status === 'GRADUATED') {
+        throw { status: 403, message: 'Student login is disabled after graduation' };
+      }
+      throw { status: 403, message: 'Student login is disabled for this account' };
     }
     throw { status: 403, message: 'Student is not enrolled in any active academic year' };
   }
