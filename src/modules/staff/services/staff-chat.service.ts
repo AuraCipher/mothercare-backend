@@ -120,7 +120,7 @@ export async function getStaffChatLanding(input: {
     };
   }).filter((c) => c.rooms.length > 0);
 
-  const contacts = await listBranchChatContacts(input.branchId, input.userId, input.academicYearId);
+  const contacts: StaffChatContact[] = [];
 
   const pick = (kinds: string[]) => roomMap.filter((r) => kinds.includes(r.kind));
 
@@ -128,11 +128,9 @@ export async function getStaffChatLanding(input: {
     { key: 'school', title: 'School Announcement', rooms: pick(['school_announcement']) },
     { key: 'teachers', title: 'Teachers Announcement', rooms: pick(['teacher_announcement']) },
     { key: 'classes', title: 'Class Communities', communities },
-    { key: 'contacts', title: 'Contacts', contacts },
     { key: 'dm', title: 'Messages', rooms: pick(['direct_message']) },
   ].filter((s) => {
     if (s.communities?.length) return true;
-    if (s.contacts?.length) return true;
     if (s.rooms?.length) return true;
     return false;
   });
@@ -143,6 +141,15 @@ export async function getStaffChatLanding(input: {
     communities,
     contacts,
   };
+}
+
+export async function getStaffChatContacts(input: {
+  userId: string;
+  branchId: string;
+  academicYearId: string;
+}) {
+  const { getAdminContactPicker } = await import('../../chat/services/chat-contact-picker.service');
+  return getAdminContactPicker(input);
 }
 
 export async function openStaffDirectMessage(input: {

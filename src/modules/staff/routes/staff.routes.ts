@@ -1,7 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import auth from '../../../middleware/auth/auth.middleware';
 import { staffAdminRoleMiddleware } from '../middleware/staff-role.middleware';
-import { getStaffChatLanding, openStaffDirectMessage } from '../services/staff-chat.service';
+import { getStaffChatLanding, openStaffDirectMessage, getStaffChatContacts } from '../services/staff-chat.service';
+import { getStaffSelfProfile } from '../services/staff-profile.service';
 
 const router = Router();
 
@@ -32,6 +33,35 @@ router.get(
     }
 
     const data = await getStaffChatLanding({ userId, branchId, academicYearId });
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/chat/contacts',
+  asyncHandler(async (req, res) => {
+    const userId = (req as any).user.id;
+    const branchId = req.query.branchId as string;
+    const academicYearId = req.query.academicYearId as string;
+    if (!branchId || !academicYearId) {
+      res.status(400).json({ success: false, message: 'branchId and academicYearId are required' });
+      return;
+    }
+    const data = await getStaffChatContacts({ userId, branchId, academicYearId });
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/profile',
+  asyncHandler(async (req, res) => {
+    const userId = (req as any).user.id;
+    const branchId = req.query.branchId as string;
+    if (!branchId) {
+      res.status(400).json({ success: false, message: 'branchId is required' });
+      return;
+    }
+    const data = await getStaffSelfProfile(userId, branchId);
     res.json({ success: true, data });
   }),
 );

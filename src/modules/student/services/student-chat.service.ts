@@ -5,7 +5,7 @@ import {
 } from '../../chat/services/chat-community.bootstrap';
 import { listRoomsForUser } from '../../chat/services/chat-access.service';
 import { ensureDirectMessageRoom } from '../../chat/services/chat-dm.service';
-import { listStudentDmContacts } from '../../chat/services/chat-dm-policy.service';
+import { getStudentContactPicker } from '../../chat/services/chat-contact-picker.service';
 
 export async function getStudentChatLanding(ctx: StudentContext) {
   if (!ctx.groupId) {
@@ -23,26 +23,13 @@ export async function getStudentChatLanding(ctx: StudentContext) {
   });
 
   const rooms = await listRoomsForUser(ctx.userId, ctx.academicYearId);
-  const contacts = await listStudentDmContacts({
-    userId: ctx.userId,
-    groupId: ctx.groupId,
-    academicYearId: ctx.academicYearId,
-  });
 
   const sections = groupRoomsForStudentLanding(rooms);
-  if (contacts.length > 0) {
-    sections.push({
-      key: 'contacts',
-      title: 'Contacts',
-      rooms: [],
-      contacts,
-    });
-  }
 
   return {
     sections,
     rooms,
-    contacts,
+    contacts: [],
   };
 }
 
@@ -57,4 +44,16 @@ export async function openStudentDirectMessage(
     participantUserId,
   });
   return { roomId: room.id, name: room.name };
+}
+
+export async function getStudentChatContacts(ctx: StudentContext) {
+  if (!ctx.groupId) {
+    throw { status: 400, message: 'Student is not assigned to a class group' };
+  }
+  return getStudentContactPicker({
+    userId: ctx.userId,
+    branchId: ctx.branchId,
+    groupId: ctx.groupId,
+    academicYearId: ctx.academicYearId,
+  });
 }

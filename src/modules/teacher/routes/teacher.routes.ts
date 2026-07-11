@@ -32,7 +32,7 @@ import { getTeacherContext, TeacherAccessError } from '../utils/teacher-assignme
 import { expensesService } from '../../admin/services/expenses.service';
 import { assertFeatureAllowed } from '../permissions/teacher-feature.guard';
 import type { TeacherContext } from '../services/teacher-context.service';
-import { getTeacherChatLanding, openTeacherDirectMessage } from '../services/teacher-chat.service';
+import { getTeacherChatLanding, openTeacherDirectMessage, getTeacherChatContacts } from '../services/teacher-chat.service';
 import {
   assignClassRole,
   createClassRoleDefinition,
@@ -316,6 +316,20 @@ router.get(
   asyncHandler(async (req, res) => {
     const ctx = (req as any).teacherContext as TeacherContext;
     const data = await getTeacherChatLanding({
+      userId: ctx.userId,
+      branchId: ctx.branchId,
+      academicYearId: ctx.academicYearId,
+    });
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/chat/contacts',
+  teacherScopeMiddleware,
+  asyncHandler(async (req, res) => {
+    const ctx = (req as any).teacherContext as TeacherContext;
+    const data = await getTeacherChatContacts({
       userId: ctx.userId,
       branchId: ctx.branchId,
       academicYearId: ctx.academicYearId,

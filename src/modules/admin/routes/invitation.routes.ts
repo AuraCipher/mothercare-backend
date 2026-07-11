@@ -12,6 +12,40 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
     fn(req, res, next).catch(next);
   };
 
+/** Protected — super_admin only (must be before /:token) */
+router.post('/', auth, roleMiddleware(['super_admin']), asyncHandler(async (req: Request, res: Response) => {
+  const { email, branchId } = req.body;
+
+  if (!email || !branchId) {
+    res.status(400).json({ success: false, message: 'Email and branchId are required' });
+    return;
+  }
+
+  const result = await invitationService.createInvitation(email, branchId, (req as any).user?.id);
+  res.status(201).json({ success: true, data: result });
+}));
+
+router.get('/', auth, roleMiddleware(['super_admin']), asyncHandler(async (_req: Request, res: Response) => {
+  const [pendingInvitations, admins] = await Promise.all([
+    invitationService.listPendingInvitations(),
+    invitationService.listAdmins(),
+  ]);
+  res.json({
+    success: true,
+    data: { pendingInvitations, admins },
+  });
+}));
+
+router.get('/admins/:userId', auth, roleMiddleware(['super_admin']), asyncHandler(async (req: Request, res: Response) => {
+  const data = await invitationService.getAdminDetail(req.params.userId);
+  res.json({ success: true, data });
+}));
+
+router.put('/admins/:userId', auth, roleMiddleware(['super_admin']), asyncHandler(async (req: Request, res: Response) => {
+  const data = await invitationService.updateAdminProfile(req.params.userId, req.body ?? {});
+  res.json({ success: true, data });
+}));
+
 /** Public — validate invitation token */
 router.get('/:token', asyncHandler(async (req: Request, res: Response) => {
   const { token } = req.params;
@@ -37,42 +71,34 @@ router.get('/:token', asyncHandler(async (req: Request, res: Response) => {
 /** Public — complete registration */
 router.post('/:token/complete', asyncHandler(async (req: Request, res: Response) => {
   const { token } = req.params;
-  const { name, username, password, phone } = req.body;
+  const {
+    name, username, password, phone, employeeId, qualification, specialization,
+    joiningDate, address, emergencyContact, workRole, bio,
+  } = req.body;
 
   if (!name || !username || !password) {
     res.status(400).json({ success: false, message: 'Name, username, and password are required' });
     return;
   }
 
-  const user = await invitationService.completeRegistration(token, { name, username, password, phone });
+  const user = await invitationService.completeRegistration(token, {
+    name,
+    username,
+    password,
+    phone,
+    employeeId,
+    qualification,
+    specialization,
+    joiningDate,
+    address,
+    emergencyContact,
+    workRole,
+    bio,
+  });
   res.status(201).json({
     success: true,
     message: 'Admin registered successfully',
     data: user,
-  });
-}));
-
-/** Protected — super_admin only */
-router.post('/', auth, roleMiddleware(['super_admin']), asyncHandler(async (req: Request, res: Response) => {
-  const { email, branchId } = req.body;
-
-  if (!email || !branchId) {
-    res.status(400).json({ success: false, message: 'Email and branchId are required' });
-    return;
-  }
-
-  const result = await invitationService.createInvitation(email, branchId, (req as any).user?.id);
-  res.status(201).json({ success: true, data: result });
-}));
-
-router.get('/', auth, roleMiddleware(['super_admin']), asyncHandler(async (_req: Request, res: Response) => {
-  const [pendingInvitations, admins] = await Promise.all([
-    invitationService.listPendingInvitations(),
-    invitationService.listAdmins(),
-  ]);
-  res.json({
-    success: true,
-    data: { pendingInvitations, admins },
   });
 }));
 

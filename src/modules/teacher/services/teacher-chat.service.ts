@@ -116,7 +116,7 @@ export async function getTeacherChatLanding(input: {
     });
   }
 
-  const contacts = await listTeacherChatContacts(input.branchId, input.userId, input.academicYearId);
+  const contacts: StaffChatContact[] = [];
   const pick = (kinds: string[]) => roomMap.filter((r) => kinds.includes(r.kind));
 
   const sections = [
@@ -128,11 +128,9 @@ export async function getTeacherChatLanding(input: {
       rooms: pick(['system_teacher_attendance', 'system_teacher_payroll']),
     },
     { key: 'classes', title: 'My Classes', communities },
-    { key: 'contacts', title: 'Contacts', contacts },
     { key: 'dm', title: 'Messages', rooms: pick(['direct_message']) },
   ].filter((s) => {
     if ('communities' in s && s.communities?.length) return true;
-    if ('contacts' in s && s.contacts?.length) return true;
     if ('rooms' in s && s.rooms?.length) return true;
     return false;
   });
@@ -143,6 +141,15 @@ export async function getTeacherChatLanding(input: {
     communities,
     contacts,
   };
+}
+
+export async function getTeacherChatContacts(input: {
+  userId: string;
+  branchId: string;
+  academicYearId: string;
+}) {
+  const { getTeacherContactPicker } = await import('../../chat/services/chat-contact-picker.service');
+  return getTeacherContactPicker(input);
 }
 
 export async function openTeacherDirectMessage(input: {

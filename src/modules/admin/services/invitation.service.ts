@@ -85,7 +85,20 @@ class InvitationService {
    */
   async completeRegistration(
     token: string,
-    data: { name: string; username: string; password: string; phone?: string },
+    data: {
+      name: string;
+      username: string;
+      password: string;
+      phone?: string;
+      employeeId?: string;
+      qualification?: string;
+      specialization?: string;
+      joiningDate?: string;
+      address?: string;
+      emergencyContact?: string;
+      workRole?: string;
+      bio?: string;
+    },
   ) {
     const invitation = await prisma.adminInvitation.findUnique({ where: { token } });
 
@@ -142,6 +155,21 @@ class InvitationService {
         },
       });
 
+      await tx.staffProfile.create({
+        data: {
+          userId: user.id,
+          employeeId: data.employeeId?.trim() || null,
+          workRole: data.workRole?.trim() || 'Branch Administrator',
+          qualification: data.qualification?.trim() || null,
+          specialization: data.specialization?.trim() || null,
+          joiningDate: data.joiningDate ? new Date(data.joiningDate) : new Date(),
+          phone: data.phone?.trim() || null,
+          emergencyContact: data.emergencyContact?.trim() || null,
+          address: data.address?.trim() || null,
+          bio: data.bio?.trim() || null,
+        },
+      });
+
       return { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role };
     });
 
@@ -194,6 +222,110 @@ class InvitationService {
       branchCode: bm.branch.code,
       createdAt: bm.createdAt,
     }));
+  }
+
+  async getAdminDetail(userId: string) {
+    const membership = await prisma.branchMember.findFirst({
+      where: { userId, role: 'branch_admin' },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            username: true,
+            phone: true,
+            status: true,
+            profilePhotoId: true,
+            createdAt: true,
+          },
+        },
+        branch: { select: { id: true, name: true, code: true } },
+      },
+    });
+    if (!membership) {
+      throw Object.assign(new Error('Admin not found'), { status: 404 });
+    }
+
+    const profile = await prisma.staffProfile.findUnique({ where: { userId } });
+
+    return {
+      membershipId: membership.id,
+      userId: membership.user.id,
+      name: membership.user.name,
+      email: membership.user.email,
+      username: membership.user.username,
+      phone: membership.user.phone,
+      status: membership.user.status,
+      profilePhotoId: membership.user.profilePhotoId,
+      branch: membership.branch,
+      memberSince: membership.createdAt,
+      profile,
+    };
+  }
+
+  async updateAdminProfile(
+    userId: string,
+    data: {
+      name?: string;
+      phone?: string | null;
+      employeeId?: string | null;
+      workRole?: string | null;
+      qualification?: string | null;
+      specialization?: string | null;
+      joiningDate?: string | null;
+      address?: string | null;
+      emergencyContact?: string | null;
+      bio?: string | null;
+    },
+  ) {
+    const membership = await prisma.branchMember.findFirst({
+      where: { userId, role: 'branch_admin' },
+      select: { id: true },
+    });
+    if (!membership) {
+      throw Object.assign(new Error('Admin not found'), { status: 404 });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (data.name !== undefined || data.phone !== undefined) {
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            ...(data.name !== undefined && { name: data.name }),
+            ...(data.phone !== undefined && { phone: data.phone }),
+          },
+        });
+      }
+
+      const profileData = {
+        ...(data.employeeId !== undefined && { employeeId: data.employeeId }),
+        ...(data.workRole !== undefined && { workRole: data.workRole }),
+        ...(data.qualification !== undefined && { qualification: data.qualification }),
+        ...(data.specialization !== undefined && { specialization: data.specialization }),
+        ...(data.joiningDate !== undefined && {
+          joiningDate: data.joiningDate ? new Date(data.joiningDate) : null,
+        }),
+        ...(data.address !== undefined && { address: data.address }),
+        ...(data.emergencyContact !== undefined && { emergencyContact: data.emergencyContact }),
+        ...(data.bio !== undefined && { bio: data.bio }),
+        ...(data.phone !== undefined && { phone: data.phone }),
+      };
+
+      if (Object.keys(profileData).length > 0) {
+        await tx.staffProfile.upsert({
+          where: { userId },
+          create: {
+            userId,
+            workRole: data.workRole ?? 'Branch Administrator',
+            ...profileData,
+          },
+          update: profileData,
+        });
+      }
+    });
+
+    return this.getAdminDetail(userId);
   }
 
   private getBaseUrl(): string {

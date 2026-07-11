@@ -127,6 +127,78 @@ async function getStudentEnrollment(userId: string, academicYearId: string) {
   });
 }
 
+async function assertStudentMayMessageStaff(
+  studentUserId: string,
+  staffUserId: string,
+  branchId: string,
+  academicYearId: string,
+): Promise<void> {
+  const isAdmin = await prisma.branchMember.findFirst({
+    where: {
+      branchId,
+      userId: staffUserId,
+      isActive: true,
+      role: { in: ['branch_admin', 'sub_admin', 'management'] },
+    },
+    select: { id: true },
+  });
+  if (isAdmin) return;
+
+  const student = await getStudentEnrollment(studentUserId, academicYearId);
+  if (!student?.groupId) {
+    throw { status: 400, message: 'Student is not enrolled in a class' };
+  }
+
+  const teacherAssignment = await prisma.teacherAssignment.findFirst({
+    where: {
+      groupId: student.groupId,
+      academicYearId,
+      teacherId: staffUserId,
+    },
+    select: { id: true },
+  });
+  if (!teacherAssignment) {
+    throw { status: 403, message: 'You may only message your class teachers or administration' };
+  }
+}
+
+async function assertTeacherMayMessageParent(
+  teacherUserId: string,
+  parentUserId: string,
+  academicYearId: string,
+): Promise<void> {
+  const parentProfile = await prisma.parentProfile.findUnique({
+    where: { userId: parentUserId },
+    select: {
+      children: {
+        select: { student: { select: { groupId: true, academicYearId: true, isActive: true, status: true } } },
+      },
+    },
+  });
+  if (!parentProfile) {
+    throw { status: 404, message: 'Parent not found' };
+  }
+
+  const groupIds = await prisma.teacherAssignment.findMany({
+    where: { teacherId: teacherUserId, academicYearId },
+    select: { groupId: true },
+  });
+  const taught = new Set(groupIds.map((g) => g.groupId));
+
+  const hasChild = parentProfile.children.some(
+    (c) =>
+      c.student.isActive &&
+      c.student.status === 'ACTIVE' &&
+      c.student.academicYearId === academicYearId &&
+      c.student.groupId != null &&
+      taught.has(c.student.groupId),
+  );
+  if (!hasChild) {
+    throw { status: 403, message: 'You may only message parents of students in your classes' };
+  }
+}
+
+/** @deprecated use assertStudentMayMessageStaff */
 async function assertStudentMayMessageClassTeacher(
   studentUserId: string,
   teacherUserId: string,
@@ -136,19 +208,14 @@ async function assertStudentMayMessageClassTeacher(
   if (!student?.groupId) {
     throw { status: 400, message: 'Student is not enrolled in a class' };
   }
-
-  const classTeacher = await prisma.teacherAssignment.findFirst({
-    where: {
-      groupId: student.groupId,
-      academicYearId,
-      teacherId: teacherUserId,
-      isClassTeacher: true,
-    },
-    select: { id: true },
-  });
-  if (!classTeacher) {
-    throw { status: 403, message: 'Students may only message their class teacher' };
-  }
+  const branchId = (
+    await prisma.student.findFirst({
+      where: { userId: studentUserId, academicYearId },
+      select: { academicYear: { select: { branchId: true } } },
+    })
+  )?.academicYear?.branchId;
+  if (!branchId) throw { status: 400, message: 'Branch context missing' };
+  await assertStudentMayMessageStaff(studentUserId, teacherUserId, branchId, academicYearId);
 }
 
 async function assertStaffMayMessageStudent(
@@ -226,19 +293,21 @@ export async function assertCanCreateDirectMessage(input: {
 
   const initiatorIsStudent = initiator.role === 'student';
   const participantIsStudent = participant.role === 'student';
+  const participantIsParent = participant.role === 'parent';
   const initiatorIsStaff = STAFF_ROLES.has(initiator.role);
   const participantIsStaff = STAFF_ROLES.has(participant.role);
 
   if (initiatorIsStudent) {
     await assertStudentCanInitiateDm(input.initiatorUserId, input.academicYearId);
     if (participantIsStaff) {
-      await assertStudentMayMessageClassTeacher(
+      await assertStudentMayMessageStaff(
         input.initiatorUserId,
         input.participantUserId,
+        input.branchId,
         input.academicYearId,
       );
     } else {
-      throw { status: 403, message: 'You can only message your class teacher' };
+      throw { status: 403, message: 'You can only message teachers and administration' };
     }
   } else if (initiatorIsStaff) {
     await assertStaffCanInitiateDm(
@@ -247,13 +316,25 @@ export async function assertCanCreateDirectMessage(input: {
       input.academicYearId,
     );
     if (participantIsStudent) {
-      await assertStaffMayMessageStudent(
-        input.initiatorUserId,
-        input.participantUserId,
-        input.branchId,
-        input.academicYearId,
-      );
+      if (!(await isBranchChatAdmin(input.initiatorUserId, input.branchId))) {
+        await assertStaffMayMessageStudent(
+          input.initiatorUserId,
+          input.participantUserId,
+          input.branchId,
+          input.academicYearId,
+        );
+      }
       await assertStudentCanReceiveDm(input.participantUserId, input.academicYearId);
+    } else if (participantIsParent) {
+      if (initiator.role === 'teacher') {
+        await assertTeacherMayMessageParent(
+          input.initiatorUserId,
+          input.participantUserId,
+          input.academicYearId,
+        );
+      } else if (!(await isBranchChatAdmin(input.initiatorUserId, input.branchId))) {
+        throw { status: 403, message: 'Only teachers and administrators may message parents' };
+      }
     } else if (participantIsStaff) {
       await assertParticipantIsBranchStaff(input.participantUserId, input.branchId);
     } else {
@@ -272,47 +353,23 @@ export type StudentDmContact = {
   dmRoomId: string | null;
 };
 
-/** Class teachers a student may message when they have initiate permission. */
+/** Teachers and administration a student may message. */
 export async function listStudentDmContacts(input: {
   userId: string;
+  branchId: string;
   groupId: string;
   academicYearId: string;
 }): Promise<StudentDmContact[]> {
-  const flags = await getStudentDmFlags(input.userId, input.academicYearId);
-  if (!flags.canInitiate) return [];
-
-  const classTeachers = await prisma.teacherAssignment.findMany({
-    where: {
-      groupId: input.groupId,
-      academicYearId: input.academicYearId,
-      isClassTeacher: true,
-    },
-    include: {
-      teacher: { select: { id: true, name: true, role: true, status: true } },
-    },
-    orderBy: { teacher: { name: 'asc' } },
-  });
-
-  const dmThreads = await prisma.chatDmThread.findMany({
-    where: {
-      academicYearId: input.academicYearId,
-      OR: [{ participantAId: input.userId }, { participantBId: input.userId }],
-    },
-    select: { roomId: true, participantAId: true, participantBId: true },
-  });
-  const dmByUser = new Map<string, string>();
-  for (const t of dmThreads) {
-    const other = t.participantAId === input.userId ? t.participantBId : t.participantAId;
-    dmByUser.set(other, t.roomId);
-  }
-
-  return classTeachers
-    .filter((a) => a.teacher.status === 'active')
-    .map((a) => ({
-      userId: a.teacher.id,
-      name: a.teacher.name,
-      role: a.teacher.role,
-      roleLabel: 'Class teacher',
-      dmRoomId: dmByUser.get(a.teacher.id) ?? null,
-    }));
+  const picker = await import('./chat-contact-picker.service').then((m) =>
+    m.getStudentContactPicker(input),
+  );
+  return picker.sections.flatMap((s) =>
+    s.contacts.map((c) => ({
+      userId: c.userId,
+      name: c.name,
+      role: 'staff',
+      roleLabel: c.roleLabel,
+      dmRoomId: c.dmRoomId,
+    })),
+  );
 }

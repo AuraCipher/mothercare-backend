@@ -93,18 +93,14 @@ describe('chat-dm-policy.service', () => {
         branchId: BRANCH_ID,
         academicYearId: AY_ID,
       }),
-    ).rejects.toMatchObject({ status: 403 });
+    ).rejects.toMatchObject({ status: 403, message: expect.stringContaining('class teachers') });
   });
 
   test('listStudentDmContacts returns class teachers when student can initiate', async () => {
-    (prismaMock.classRoleAssignment.findMany as jest.Mock).mockResolvedValue([
-      {
-        isMessagingRestricted: false,
-        roleDefinition: { canInitiateDms: true, canReceiveDms: true },
-      },
-    ]);
+    (prismaMock.branchMember.findMany as jest.Mock).mockResolvedValue([]);
     (prismaMock.teacherAssignment.findMany as jest.Mock).mockResolvedValue([
       {
+        isClassTeacher: true,
         teacher: { id: TEACHER_USER, name: 'Ms. Sarah', role: 'teacher', status: 'active' },
       },
     ]);
@@ -112,6 +108,7 @@ describe('chat-dm-policy.service', () => {
 
     const contacts = await listStudentDmContacts({
       userId: STUDENT_USER,
+      branchId: BRANCH_ID,
       groupId: GROUP_ID,
       academicYearId: AY_ID,
     });
