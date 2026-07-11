@@ -147,6 +147,28 @@ export async function ensureStaffChatBootstrap(input: {
   await ensureTeacherAnnouncementRoom(input.branchId, input.academicYearId);
   await syncTeacherAnnouncementMembers(input.branchId, input.academicYearId);
 
+  const schoolRoom = await prisma.chatRoom.findFirst({
+    where: {
+      branchId: input.branchId,
+      academicYearId: input.academicYearId,
+      kind: 'school_announcement',
+    },
+  });
+  if (schoolRoom) {
+    await ensureRoomMembership(schoolRoom.id, input.userId, { access: 'moderator', canPost: true });
+  }
+
+  const teacherRoom = await prisma.chatRoom.findFirst({
+    where: {
+      branchId: input.branchId,
+      academicYearId: input.academicYearId,
+      kind: 'teacher_announcement',
+    },
+  });
+  if (teacherRoom) {
+    await ensureRoomMembership(teacherRoom.id, input.userId, { access: 'moderator', canPost: true });
+  }
+
   const groups = await prisma.group.findMany({
     where: { academicYearId: input.academicYearId, isActive: true },
     orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }, { section: 'asc' }],

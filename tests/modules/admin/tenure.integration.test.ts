@@ -214,7 +214,7 @@ describe('POST /admin/branch-members/:branchMemberId/tenures/leave', () => {
       .set(adminAuth)
       .send(body);
     expect(res.status).toBe(400);
-    expect(res.body.message).toBe('endReason is required');
+    expect(res.body.message).toBe('Valid endReason is required');
     expect(tenureService.recordBranchLeave).not.toHaveBeenCalled();
   });
 
@@ -500,7 +500,7 @@ describe('POST /admin/students/:studentId/school-tenures/leave', () => {
       .set(adminAuth)
       .send(body);
     expect(res.status).toBe(400);
-    expect(res.body.message).toBe('endReason is required');
+    expect(res.body.message).toBe('Valid endReason is required');
   });
 
   test.each(END_REASONS)('200 records student leave with endReason %s', async (endReason) => {
@@ -892,7 +892,7 @@ describe('POST /admin/teachers/:userId/tenures/leave', () => {
       .set(adminAuth)
       .send(body);
     expect(res.status).toBe(400);
-    expect(res.body.message).toBe('endReason is required');
+    expect(res.body.message).toBe('Valid endReason is required');
   });
 
   test.each(END_REASONS)('200 records teacher leave with endReason %s', async (endReason) => {

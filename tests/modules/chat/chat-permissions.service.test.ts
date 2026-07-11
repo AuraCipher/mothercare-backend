@@ -47,6 +47,20 @@ describe('chat permissions — school announcement', () => {
     expect(await isBranchChatAdmin(ADMIN_USER, TEST_BRANCH)).toBe(true);
   });
 
+  test('branch management staff role is treated as branch chat admin', async () => {
+    (prismaMock.user.findUnique as jest.Mock).mockResolvedValue({
+      id: ADMIN_USER,
+      role: 'management',
+      status: 'active',
+    });
+    (prismaMock.branchMember.findUnique as jest.Mock).mockResolvedValue({
+      role: 'management',
+      isActive: true,
+    });
+
+    expect(await isBranchChatAdmin(ADMIN_USER, TEST_BRANCH)).toBe(true);
+  });
+
   test('appointed teacher can post in school announcement', async () => {
     (prismaMock.user.findUnique as jest.Mock).mockResolvedValue({
       id: TEACHER_USER,

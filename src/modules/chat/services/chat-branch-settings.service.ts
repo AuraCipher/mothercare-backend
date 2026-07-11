@@ -89,7 +89,7 @@ export async function syncSchoolAnnouncementMembers(branchId: string, academicYe
   if (!schoolRoom) return null;
 
   const branchAdmins = await prisma.branchMember.findMany({
-    where: { branchId, isActive: true, role: { in: ['branch_admin', 'sub_admin'] } },
+    where: { branchId, isActive: true, role: { in: ['branch_admin', 'sub_admin', 'management'] } },
     select: { userId: true },
   });
 
@@ -151,7 +151,7 @@ export async function syncTeacherAnnouncementMembers(branchId: string, academicY
   if (!teacherRoom) return null;
 
   const branchAdmins = await prisma.branchMember.findMany({
-    where: { branchId, isActive: true, role: { in: ['branch_admin', 'sub_admin'] } },
+    where: { branchId, isActive: true, role: { in: ['branch_admin', 'sub_admin', 'management'] } },
     select: { userId: true },
   });
   const superAdmins = await prisma.user.findMany({

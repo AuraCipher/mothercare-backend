@@ -1,6 +1,7 @@
 import { prisma } from '../../../lib/prisma';
 import type { ChatMessageType } from '@prisma/client';
 import { assertCanPost, assertRoomMember } from './chat-access.service';
+import { ensureChatRoomAccess } from './chat-room-access.service';
 import { ensureStudentSystemRoomAccess } from './chat-student-room-access.service';
 
 export async function listRoomMessages(
@@ -8,7 +9,7 @@ export async function listRoomMessages(
   userId: string,
   opts: { cursor?: string; limit?: number } = {},
 ) {
-  await ensureStudentSystemRoomAccess(roomId, userId);
+  await ensureChatRoomAccess(roomId, userId);
   await assertRoomMember(roomId, userId);
   const limit = Math.min(opts.limit ?? 40, 100);
 
@@ -64,7 +65,7 @@ export async function createRoomMessage(input: {
 }
 
 export async function markRoomRead(roomId: string, userId: string, messageId?: string) {
-  await ensureStudentSystemRoomAccess(roomId, userId);
+  await ensureChatRoomAccess(roomId, userId);
   await assertRoomMember(roomId, userId);
   const lastMessage = messageId
     ? await prisma.chatMessage.findUnique({ where: { id: messageId } })

@@ -304,6 +304,7 @@ function setupAttendanceMocks() {
   (prismaMock.teacherAttendance.upsert as jest.Mock).mockResolvedValue({});
   (prismaMock.staffAttendance.upsert as jest.Mock).mockResolvedValue({});
   (prismaMock.attendanceNotification.findFirst as jest.Mock).mockResolvedValue(null);
+  (prismaMock.attendanceNotification.findMany as jest.Mock).mockResolvedValue([]);
   (prismaMock.attendanceNotification.create as jest.Mock).mockResolvedValue({ id: 'n1' });
 
   mockTenuredBranchMember(TEACHER_ID);
@@ -1115,17 +1116,18 @@ describe('Attendance full integration routes', () => {
       expect(res.body.data.queued).toBe(1);
       const call = (prismaMock.attendanceNotification.create as jest.Mock).mock.calls.at(-1)?.[0];
       expect(call.data.status).toBe(status);
-      expect(call.data.message).toMatch(/Your child/);
+      expect(call.data.message).toMatch(/You (were marked|arrived late)/);
     });
 
-    test('uses generic message for unknown status', async () => {
-      await request(app)
+    test('skips unknown status without creating notification', async () => {
+      const res = await request(app)
         .post(basePath)
         .query(scopeQuery)
         .set(adminAuth)
         .send({ date: VALID_DATE, records: [{ studentId: STUDENT_ID, status: 'custom' }] });
-      const call = (prismaMock.attendanceNotification.create as jest.Mock).mock.calls.at(-1)?.[0];
-      expect(call.data.message).toContain('custom');
+      expect(res.status).toBe(200);
+      expect(res.body.data.queued).toBe(0);
+      expect(prismaMock.attendanceNotification.create).not.toHaveBeenCalled();
     });
 
     test('returns queued count for multiple new notifications', async () => {
@@ -1141,7 +1143,7 @@ describe('Attendance full integration routes', () => {
           ],
         });
       expect(res.body.data.queued).toBe(2);
-      expect(res.body.data.message).toMatch(/queued/i);
+      expect(res.body.data.message).toMatch(/Attendance contact/i);
     });
 
     test('skips records missing studentId or status', async () => {

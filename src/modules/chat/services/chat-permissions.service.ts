@@ -3,7 +3,8 @@ import type { ChatRoom, ChatRoomMember, ChatRoomKind } from '@prisma/client';
 import { teacherAppChatAllowsPost } from './teacher-app-chat-permissions.service';
 import { canUserSendInDirectMessage } from './chat-dm-policy.service';
 
-const BRANCH_CHAT_ADMIN_ROLES = new Set(['branch_admin', 'sub_admin']);
+const BRANCH_CHAT_ADMIN_ROLES = new Set(['branch_admin', 'sub_admin', 'management']);
+const PORTAL_ADMIN_USER_ROLES = new Set(['super_admin', 'management']);
 const STAFF_ROLES = new Set(['teacher', 'management', 'branch_admin', 'sub_admin', 'super_admin', 'staff']);
 
 export async function getOrCreateBranchChatSettings(branchId: string) {
@@ -21,19 +22,14 @@ export async function isBranchChatAdmin(userId: string, branchId: string): Promi
     select: { role: true, status: true },
   });
   if (!user || user.status !== 'active') return false;
-  if (user.role === 'super_admin') {
-    const membership = await prisma.branchMember.findUnique({
-      where: { branchId_userId: { branchId, userId } },
-      select: { isActive: true },
-    });
-    return !!membership?.isActive;
-  }
-
   const membership = await prisma.branchMember.findUnique({
     where: { branchId_userId: { branchId, userId } },
     select: { role: true, isActive: true },
   });
-  return !!membership?.isActive && BRANCH_CHAT_ADMIN_ROLES.has(membership.role);
+  if (!membership?.isActive) return false;
+  if (user.role === 'super_admin') return true;
+  if (!PORTAL_ADMIN_USER_ROLES.has(user.role)) return false;
+  return BRANCH_CHAT_ADMIN_ROLES.has(membership.role);
 }
 
 async function canPostSchoolAnnouncement(

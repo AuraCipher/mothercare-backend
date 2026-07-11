@@ -148,6 +148,18 @@ jest.mock('@prisma/client', () => ({
     SUPPLIER_PAID_US: 'SUPPLIER_PAID_US',
   },
 
+  TenureEndReason: {
+    RESIGNED: 'RESIGNED',
+    TERMINATED: 'TERMINATED',
+    TRANSFERRED: 'TRANSFERRED',
+    GRADUATED: 'GRADUATED',
+    WITHDRAWN: 'WITHDRAWN',
+    DECEASED: 'DECEASED',
+    LEAVE: 'LEAVE',
+    REJOINED: 'REJOINED',
+    OTHER: 'OTHER',
+  },
+
   Prisma: {
     Decimal: class {
       constructor(public value: number) {}

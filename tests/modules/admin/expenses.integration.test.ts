@@ -17,7 +17,11 @@ jest.mock('../../../src/modules/admin/services/expenses.service', () => ({
     recordPayrollBulk: jest.fn().mockResolvedValue({ created: 1 }),
     getPayeePayrollProfile: jest.fn().mockResolvedValue({ userId: 'u1' }),
     listPayroll: jest.fn().mockResolvedValue([]),
-    recordPayrollPayment: jest.fn().mockResolvedValue({ id: 'p1' }),
+    recordPayrollPayment: jest.fn().mockResolvedValue({
+      payment: { id: 'p1', amount: 50000, paymentMethod: 'CASH' },
+      summary: {},
+      voucherNumber: 'V-001',
+    }),
     listPayrollHistory: jest.fn().mockResolvedValue([]),
     listCategories: jest.fn().mockResolvedValue([]),
     upsertCategory: jest.fn().mockResolvedValue({ id: 'c1', name: 'Electric' }),
