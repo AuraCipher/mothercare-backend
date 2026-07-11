@@ -53,7 +53,7 @@ function setupLoginScenario(s: Scenario) {
   } else if (s === 'graduated_student') {
     prismaMock.student.findFirst
       .mockResolvedValueOnce(null as any)
-      .mockResolvedValueOnce({ id: 'st-1' } as any);
+      .mockResolvedValueOnce({ id: 'st-1', status: 'GRADUATED' } as any);
   }
 }
 
@@ -91,7 +91,7 @@ function setupRefreshScenario(s: Scenario) {
   } else if (s === 'graduated_student') {
     prismaMock.student.findFirst
       .mockResolvedValueOnce(null as any)
-      .mockResolvedValueOnce({ id: 'st-1' } as any);
+      .mockResolvedValueOnce({ id: 'st-1', status: 'GRADUATED' } as any);
   }
   return { token: generateTestToken(user.id, user.role as any, { name: user.name }) };
 }

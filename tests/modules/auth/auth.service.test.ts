@@ -252,7 +252,7 @@ describe('AuthService.login', () => {
     prismaMock.user.findFirst.mockResolvedValue(studentUser as any);
     prismaMock.student.findFirst
       .mockResolvedValueOnce(null as any) // no active enrollment
-      .mockResolvedValueOnce({ id: 'st-1' } as any); // blocked marker exists
+      .mockResolvedValueOnce({ id: 'st-1', status: 'GRADUATED' } as any); // blocked marker exists
 
     await expect(
       authService.login({

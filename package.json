@@ -20,7 +20,10 @@
     "openapi:generate": "npx ts-node scripts/generate-openapi.ts",
     "backup:postgres": "npx ts-node scripts/backup-postgres-r2.ts",
     "seed:demo": "npx ts-node prisma/seed-demo-school.ts",
-    "db:reset:demo": "prisma migrate reset --force --skip-seed && npm run seed:demo"
+    "db:reset:demo": "prisma migrate reset --force --skip-seed && npm run seed:demo",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db seed",
+    "e2e:prepare": "prisma generate && npm run db:migrate:deploy && npm run db:seed && npm run build"
   },
   "prisma": {
     "seed": "npx ts-node prisma/seed.ts"
@@ -35,6 +38,7 @@
   ],
   "author": "MCS Development Team",
   "license": "MIT",
+  "auditNotes": "overrides force uuid@11.1.1+ in firebase-admin transitive deps (GHSA-w5hq-g745-h8pq); firebase-admin v14 upgrade deferred as major bump",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1083.0",
     "@prisma/client": "^5.10.0",
@@ -62,6 +66,17 @@
     "validator": "^13.11.0",
     "zod": "^3.22.4"
   },
+  "overrides": {
+    "gaxios": {
+      "uuid": "^11.1.1"
+    },
+    "google-gax": {
+      "uuid": "^11.1.1"
+    },
+    "teeny-request": {
+      "uuid": "^11.1.1"
+    }
+  },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.2",
     "@types/cookie-parser": "^1.4.10",
@@ -88,6 +103,8 @@
     "ts-jest": "^29.4.11",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "yaml": "^2.9.0",
+    "zod-to-json-schema": "^3.25.2"
   }
 }

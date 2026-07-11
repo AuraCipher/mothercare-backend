@@ -64,7 +64,7 @@ describe('Auth student eligibility matrix', () => {
           if (state === 'graduated') {
             prismaMock.student.findFirst
               .mockResolvedValueOnce(null as any)
-              .mockResolvedValueOnce({ id: 'st-1' } as any);
+              .mockResolvedValueOnce({ id: 'st-1', status: 'GRADUATED' } as any);
             await expect(callMethod(method)).rejects.toMatchObject({
               status: 403,
               message: 'Student login is disabled after graduation',
