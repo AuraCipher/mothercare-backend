@@ -128,11 +128,24 @@ export async function ensureStudentChatBootstrap(input: StudentChatBootstrapInpu
     description: 'Fee payments and receipts',
   });
 
+  const resultRoom = await ensureRoom({
+    academicYearId: input.academicYearId,
+    branchId: input.branchId,
+    kind: 'system_result',
+    name: 'Results',
+    singletonKey: `ay:${input.academicYearId}:student:${input.studentId}:results`,
+    studentId: input.studentId,
+    onlyStaffCanPost: true,
+    studentsCanPost: false,
+    description: 'Published exam results',
+  });
+
   // Student memberships (read-only on broadcasts / system feeds)
   await ensureRoomMembership(schoolRoom.id, input.userId, { access: 'observer', canPost: false });
   await ensureRoomMembership(classRoom.id, input.userId, { access: 'member', canPost: false });
   await ensureRoomMembership(attendanceRoom.id, input.userId, { access: 'observer', canPost: false });
   await ensureRoomMembership(paymentRoom.id, input.userId, { access: 'observer', canPost: false });
+  await ensureRoomMembership(resultRoom.id, input.userId, { access: 'observer', canPost: false });
 
   // Class teachers → class announcement post only if isClassTeacher
   const classTeachers = await prisma.teacherAssignment.findMany({
@@ -239,7 +252,7 @@ export function groupRoomsForStudentLanding(
   return [
     { key: 'school', title: 'School Announcement', rooms: pick(['school_announcement']) },
     { key: 'class', title: 'Class Community', rooms: pick(['class_announcement', 'group_chat']) },
-    { key: 'system', title: 'Updates', rooms: pick(['system_attendance', 'system_payment']) },
+    { key: 'system', title: 'School Records', rooms: pick(['system_attendance', 'system_payment', 'system_result']) },
     { key: 'dm', title: 'Messages', rooms: pick(['direct_message']) },
   ].filter((s) => s.rooms.length > 0);
 }

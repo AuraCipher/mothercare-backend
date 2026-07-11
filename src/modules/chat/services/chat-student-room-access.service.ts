@@ -13,7 +13,7 @@ export async function ensureStudentSystemRoomAccess(roomId: string, userId: stri
     },
   });
   if (!room) return;
-  if (room.kind !== 'system_attendance' && room.kind !== 'system_payment') return;
+  if (room.kind !== 'system_attendance' && room.kind !== 'system_payment' && room.kind !== 'system_result') return;
   if (!room.studentId || !room.branchId) {
     throw { status: 403, message: 'Not a member of this room' };
   }

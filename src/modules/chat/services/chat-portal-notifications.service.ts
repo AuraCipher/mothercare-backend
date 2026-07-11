@@ -37,6 +37,9 @@ function typeFromRoomKind(kind: ChatRoomKind): string {
   }
   if (kind === 'system_attendance') return 'attendance';
   if (kind === 'system_payment') return 'payment';
+  if (kind === 'system_result') return 'results';
+  if (kind === 'system_teacher_attendance') return 'attendance';
+  if (kind === 'system_teacher_payroll') return 'payroll';
   return 'message';
 }
 

@@ -211,6 +211,10 @@ enum ChatRoomKind {
   direct_message // 1:1 student ↔ teacher / appointed class role
   system_attendance // per-student fixed attendance feed
   system_payment // per-student fixed payment/receipt feed
+  system_result // per-student fixed exam results feed
+  system_teacher_alerts // deprecated — use system_teacher_attendance / system_teacher_payroll
+  system_teacher_attendance // per-teacher own attendance feed
+  system_teacher_payroll // per-teacher salary / payroll feed
 }
 
 enum ChatRoomSource {

@@ -10,6 +10,8 @@ import {
   assertStaffInScopeWithTenure,
   assertTeachersInScopeWithTenure,
 } from '../utils/employee-attendance';
+import { queueAttendanceStatusNotification, notifyTeacherAttendanceStatus } from '../../chat/services/system-notification.service';
+import { shouldNotifyStudentAttendance } from '../../chat/templates/system-notification-templates';
 
 const router = Router();
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
@@ -111,6 +113,15 @@ router.post('/attendance/batch', asyncHandler(async (req: Request, res: Response
       },
     });
     saved++;
+
+    if (shouldNotifyStudentAttendance(record.status)) {
+      void queueAttendanceStatusNotification({
+        studentId: record.studentId,
+        date: dateObj,
+        status: record.status,
+        note: record.note || null,
+      }).catch(() => undefined);
+    }
   }
 
   res.json({ success: true, data: { saved, total: records.length } });
@@ -248,6 +259,14 @@ router.post('/attendance/teachers/batch', asyncHandler(async (req: Request, res:
       },
     });
     saved++;
+    void notifyTeacherAttendanceStatus({
+      teacherUserId: record.teacherId,
+      academicYearId: scope.academicYearId,
+      branchId: scope.branchId,
+      date: dateObj,
+      status: record.status,
+      note: record.note || null,
+    }).catch(() => undefined);
   }
 
   res.json({ success: true, data: { saved, total: records.length } });
@@ -382,19 +401,21 @@ router.post('/attendance/notify', asyncHandler(async (req: Request, res: Respons
 
   for (const r of records) {
     if (!r.studentId || !r.status) continue;
-    const labels: Record<string, string> = { absent: 'was absent', late: 'arrived late', leave: 'is on leave' };
-    const msg = `Your child ${labels[r.status] || r.status} on ${date}.`;
+    if (!shouldNotifyStudentAttendance(r.status)) continue;
     const exists = await prisma.attendanceNotification.findFirst({
       where: { studentId: r.studentId, date: dateObj, status: r.status },
     });
     if (exists) continue;
-    await prisma.attendanceNotification.create({
-      data: { studentId: r.studentId, date: dateObj, status: r.status, message: msg },
+    await queueAttendanceStatusNotification({
+      studentId: r.studentId,
+      date: dateObj,
+      status: r.status,
+      note: r.note || null,
     });
     queued++;
   }
 
-  res.json({ success: true, data: { queued, message: 'Notifications queued. Will be sent via chat app.' } });
+  res.json({ success: true, data: { queued, message: 'Notifications sent to student Attendance contact.' } });
 }));
 
 export default router;

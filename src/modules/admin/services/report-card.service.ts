@@ -8,6 +8,7 @@ import {
   assertStudentInScope,
 } from '../utils/exam-scope';
 import { computeCompetitionRanks, lookupGrade } from './subject-result.service';
+import { notifyReportCardPublished } from '../../chat/services/system-notification.service';
 
 /** Simple average of subject-result percentages (no credit hours on Subject model). */
 export function computeOverallPercentage(subjectResults: { percentage: number }[]): number {
@@ -292,6 +293,16 @@ class ReportCardService {
     const updated = await prisma.reportCard.update({
       where: { id: reportCardId },
       data: { status: 'PUBLISHED' },
+      include: {
+        examSession: { select: { name: true } },
+        student: {
+          select: {
+            id: true,
+            name: true,
+            group: { select: { name: true, section: true } },
+          },
+        },
+      },
     });
 
     await logAudit({
@@ -309,6 +320,15 @@ class ReportCardService {
         branchId: scope.branchId,
       },
     });
+
+    void notifyReportCardPublished({
+      studentId: updated.studentId,
+      reportCardId: updated.id,
+      examSessionId: updated.examSessionId,
+      sessionName: updated.examSession.name,
+      overallGrade: updated.overallGrade,
+      percentage: updated.overallPercentage,
+    }).catch(() => undefined);
 
     return updated;
   }

@@ -29,6 +29,7 @@ import {
   markTeacherNotificationRead,
 } from '../services/teacher-notifications.service';
 import { getTeacherContext, TeacherAccessError } from '../utils/teacher-assignment.guard';
+import { expensesService } from '../../admin/services/expenses.service';
 import { assertFeatureAllowed } from '../permissions/teacher-feature.guard';
 import type { TeacherContext } from '../services/teacher-context.service';
 import { getTeacherChatLanding, openTeacherDirectMessage } from '../services/teacher-chat.service';
@@ -457,6 +458,43 @@ router.delete(
       removedById: user.id,
     });
     res.json({ success: true, message: 'Assignment removed' });
+  }),
+);
+
+router.get(
+  '/my-attendance',
+  teacherScopeMiddleware,
+  asyncHandler(async (req, res) => {
+    const ctx = (req as any).teacherContext as TeacherContext;
+    const user = (req as any).teacherUser;
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+    const where: { teacherId: string; academicYearId: string; date?: { gte?: Date; lte?: Date } } = {
+      teacherId: user.id,
+      academicYearId: ctx.academicYearId,
+    };
+    if (from || to) {
+      where.date = {};
+      if (from) where.date.gte = new Date(from);
+      if (to) where.date.lte = new Date(`${to}T23:59:59`);
+    }
+    const rows = await prisma.teacherAttendance.findMany({
+      where,
+      orderBy: { date: 'desc' },
+      take: 120,
+    });
+    res.json({ success: true, data: rows });
+  }),
+);
+
+router.get(
+  '/my-payroll',
+  teacherScopeMiddleware,
+  asyncHandler(async (req, res) => {
+    const ctx = (req as any).teacherContext as TeacherContext;
+    const user = (req as any).teacherUser;
+    const data = await expensesService.listPayrollHistory(ctx.branchId, user.id);
+    res.json({ success: true, data });
   }),
 );
 

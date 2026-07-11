@@ -122,6 +122,11 @@ export async function getTeacherChatLanding(input: {
   const sections = [
     { key: 'school', title: 'School Announcement', rooms: pick(['school_announcement']) },
     { key: 'teachers', title: 'Teachers Announcement', rooms: pick(['teacher_announcement']) },
+    {
+      key: 'records',
+      title: 'My Records',
+      rooms: pick(['system_teacher_attendance', 'system_teacher_payroll']),
+    },
     { key: 'classes', title: 'My Classes', communities },
     { key: 'contacts', title: 'Contacts', contacts },
     { key: 'dm', title: 'Messages', rooms: pick(['direct_message']) },

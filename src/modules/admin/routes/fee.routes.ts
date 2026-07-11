@@ -12,6 +12,12 @@ import {
   buildReceiptHeadRowsFromAllocations,
   type FeeHeadBreakdownRow,
 } from '../services/fee-breakdown.utils';
+import {
+  notifyFeeGenerated,
+  notifyPaymentRecorded,
+  notifyPaymentReverted,
+  notifyFamilyPaymentReceived,
+} from '../../chat/services/system-notification.service';
 
 const router = Router();
 
@@ -896,7 +902,7 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
     if (mode === 'generate') {
       if (existing) { skipped++; continue; }
       if (totalAmount > 0) {
-        await prisma.studentFee.create({
+        const createdFee = await prisma.studentFee.create({
           data: {
             academicYearId: ayId,
             studentId: student.id,
@@ -907,6 +913,14 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
             feeHeadBreakdown: breakdown,
           },
         });
+        void notifyFeeGenerated({
+          studentId: student.id,
+          studentFeeId: createdFee.id,
+          month,
+          year,
+          amountPaise: totalAmount,
+          balanceDuePaise: totalAmount,
+        }).catch(() => undefined);
         generated++;
       } else if (groupStructures.length === 0) {
         skippedNoStructure++;
@@ -1633,6 +1647,23 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
     userId,
   );
 
+  const updatedFee = await prisma.studentFee.findUnique({
+    where: { id: studentFeeId },
+    select: { status: true, month: true, year: true },
+  });
+
+  void notifyPaymentRecorded({
+    studentId: studentFee.studentId,
+    paymentId: payment.id,
+    amountPaise: amount,
+    receiptNumber,
+    paymentMethod,
+    month: studentFee.month,
+    year: studentFee.year,
+    balanceDuePaise: balanceAfter,
+    feeStatus: updatedFee?.status ?? 'PARTIAL',
+  }).catch(() => undefined);
+
   res.status(201).json({ success: true, data: { payment, receiptNumber, status: 'PAID' } });
 }));
 
@@ -2206,6 +2237,15 @@ router.post('/payments/:id/revert', asyncHandler(async (req: Request, res: Respo
       performedById: userId,
     },
   });
+
+  const balanceDue = Math.max(0, revertTotalDue - paidAmount);
+  void notifyPaymentReverted({
+    studentId: payment.studentId,
+    paymentId: payment.id,
+    amountPaise: payment.amount,
+    receiptNumber: payment.receiptNumber ?? '—',
+    balanceDuePaise: balanceDue,
+  }).catch(() => undefined);
 
   res.json({ success: true, data: { reverted: payment.id, status } });
 }));
@@ -3054,6 +3094,24 @@ router.post('/family-payments/allocate', asyncHandler(async (req: Request, res: 
     console.error('Family receipt snapshot failed:', (famSnapErr as Error).message);
   }
 
+  const familyRow = await prisma.family.findUnique({
+    where: { id: familyId },
+    select: { fatherName: true },
+  });
+  const familyNameAllocate = familyRow?.fatherName
+    ? `${familyRow.fatherName} Family`
+    : 'Family';
+  for (const cp of allPayments) {
+    void notifyFamilyPaymentReceived({
+      studentId: cp.studentId,
+      paymentId: cp.id,
+      amountPaise: cp.amount,
+      receiptNumber: cp.receiptNumber ?? receiptNumber,
+      paymentMethod: cp.paymentMethod,
+      familyName: familyNameAllocate,
+    }).catch(() => undefined);
+  }
+
   res.status(201).json({
     success: true,
     data: {
@@ -3232,6 +3290,20 @@ router.post('/family-payments', asyncHandler(async (req: Request, res: Response)
     await createFamilyReceiptSnapshot(familyPayment.id, userId);
   } catch (famSnapErr) {
     console.error('Family receipt snapshot failed:', (famSnapErr as Error).message);
+  }
+
+  const familyName = familyPayment.family?.fatherName
+    ? `${familyPayment.family.fatherName} Family`
+    : 'Family';
+  for (const cp of createdPayments) {
+    void notifyFamilyPaymentReceived({
+      studentId: cp.studentId,
+      paymentId: cp.id,
+      amountPaise: cp.amount,
+      receiptNumber: cp.receiptNumber ?? receiptNumber,
+      paymentMethod: cp.paymentMethod,
+      familyName,
+    }).catch(() => undefined);
   }
 
   res.status(201).json({ success: true, data: { familyPayment, receiptNumber, totalAmount, paymentCount: createdPayments.length } });

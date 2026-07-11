@@ -3,6 +3,8 @@ import { ExpenseCategoryKind } from '@prisma/client';
 import { expensesService } from '../services/expenses.service';
 import { computePayrollMonth, listPayrollPayees } from '../services/payroll-calculation.service';
 import { requireScope } from '../utils/scope-context';
+import { notifyTeacherPayrollPayment } from '../../chat/services/system-notification.service';
+import { prisma } from '../../../lib/prisma';
 
 const router = Router();
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
@@ -75,6 +77,24 @@ router.post('/expenses/payroll/bulk', asyncHandler(async (req, res) => {
     ...req.body,
     academicYearId: scope.academicYearId,
   });
+  for (const item of data.results ?? []) {
+    if (!item.success || !item.payeeUserId) continue;
+    const outgoing = await prisma.branchOutgoingPayment.findFirst({
+      where: { branchId: scope.branchId, voucherNumber: item.voucherNumber },
+      select: { id: true, amount: true, paymentMethod: true },
+    });
+    if (!outgoing) continue;
+    void notifyTeacherPayrollPayment({
+      teacherUserId: item.payeeUserId,
+      academicYearId: scope.academicYearId,
+      branchId: scope.branchId,
+      outgoingPaymentId: outgoing.id,
+      amountPaise: Number(outgoing.amount),
+      salaryMonth: req.body.salaryMonth,
+      paymentMethod: outgoing.paymentMethod,
+      isBulkRun: true,
+    }).catch(() => undefined);
+  }
   res.status(201).json({ success: true, data });
 }));
 
@@ -129,6 +149,16 @@ router.post('/expenses/payroll', asyncHandler(async (req, res) => {
     ...req.body,
     academicYearId: scope.academicYearId,
   });
+  void notifyTeacherPayrollPayment({
+    teacherUserId: req.body.payeeUserId,
+    academicYearId: scope.academicYearId,
+    branchId: scope.branchId,
+    outgoingPaymentId: data.payment.id,
+    amountPaise: Number(data.payment.amount),
+    salaryMonth: req.body.salaryMonth,
+    paymentMethod: data.payment.paymentMethod,
+    isPartial: req.body.paymentKind === 'PARTIAL',
+  }).catch(() => undefined);
   res.status(201).json({ success: true, data });
 }));
 

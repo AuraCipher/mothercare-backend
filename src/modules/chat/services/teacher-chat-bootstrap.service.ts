@@ -196,6 +196,44 @@ export async function ensureTeacherChatBootstrap(input: {
       });
     }
   }
+
+  const attendanceKey = `ay:${input.academicYearId}:teacher_user:${input.userId}:attendance`;
+  let attendanceRoom = await prisma.chatRoom.findUnique({ where: { singletonKey: attendanceKey } });
+  if (!attendanceRoom) {
+    attendanceRoom = await prisma.chatRoom.create({
+      data: {
+        academicYearId: input.academicYearId,
+        branchId: input.branchId,
+        kind: 'system_teacher_attendance',
+        name: 'My Attendance',
+        singletonKey: attendanceKey,
+        source: 'system_bootstrap',
+        onlyStaffCanPost: true,
+        studentsCanPost: false,
+        description: 'Your attendance updates from school',
+      },
+    });
+  }
+  await ensureRoomMembership(attendanceRoom.id, input.userId, { access: 'observer', canPost: false });
+
+  const payrollKey = `ay:${input.academicYearId}:teacher_user:${input.userId}:payroll`;
+  let payrollRoom = await prisma.chatRoom.findUnique({ where: { singletonKey: payrollKey } });
+  if (!payrollRoom) {
+    payrollRoom = await prisma.chatRoom.create({
+      data: {
+        academicYearId: input.academicYearId,
+        branchId: input.branchId,
+        kind: 'system_teacher_payroll',
+        name: 'My Payroll',
+        singletonKey: payrollKey,
+        source: 'system_bootstrap',
+        onlyStaffCanPost: true,
+        studentsCanPost: false,
+        description: 'Salary and payroll updates',
+      },
+    });
+  }
+  await ensureRoomMembership(payrollRoom.id, input.userId, { access: 'observer', canPost: false });
 }
 
 export { groupLabel };

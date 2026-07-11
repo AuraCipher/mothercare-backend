@@ -1,6 +1,7 @@
 import { prisma } from '../../../lib/prisma';
 import { basePrisma } from '../../../lib/prisma';
 import { logAudit } from '../../../services/audit.service';
+import { notifyMarksAbsent, notifyMarksEntered } from '../../chat/services/system-notification.service';
 
 type MarksEntryInput = {
   studentId: string;
@@ -82,6 +83,7 @@ class MarksEntryService {
     const ecs = await prisma.examClassSubject.findUnique({
       where: { id: examClassSubjectId },
       include: {
+        subject: { select: { name: true } },
         examClass: {
           include: { exam: { select: { id: true, name: true, status: true } } },
         },
@@ -205,6 +207,43 @@ class MarksEntryService {
         examName: exam.name,
       },
     });
+
+    const examName = exam.name;
+    const subjectName = ecs.subject.name;
+    const totalForNotify = effectiveTotal!;
+
+    for (const entry of entries) {
+      const savedEntry = await prisma.marksEntry.findUnique({
+        where: {
+          examClassSubjectId_studentId: {
+            examClassSubjectId,
+            studentId: entry.studentId,
+          },
+        },
+        select: { id: true },
+      });
+      if (!savedEntry) continue;
+
+      if (entry.isAbsent) {
+        void notifyMarksAbsent({
+          studentId: entry.studentId,
+          examClassSubjectId,
+          marksEntryId: savedEntry.id,
+          examName,
+          subjectName,
+        }).catch(() => undefined);
+      } else if (entry.marksObtained != null) {
+        void notifyMarksEntered({
+          studentId: entry.studentId,
+          examClassSubjectId,
+          marksEntryId: savedEntry.id,
+          examName,
+          subjectName,
+          marksObtained: entry.marksObtained,
+          totalMarks: totalForNotify,
+        }).catch(() => undefined);
+      }
+    }
 
     // Return updated grid
     return this.getMarksGrid(examClassSubjectId);
