@@ -115,10 +115,13 @@ export async function studentScopeMiddleware(
   }
 }
 
-/** Student portal is read-only — block mutating methods. */
+/** Student portal is read-only — block mutating methods except chat DMs. */
 export function studentReadOnlyGuard(req: Request, res: Response, next: NextFunction) {
   const method = req.method.toUpperCase();
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    return next();
+  }
+  if (method === 'POST' && (req.path === '/chat/dm' || req.path.endsWith('/chat/dm'))) {
     return next();
   }
   return res.status(405).json({

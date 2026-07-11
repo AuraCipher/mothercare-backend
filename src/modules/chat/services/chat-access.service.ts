@@ -124,12 +124,12 @@ export async function listRoomsForUser(userId: string, academicYearId: string): 
     const readState = await prisma.chatMessageReadState.findUnique({
       where: { roomId_userId: { roomId: m.roomId, userId } },
     });
-    const unreadCount = readState?.lastReadMessageId
+    const unreadCount = readState
       ? await prisma.chatMessage.count({
           where: {
             roomId: m.roomId,
             isDeleted: false,
-            createdAt: { gt: readState.lastReadAt },
+            ...(readState.lastReadAt ? { createdAt: { gt: readState.lastReadAt } } : {}),
           },
         })
       : await prisma.chatMessage.count({

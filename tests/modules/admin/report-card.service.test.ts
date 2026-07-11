@@ -133,7 +133,15 @@ describe('ReportCardService — compute pipeline', () => {
       { subjectId: 'sub1', computedAt: new Date('2026-06-10') },
     ] as any);
     prismaMock.examClassSubject.findMany.mockResolvedValue([{ subjectId: 'sub1' }] as any);
-    prismaMock.reportCard.update.mockResolvedValue({ id: 'rc1', status: 'PUBLISHED' } as any);
+    prismaMock.reportCard.update.mockResolvedValue({
+      id: 'rc1',
+      studentId: 's1',
+      examSessionId: 'sess1',
+      status: 'PUBLISHED',
+      overallGrade: 'A',
+      overallPercentage: 85,
+      examSession: { name: 'Term 1' },
+    } as any);
 
     const result = await reportCardService.publish('rc1', scope);
     expect(result.status).toBe('PUBLISHED');

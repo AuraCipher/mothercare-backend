@@ -14,6 +14,9 @@
     "test:integration": "jest --testPathPatterns=integration\\.test --testPathIgnorePatterns=e2e-flow",
     "test:e2e": "jest --testPathPatterns=e2e-flow\\.integration\\.test",
     "test:all": "bash scripts/test-all.sh",
+    "benchmark:year-end": "npx ts-node scripts/benchmark-year-end.ts",
+    "load-test": "npx ts-node scripts/load-test.ts",
+    "load-test:suite": "bash scripts/load-test-suite.sh",
     "backup:postgres": "npx ts-node scripts/backup-postgres-r2.ts",
     "seed:demo": "npx ts-node prisma/seed-demo-school.ts",
     "db:reset:demo": "prisma migrate reset --force --skip-seed && npm run seed:demo"

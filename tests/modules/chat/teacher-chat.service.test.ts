@@ -137,14 +137,13 @@ describe('getTeacherChatLanding', () => {
     expect(classes?.communities).toHaveLength(2);
   });
 
-  test('lists staff contacts excluding self', async () => {
+  test('does not inline contacts on landing (use contact picker API)', async () => {
     const landing = await getTeacherChatLanding({
       userId: TEACHER_ID,
       branchId: BRANCH_ID,
       academicYearId: AY_ID,
     });
 
-    expect(landing.contacts).toHaveLength(1);
-    expect(landing.contacts[0].name).toBe('Principal');
+    expect(landing.contacts).toEqual([]);
   });
 });

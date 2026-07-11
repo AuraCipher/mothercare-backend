@@ -1,6 +1,22 @@
 import { prisma } from '../../../lib/prisma';
 import { groupLabel } from './teacher-chat-bootstrap.service';
 
+const STAFF_DM_BRANCH_ROLES = ['teacher', 'branch_admin', 'sub_admin', 'management'] as const;
+
+function branchStaffPickerWhere(branchId: string, excludeUserId: string) {
+  return {
+    branchId,
+    isActive: true,
+    userId: { not: excludeUserId },
+    role: { in: [...STAFF_DM_BRANCH_ROLES] },
+    user: { status: 'active' as const, role: { not: 'super_admin' as const } },
+  };
+}
+
+function filterPickerContacts(contacts: PickerContact[], userId: string): PickerContact[] {
+  return contacts.filter((c) => c.userId !== userId);
+}
+
 export type PickerContact = {
   userId: string;
   name: string;
@@ -56,10 +72,8 @@ export async function getStudentContactPicker(input: {
 
   const adminMembers = await prisma.branchMember.findMany({
     where: {
-      branchId: input.branchId,
-      isActive: true,
+      ...branchStaffPickerWhere(input.branchId, input.userId),
       role: { in: ['branch_admin', 'sub_admin', 'management'] },
-      user: { status: 'active' },
     },
     include: { user: { select: { id: true, name: true } } },
     orderBy: { user: { name: 'asc' } },
@@ -82,7 +96,7 @@ export async function getStudentContactPicker(input: {
 
   const teacherContacts = withDm(
     classTeachers
-      .filter((a) => a.teacher.status === 'active')
+      .filter((a) => a.teacher.status === 'active' && a.teacher.id !== input.userId)
       .map((a) => ({
         userId: a.teacher.id,
         name: a.teacher.name,
@@ -93,8 +107,8 @@ export async function getStudentContactPicker(input: {
 
   return {
     sections: [
-      { key: 'administration', title: 'Administration', contacts: adminContacts },
-      { key: 'teachers', title: 'Teachers', contacts: teacherContacts },
+      { key: 'administration', title: 'Administration', contacts: filterPickerContacts(adminContacts, input.userId) },
+      { key: 'teachers', title: 'Teachers', contacts: filterPickerContacts(teacherContacts, input.userId) },
     ],
     classGroups: [],
   };
@@ -115,11 +129,8 @@ export async function getTeacherContactPicker(input: {
 
   const adminMembers = await prisma.branchMember.findMany({
     where: {
-      branchId: input.branchId,
-      isActive: true,
-      userId: { not: input.userId },
+      ...branchStaffPickerWhere(input.branchId, input.userId),
       role: { in: ['branch_admin', 'sub_admin', 'management'] },
-      user: { status: 'active' },
     },
     include: { user: { select: { id: true, name: true } } },
     orderBy: { user: { name: 'asc' } },
@@ -127,11 +138,8 @@ export async function getTeacherContactPicker(input: {
 
   const teacherMembers = await prisma.branchMember.findMany({
     where: {
-      branchId: input.branchId,
-      isActive: true,
-      userId: { not: input.userId },
+      ...branchStaffPickerWhere(input.branchId, input.userId),
       role: 'teacher',
-      user: { status: 'active' },
     },
     include: { user: { select: { id: true, name: true } } },
     orderBy: { user: { name: 'asc' } },
@@ -154,7 +162,7 @@ export async function getTeacherContactPicker(input: {
         parents: {
           include: {
             parent: {
-              include: { user: { select: { id: true, name: true, status: true } } },
+              include: { user: { select: { id: true, name: true, status: true, role: true } } },
             },
           },
         },
@@ -167,7 +175,15 @@ export async function getTeacherContactPicker(input: {
     for (const s of students) {
       for (const sp of s.parents) {
         const parentUser = sp.parent.user;
-        if (!parentUser || parentUser.status !== 'active' || seenParents.has(parentUser.id)) continue;
+        if (
+          !parentUser ||
+          parentUser.status !== 'active' ||
+          parentUser.id === input.userId ||
+          parentUser.role === 'super_admin' ||
+          seenParents.has(parentUser.id)
+        ) {
+          continue;
+        }
         seenParents.add(parentUser.id);
         parentContacts.push({
           userId: parentUser.id,
@@ -188,32 +204,33 @@ export async function getTeacherContactPicker(input: {
     }
   }
 
+  const adminContacts = filterPickerContacts(
+    withDm(
+      adminMembers.map((m) => ({
+        userId: m.user.id,
+        name: m.user.name,
+        roleLabel: m.role === 'branch_admin' ? 'Principal' : m.role === 'sub_admin' ? 'Admin' : 'Management',
+      })),
+      dm,
+    ),
+    input.userId,
+  );
+  const teacherContacts = filterPickerContacts(
+    withDm(
+      teacherMembers.map((m) => ({
+        userId: m.user.id,
+        name: m.user.name,
+        roleLabel: 'Teacher',
+      })),
+      dm,
+    ),
+    input.userId,
+  );
+
   return {
     sections: [
-      {
-        key: 'administration',
-        title: 'Administration',
-        contacts: withDm(
-          adminMembers.map((m) => ({
-            userId: m.user.id,
-            name: m.user.name,
-            roleLabel: m.role === 'branch_admin' ? 'Principal' : m.role === 'sub_admin' ? 'Admin' : 'Management',
-          })),
-          dm,
-        ),
-      },
-      {
-        key: 'teachers',
-        title: 'Teachers',
-        contacts: withDm(
-          teacherMembers.map((m) => ({
-            userId: m.user.id,
-            name: m.user.name,
-            roleLabel: 'Teacher',
-          })),
-          dm,
-        ),
-      },
+      { key: 'administration', title: 'Administration', contacts: adminContacts },
+      { key: 'teachers', title: 'Teachers', contacts: teacherContacts },
     ],
     classGroups,
   };
@@ -227,13 +244,7 @@ export async function getAdminContactPicker(input: {
   const dm = await dmRoomMap(input.userId, input.academicYearId);
 
   const staffMembers = await prisma.branchMember.findMany({
-    where: {
-      branchId: input.branchId,
-      isActive: true,
-      userId: { not: input.userId },
-      role: { in: ['teacher', 'branch_admin', 'sub_admin', 'management'] },
-      user: { status: 'active' },
-    },
+    where: branchStaffPickerWhere(input.branchId, input.userId),
     include: { user: { select: { id: true, name: true } } },
     orderBy: { user: { name: 'asc' } },
   });
@@ -256,7 +267,7 @@ export async function getAdminContactPicker(input: {
     });
 
     const studentContacts = students
-      .filter((s) => s.user?.status === 'active')
+      .filter((s) => s.user?.status === 'active' && s.user!.id !== input.userId)
       .map((s) => ({
         userId: s.user!.id,
         name: s.name,
@@ -274,32 +285,33 @@ export async function getAdminContactPicker(input: {
     }
   }
 
+  const adminContacts = filterPickerContacts(
+    withDm(
+      admins.map((m) => ({
+        userId: m.user.id,
+        name: m.user.name,
+        roleLabel: m.role === 'branch_admin' ? 'Principal' : m.role === 'sub_admin' ? 'Admin' : 'Management',
+      })),
+      dm,
+    ),
+    input.userId,
+  );
+  const teacherContacts = filterPickerContacts(
+    withDm(
+      teachers.map((m) => ({
+        userId: m.user.id,
+        name: m.user.name,
+        roleLabel: 'Teacher',
+      })),
+      dm,
+    ),
+    input.userId,
+  );
+
   return {
     sections: [
-      {
-        key: 'administration',
-        title: 'Administration',
-        contacts: withDm(
-          admins.map((m) => ({
-            userId: m.user.id,
-            name: m.user.name,
-            roleLabel: m.role === 'branch_admin' ? 'Principal' : m.role === 'sub_admin' ? 'Admin' : 'Management',
-          })),
-          dm,
-        ),
-      },
-      {
-        key: 'teachers',
-        title: 'Teachers',
-        contacts: withDm(
-          teachers.map((m) => ({
-            userId: m.user.id,
-            name: m.user.name,
-            roleLabel: 'Teacher',
-          })),
-          dm,
-        ),
-      },
+      { key: 'administration', title: 'Administration', contacts: adminContacts },
+      { key: 'teachers', title: 'Teachers', contacts: teacherContacts },
     ],
     classGroups,
   };
