@@ -13,3 +13,4 @@ tests/results/
 uploads/
 cloudflared.deb
 graphify-out/
+.env.local
