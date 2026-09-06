@@ -156,6 +156,7 @@ export function setupGracefulShutdown(prisma: { $disconnect: () => Promise<void>
     process.exit(1);
   });
   process.on('unhandledRejection', (reason) => {
-    logger.error('Unhandled Rejection', reason as any);
+    logger.error('Unhandled Rejection — exiting to prevent corrupted state', reason as any);
+    process.exit(1);
   });
 }

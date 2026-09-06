@@ -1529,11 +1529,24 @@ async function createFamilyReceiptSnapshot(familyPaymentId: string, userId: stri
 
 // POST /admin/payments — Record single payment
 router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
-  const { studentFeeId, amount, paymentMethod, reference, note } = req.body;
+  const { studentFeeId, amount, paymentMethod, reference, note, idempotencyKey } = req.body;
   if (!studentFeeId || !amount || amount <= 0 || !paymentMethod) {
     res.status(400).json({ success: false, message: 'studentFeeId, amount (>0), and paymentMethod required' });
     return;
   }
+
+  // Idempotency: if client sends the same key within 5 minutes, return existing payment
+  if (idempotencyKey) {
+    const existing = await prisma.payment.findFirst({
+      where: { idempotencyKey, studentFeeId, revertedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existing && (Date.now() - existing.createdAt.getTime()) < 5 * 60 * 1000) {
+      res.json({ success: true, data: existing, idempotent: true });
+      return;
+    }
+  }
+
   const userId = (req as any).user?.id;
 
   // Get the student fee (with student info for snapshot)
@@ -1567,6 +1580,7 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
         data: {
           studentFeeId, studentId: studentFee.studentId,
           amount, paymentMethod, reference, receiptNumber: rn, note, recordedById: userId,
+          ...(idempotencyKey ? { idempotencyKey } : {}),
         },
       });
 
@@ -2221,7 +2235,11 @@ router.post('/payments/:id/revert', asyncHandler(async (req: Request, res: Respo
   const revertExtraSum = (studentFee as any)?.extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
   const revertTotalDue = (studentFee?.netAmount || 0) + revertExtraSum;
   let status = 'UNPAID';
-  if (paidAmount > 0) status = paidAmount >= revertTotalDue ? 'PAID' : 'PARTIAL';
+  if (paidAmount > 0) {
+    if (paidAmount > revertTotalDue) status = 'OVERPAID';
+    else if (paidAmount >= revertTotalDue) status = 'PAID';
+    else status = 'PARTIAL';
+  }
 
   await prisma.studentFee.update({
     where: { id: payment.studentFeeId },
@@ -2281,13 +2299,16 @@ router.post('/payments/:id/print-receipt', asyncHandler(async (req: Request, res
 
 // POST /admin/payments/:id/audit-log — Record audit event for a payment
 router.post('/payments/:id/audit-log', asyncHandler(async (req: Request, res: Response) => {
-  const { action, ipAddress, userAgent } = req.body;
+  const { action } = req.body;
   const validActions = ['CREATED', 'REVERTED', 'REPRINTED', 'DOWNLOADED', 'MODIFIED'];
   if (!action || !validActions.includes(action)) {
     res.status(400).json({ success: false, message: `Action must be one of: ${validActions.join(', ')}` });
     return;
   }
   const userId = (req as any).user?.id;
+  // Use server-derived values to prevent spoofing
+  const ipAddress = (req as any).auditContext?.ipAddress || req.ip || req.socket.remoteAddress || null;
+  const userAgent = (req as any).auditContext?.userAgent || req.headers['user-agent'] || null;
   const log = await prisma.paymentAuditLog.create({
     data: {
       paymentId: req.params.id,

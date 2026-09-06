@@ -375,7 +375,11 @@ class BatchPromotionService {
 
           const nextOrder = s.group.displayOrder + 1;
           const targetGroupId = orderToTargetGroup.get(nextOrder);
-          if (!targetGroupId) continue;
+          if (!targetGroupId) {
+            // Log warning: student has no target class in the next year
+            console.warn(`[BatchPromotion] Student ${s.id} (${s.name}) skipped: no target class for displayOrder ${nextOrder}`);
+            continue;
+          }
 
           let personId = s.personId;
           if (!personId) {

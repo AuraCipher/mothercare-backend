@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import logger from '../../lib/logger';
 
 /**
@@ -22,13 +23,26 @@ function sanitizeBody(body: any): any {
 
 /**
  * Request/Response logging middleware
- * Logs: incoming request (method, url, body) and outgoing response (status, duration)
- * Sensitive fields (passwords, tokens) are redacted before logging.
+ * - Adds X-Request-ID correlation header to every request
+ * - Logs incoming request and outgoing response (sanitized)
+ * - In production: structured JSON logs for log aggregation
  */
 export default function requestLogger(req: Request, res: Response, next: NextFunction) {
   const start = Date.now();
 
-  // Log incoming request (development only) — sanitized
+  // Correlation ID — use client-provided or generate new
+  const requestId = (req.headers['x-request-id'] as string) || crypto.randomUUID();
+  req.headers['x-request-id'] = requestId;
+  res.setHeader('X-Request-ID', requestId);
+
+  // Store audit context for downstream use (fee audit log, etc.)
+  (req as any).auditContext = {
+    ipAddress: req.ip || req.socket.remoteAddress || null,
+    userAgent: req.headers['user-agent'] || null,
+    requestId,
+  };
+
+  // Log incoming request — sanitized
   logger.req(req.method, req.originalUrl, sanitizeBody(req.body));
 
   // Capture the original end function

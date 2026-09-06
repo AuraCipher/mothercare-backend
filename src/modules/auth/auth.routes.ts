@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { login, getMe, changePassword, logout, refresh } from './auth.controller';
 import auth from '../../middleware/auth/auth.middleware';
 import { validate } from '../../middleware/validation/validate.middleware';
+import { loginLimiter } from '../../middleware/security/rateLimiter';
 import {
   loginSchema,
   changePasswordSchema,
@@ -9,8 +10,8 @@ import {
 
 const router = Router();
 
-// Public routes
-router.post('/login', validate(loginSchema), login);
+// Public routes — rate-limited login
+router.post('/login', loginLimiter, validate(loginSchema), login);
 
 // Protected routes
 router.post('/refresh', auth, refresh);

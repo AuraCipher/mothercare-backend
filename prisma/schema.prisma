@@ -270,6 +270,8 @@ model User {
   lastSeen         DateTime?
   rememberMeToken  String?       @unique
   rememberMeExpiry DateTime?
+  failedLoginAttempts Int        @default(0)
+  lockedUntil      DateTime?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
@@ -715,6 +717,7 @@ model Group {
   studentFees   StudentFee[]
 
   @@unique([academicYearId, name, section])
+  @@index([academicYearId])
   @@map("groups")
 }
 
@@ -773,6 +776,7 @@ model Subject {
   updatedById String?
 
   @@unique([academicYearId, code])
+  @@index([academicYearId])
   @@map("subjects")
 }
 
@@ -917,6 +921,8 @@ model TeacherAssignment {
   createdById String?
   updatedById String?
 
+  @@index([teacherId])
+  @@index([academicYearId])
   @@map("teacher_assignments")
 }
 
@@ -1314,6 +1320,8 @@ model Enrollment {
   updatedById String?
 
   @@unique([studentId, academicYearId])
+  @@index([academicYearId])
+  @@index([groupId])
   @@map("enrollments")
 }
 
@@ -2184,6 +2192,8 @@ model TimetableEntry {
   updatedById String?
 
   @@unique([slotId, groupId])
+  @@index([teacherId])
+  @@index([groupId])
   @@map("timetable_entries")
 }
 
@@ -2473,6 +2483,7 @@ model Payment {
   revertedAt      DateTime?
   revertedById    String?
   revertReason    String?
+  idempotencyKey  String?   @unique // Client-supplied dedup key (5-min window)
   createdAt       DateTime  @default(now())
 
   studentFee      StudentFee              @relation(fields: [studentFeeId], references: [id])

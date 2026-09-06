@@ -33,7 +33,15 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
 export const refresh = asyncHandler(async (req: Request, res: Response) => {
   // @ts-ignore: req.user is set by auth middleware
   const userId = req.user?.id;
-  const data = await authService.refresh(userId);
+  // Pass current token for rotation (old token gets blacklisted)
+  const currentToken = (req as any).token || req.cookies?.token;
+  const data = await authService.refresh(userId, currentToken);
+
+  // Rotate httpOnly cookie with new token
+  if (data.token) {
+    res.cookie('token', data.token, COOKIE_OPTIONS);
+  }
+
   res.status(200).json(data);
 });
 

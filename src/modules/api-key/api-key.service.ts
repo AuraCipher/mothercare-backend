@@ -1,8 +1,7 @@
-import { PrismaClient, ApiKeyType } from '@prisma/client';
+import { ApiKeyType } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
 
 /**
  * Generate a key with branch code embedded in the string.

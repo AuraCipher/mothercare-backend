@@ -31,7 +31,18 @@ declare global {
 export const basePrisma =
   (process.env.NODE_ENV !== 'test' && global.prisma) ||
   new PrismaClient({
-    log: ['query'],
+    log: process.env.NODE_ENV === 'production'
+      ? ['error']
+      : process.env.NODE_ENV === 'test'
+        ? []
+        : ['query', 'error', 'warn'],
+    datasources: {
+      db: {
+        url: process.env.DATABASE_URL,
+        // Production connection pool: 5-20 connections based on concurrency
+        // Default Prisma pool is 10; increase if running background workers
+      },
+    },
   });
 
 if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {

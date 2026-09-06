@@ -68,7 +68,10 @@ export default async function authMiddleware(req: Request, _res: Response, next:
       const result = await apiKeyService.verifyByKey(keyToVerify, targetBranchCode);
       if (result && (!isPublishable || result.type === 'publishable')) {
         (req as any).apiKey = result;
-        (req as any).user = { role: 'super_admin', id: result.id, name: 'API Key' };
+        // Publishable keys: limited role (management) — frontend identification only.
+        // Secret keys: full admin — server-to-server integrations.
+        const apiKeyRole = result.type === 'secret' ? 'super_admin' : 'management';
+        (req as any).user = { role: apiKeyRole, id: result.id, name: 'API Key' };
         return next();
       }
       return next({ status: 401, message: 'Invalid or revoked API key' });

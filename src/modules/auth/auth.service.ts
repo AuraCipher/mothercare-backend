@@ -1,12 +1,13 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../lib/prisma';
 import { hashPassword, verifyPassword } from '../../lib/password';
-import { signToken, verifyToken } from '../../lib/jwt';
+import { signToken, verifyToken, blacklistToken } from '../../lib/jwt';
 import env from '../../config/env';
 import { z } from 'zod';
 import crypto from 'crypto';
 import { issuePushCryptoMaterial, isMobilePushRole } from '../chat/push/push-crypto.service';
 
-const prisma = new PrismaClient();
+const MAX_FAILED_LOGINS = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 
 // ─── LOGIN INPUT SCHEMA ───────────────────────────────────────────
 const loginSchema = z.object({
@@ -101,6 +102,12 @@ class AuthService {
       throw { status: 403, message: 'Account is not active' };
     }
 
+    // Check account lockout
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      const remaining = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60_000);
+      throw { status: 423, message: `Account is locked. Try again in ${remaining} minutes.` };
+    }
+
     if (user.role === 'student') {
       await this.assertStudentLoginEligible(user.id);
     }
@@ -110,13 +117,20 @@ class AuthService {
 
     const valid = await verifyPassword(password, user.passwordHash);
     if (!valid) {
+      // Increment failed login attempts
+      const newCount = (user.failedLoginAttempts || 0) + 1;
+      const updateData: any = { failedLoginAttempts: newCount };
+      if (newCount >= MAX_FAILED_LOGINS) {
+        updateData.lockedUntil = new Date(Date.now() + LOCKOUT_DURATION_MS);
+      }
+      await prisma.user.update({ where: { id: user.id }, data: updateData });
       throw { status: 401, message: 'Invalid credentials' };
     }
 
-    // Update last login
+    // Reset failed login attempts on successful login
     await prisma.user.update({
       where: { id: user.id },
-      data: { lastLoginAt: new Date(), lastSeen: new Date() },
+      data: { lastLoginAt: new Date(), lastSeen: new Date(), failedLoginAttempts: 0, lockedUntil: null },
     });
 
     // Query user's branch memberships
@@ -316,7 +330,7 @@ class AuthService {
   }
 
   // ─── REFRESH TOKEN ────────────────────────────────────────────────
-  async refresh(userId: string) {
+  async refresh(userId: string, currentToken?: string) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -334,6 +348,11 @@ class AuthService {
     }
     if (user.role === 'teacher') {
       await this.assertTeacherLoginEligible(user.id);
+    }
+
+    // Rotate: blacklist the old token so it can't be reused
+    if (currentToken) {
+      await blacklistToken(currentToken).catch(() => undefined);
     }
 
     // Re-query current branch memberships

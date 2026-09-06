@@ -19,6 +19,7 @@ import studentPortalRoutes from './modules/student/routes/student.routes';
 import errorHandler from './middleware/error/errorHandler';
 import requestLogger from './middleware/logging/requestLogger';
 import { auditContextMiddleware } from './middleware/auth/auditContext.middleware';
+import { globalLimiter } from './middleware/security/rateLimiter';
 import env from './config/env';
 
 const app = express();
@@ -54,20 +55,18 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'x-publishable-api-key'],
 }));
 
-// Fallback: ensure CORS headers on every response (ngrok sometimes strips them)
-app.use((req, res, next) => {
-  if (!res.getHeader('Access-Control-Allow-Origin')) {
-    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,x-api-key,x-publishable-api-key');
-  }
-  next();
-});
+// NOTE: CORS fallback middleware intentionally removed.
+// The cors() middleware above handles all origin validation.
+// The old fallback set Access-Control-Allow-Origin: * which
+// defeated CORS protection entirely in production.
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
+
+// ─── Global Rate Limiter ────────────────────────────────────
+app.use('/api', globalLimiter);
+app.use('/admin', globalLimiter);
 
 // ─── Request / Response Logger (development only) ──────────────
 app.use(requestLogger);
@@ -122,6 +121,43 @@ app.get('/', (_req, res) => {
 
 app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// Deep health check — verifies DB + Redis connectivity
+app.get('/health/deep', async (_req, res) => {
+  const checks: Record<string, string> = {};
+  let healthy = true;
+
+  // Database check
+  try {
+    const { prisma } = await import('./lib/prisma');
+    await prisma.$queryRaw`SELECT 1`;
+    checks.database = 'ok';
+  } catch {
+    checks.database = 'fail';
+    healthy = false;
+  }
+
+  // Redis check
+  try {
+    const { getUpstashRedis } = await import('./config/redis');
+    const client = getUpstashRedis();
+    if (client) {
+      await client.ping();
+      checks.redis = 'ok';
+    } else {
+      checks.redis = 'not_configured';
+    }
+  } catch {
+    checks.redis = 'fail';
+    // Redis is non-critical — don't fail the health check
+  }
+
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? 'OK' : 'DEGRADED',
+    timestamp: new Date().toISOString(),
+    checks,
+  });
 });
 
 // ─── API Routes ──────────────────────────────────────────────
