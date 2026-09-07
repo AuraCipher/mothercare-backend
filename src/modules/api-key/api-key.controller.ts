@@ -1,14 +1,11 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { ApiKeyType } from '@prisma/client';
 import apiKeyService from './api-key.service';
 
 const asyncHandler =
   (fn: (req: Request, res: Response) => Promise<any>) =>
-  (req: Request, res: Response) => {
-    Promise.resolve(fn(req, res)).catch((err) => {
-      console.error(err);
-      res.status(err.status || 500).json({ success: false, message: err.message || 'Internal server error' });
-    });
+  (req: Request, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req, res)).catch(next);
   };
 
 export const createApiKey = asyncHandler(async (req, res) => {

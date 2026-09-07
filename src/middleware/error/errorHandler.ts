@@ -3,6 +3,14 @@ import logger from '../../lib/logger';
 import { captureRequestError } from '../../lib/sentry';
 
 export default function errorHandler(err: any, req: Request, res: Response, _next: NextFunction) {
+  // Prisma P2025 — record not found on delete/update
+  if (err?.code === 'P2025') {
+    return res.status(404).json({
+      success: false,
+      message: 'The requested resource was not found.',
+    });
+  }
+
   const status = err.status || err.statusCode || 500;
   const message = err.message || 'Internal server error';
 

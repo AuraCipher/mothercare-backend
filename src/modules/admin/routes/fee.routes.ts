@@ -3043,7 +3043,7 @@ router.post('/family-payments/allocate', asyncHandler(async (req: Request, res: 
     allPayments = result.result.payments;
     receiptNumber = result.receiptNumber;
   } catch (err: any) {
-    const status = err.statusCode || 500;
+    const status = err.status || err.statusCode || 500;
     res.status(status).json({ success: false, message: err.message || 'Family allocation payment failed' });
     return;
   }
@@ -3241,7 +3241,7 @@ router.post('/family-payments', asyncHandler(async (req: Request, res: Response)
     totalAmount = result.result.totalAmount;
     receiptNumber = result.receiptNumber;
   } catch (err: any) {
-    const status = err.statusCode || 500;
+    const status = err.status || err.statusCode || 500;
     res.status(status).json({ success: false, message: err.message || 'Family payment failed' });
     return;
   }

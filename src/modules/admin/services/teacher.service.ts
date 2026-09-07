@@ -109,7 +109,14 @@ class TeacherProfileService {
       } catch (err: any) {
         // Handle Prisma unique constraint violations (P2002)
         if (err?.code === 'P2002') {
-          const field = err.meta?.target?.[0] || 'field';
+          const fieldMap: Record<string, string> = {
+            username: 'username',
+            phone: 'phone number',
+            email: 'email',
+            employeeId: 'employee ID',
+          };
+          const rawField = err.meta?.target?.[0] || 'value';
+          const field = fieldMap[rawField] || 'value';
           throw { status: 409, message: `A user with this ${field} already exists` };
         }
         throw err;
