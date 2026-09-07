@@ -1111,7 +1111,7 @@ async function generateReceiptNumber(
       throw err;
     }
   }
-  throw new Error(`Failed to generate unique receipt number after ${maxAttempts} attempts`);
+  throw { status: 503, message: 'System is busy generating receipt numbers. Please try again.' };
 }
 
 /** Atomic family receipt number (FMP-YYYYMM-XXXX) with retry on unique constraint. */
@@ -1147,7 +1147,7 @@ async function generateFamilyReceiptNumber(
       throw err;
     }
   }
-  throw new Error(`Failed to generate unique family receipt number after ${maxAttempts} attempts`);
+  throw { status: 503, message: 'System is busy generating receipt numbers. Please try again.' };
 }
 
 /**
@@ -1573,7 +1573,7 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
         SELECT "netAmount", "paidAmount" FROM "student_fees" WHERE "id" = ${studentFeeId} FOR UPDATE
       `;
       const freshFee = locked[0];
-      if (!freshFee) throw new Error('Student fee not found during payment');
+      if (!freshFee) throw { status: 404, message: 'Student fee not found.' };
 
       // Create payment
       const p = await tx.payment.create({
@@ -1777,7 +1777,7 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
     allocations = result.result;
     receiptNumber = result.receiptNumber;
   } catch (waterfallErr: any) {
-    if (waterfallErr.statusCode === 400) {
+    if (waterfallErr.status === 400 || waterfallErr.statusCode === 400) {
       res.status(400).json({ success: false, message: waterfallErr.message });
       return;
     }
@@ -2066,7 +2066,7 @@ router.post('/payments/allocate', asyncHandler(async (req: Request, res: Respons
     payments = result.result;
     receiptNumber = result.receiptNumber;
   } catch (allocErr: any) {
-    if (allocErr.statusCode === 400) {
+    if (allocErr.status === 400 || allocErr.statusCode === 400) {
       res.status(400).json({ success: false, message: allocErr.message });
       return;
     }
