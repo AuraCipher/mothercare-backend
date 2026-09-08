@@ -32,5 +32,12 @@ process.env.META_WHATSAPP_BUSINESS_ACCOUNT_ID = '';
 process.env.META_WHATSAPP_ACCESS_TOKEN = '';
 process.env.META_WHATSAPP_API_VERSION = 'v21.0';
 
+process.env.TWILIO_ACCOUNT_SID = '';
+process.env.TWILIO_AUTH_TOKEN = '';
+process.env.TWILIO_WHATSAPP_FROM = '';
+process.env.TWILIO_TEMPLATE_STUDENT = '';
+process.env.TWILIO_TEMPLATE_TEACHER = '';
+process.env.TWILIO_TEMPLATE_STAFF = '';
+
 // ─── CORS ────────────────────────────────────────────────
 process.env.ALLOWED_ORIGINS = 'http://localhost:3000';

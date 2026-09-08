@@ -1,4 +1,4 @@
-import type { CredentialRecipientType } from './meta-whatsapp.service';
+import type { CredentialRecipientType } from './twilio-whatsapp.service';
 import { enqueueCredentialSend } from '../queues/message.queue';
 import type { SendCredentialResult } from './credential-delivery.service';
 

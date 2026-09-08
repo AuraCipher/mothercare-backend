@@ -2,11 +2,10 @@ import env from '../config/env';
 import logger from '../lib/logger';
 import {
   buildCredentialParameters,
-  MetaWhatsAppError,
+  TwilioWhatsAppError,
   sendTemplateMessage,
-  templateNameForRecipient,
   type CredentialRecipientType,
-} from './meta-whatsapp.service';
+} from './twilio-whatsapp.service';
 
 export type SendCredentialResult = {
   success: boolean;
@@ -30,12 +29,11 @@ export type CredentialDeliveryParams = {
 export async function deliverCredential(params: CredentialDeliveryParams): Promise<SendCredentialResult> {
   const frontendUrl = env.FRONTEND_URL || 'https://mothercare.pk';
   const appDownloadUrl = env.APP_DOWNLOAD_URL || 'https://play.google.com/store/apps/details?id=com.mothercare.app';
-  const templateName = templateNameForRecipient(params.recipientType);
 
   try {
     const { messageId } = await sendTemplateMessage({
       to: params.to,
-      templateName,
+      recipientType: params.recipientType,
       languageCode: 'en',
       bodyParameters: buildCredentialParameters({
         name: params.name,
@@ -48,7 +46,6 @@ export async function deliverCredential(params: CredentialDeliveryParams): Promi
 
     logger.info('Credential WhatsApp sent', {
       recipientType: params.recipientType,
-      templateName,
       to: params.to.slice(0, 6) + '****',
       messageId,
     });
@@ -60,10 +57,9 @@ export async function deliverCredential(params: CredentialDeliveryParams): Promi
       messageStatus: 'sent',
     };
   } catch (error: unknown) {
-    if (error instanceof MetaWhatsAppError) {
+    if (error instanceof TwilioWhatsAppError) {
       logger.error('Credential WhatsApp failed', {
         recipientType: params.recipientType,
-        templateName,
         to: params.to.slice(0, 6) + '****',
         code: error.code,
         message: error.message,

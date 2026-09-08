@@ -1,8 +1,8 @@
-jest.mock('../../src/services/meta-whatsapp.service', () => ({
-  ...jest.requireActual('../../src/services/meta-whatsapp.service'),
+jest.mock('../../src/services/twilio-whatsapp.service', () => ({
+  ...jest.requireActual('../../src/services/twilio-whatsapp.service'),
   sendTemplateMessage: jest.fn(),
-  templateNameForRecipient: jest.requireActual('../../src/services/meta-whatsapp.service').templateNameForRecipient,
-  buildCredentialParameters: jest.requireActual('../../src/services/meta-whatsapp.service').buildCredentialParameters,
+  templateNameForRecipient: jest.requireActual('../../src/services/twilio-whatsapp.service').templateNameForRecipient,
+  buildCredentialParameters: jest.requireActual('../../src/services/twilio-whatsapp.service').buildCredentialParameters,
 }));
 
 jest.mock('../../src/queues/message.queue', () => ({
@@ -13,7 +13,7 @@ jest.mock('../../src/queues/message.queue', () => ({
 }));
 
 import notificationService from '../../src/services/notification.service';
-import { MetaWhatsAppError, sendTemplateMessage } from '../../src/services/meta-whatsapp.service';
+import { TwilioWhatsAppError, sendTemplateMessage } from '../../src/services/twilio-whatsapp.service';
 
 const mockedSend = sendTemplateMessage as jest.MockedFunction<typeof sendTemplateMessage>;
 
@@ -25,7 +25,7 @@ describe('notification.service sendCredential', () => {
   });
 
   test('uses student template and returns success without retry hints on failure path opposite', async () => {
-    mockedSend.mockResolvedValue({ messageId: 'wamid.abc' });
+    mockedSend.mockResolvedValue({ messageId: 'SM.abc123' });
 
     const result = await notificationService.sendCredential({
       to: '+923001234567',
@@ -37,14 +37,14 @@ describe('notification.service sendCredential', () => {
 
     expect(result.success).toBe(true);
     expect(result.channel).toBe('whatsapp');
-    expect(result.messageId).toBe('wamid.abc');
+    expect(result.messageId).toBe('SM.abc123');
     expect(mockedSend).toHaveBeenCalledWith(expect.objectContaining({
-      templateName: 'credential_send',
+      recipientType: 'student',
     }));
   });
 
   test('uses teacher template for teacher recipient type', async () => {
-    mockedSend.mockResolvedValue({ messageId: 'wamid.teacher' });
+    mockedSend.mockResolvedValue({ messageId: 'SM.teacher123' });
 
     await notificationService.sendCredential({
       to: '+923001234567',
@@ -55,13 +55,13 @@ describe('notification.service sendCredential', () => {
     });
 
     expect(mockedSend).toHaveBeenCalledWith(expect.objectContaining({
-      templateName: 'credential_send_teacher',
+      recipientType: 'teacher',
     }));
   });
 
-  test('returns structured failure when Meta send fails', async () => {
+  test('returns structured failure when Twilio send fails', async () => {
     mockedSend.mockRejectedValue(
-      new MetaWhatsAppError('Invalid phone', 'recipient_error', false, true),
+      new TwilioWhatsAppError('Invalid phone', 'recipient_error', false, true),
     );
 
     const result = await notificationService.sendCredential({
