@@ -33,6 +33,8 @@ export interface MockUser {
   lastSeen: Date | null;
   rememberMeToken: string | null;
   rememberMeExpiry: Date | null;
+  failedLoginAttempts: number;
+  lockedUntil: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -219,6 +221,8 @@ export function createMockUser(overrides: Partial<MockUser> = {}): MockUser {
     lastSeen: null,
     rememberMeToken: null,
     rememberMeExpiry: null,
+    failedLoginAttempts: 0,
+    lockedUntil: null,
     createdAt: pastDate(7),
     updatedAt: now(),
     ...overrides,

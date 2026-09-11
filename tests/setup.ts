@@ -41,3 +41,7 @@ process.env.TWILIO_TEMPLATE_STAFF = '';
 
 // ─── CORS ────────────────────────────────────────────────
 process.env.ALLOWED_ORIGINS = 'http://localhost:3000';
+
+// ─── Rate Limiting (disabled in tests) ─────────────────────
+process.env.RATE_LIMIT_LOGIN_MAX = '9999';
+process.env.RATE_LIMIT_GLOBAL_MAX = '9999';

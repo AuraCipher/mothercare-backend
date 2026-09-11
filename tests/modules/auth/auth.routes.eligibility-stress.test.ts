@@ -60,7 +60,7 @@ function setupLoginScenario(s: Scenario) {
 function setupRefreshScenario(s: Scenario) {
   if (s === 'unknown_user') {
     prismaMock.user.findUnique.mockResolvedValue(null as any);
-    return { token: generateTestToken('u-missing', 'parent') };
+    return { token: generateTestToken('u-missing', 'student') };
   }
   const role = s === 'eligible_non_student' ? 'teacher' : 'student';
   const status = s === 'inactive_student' ? 'inactive' : 'active';
@@ -98,7 +98,10 @@ function setupRefreshScenario(s: Scenario) {
 
 describe('Auth route eligibility stress matrix', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
+    (require('bcryptjs').hash as jest.Mock).mockResolvedValue('$2a$12$mocked_hash_for_testing');
+    (require('bcryptjs').compare as jest.Mock).mockResolvedValue(true);
+    prismaMock.$extends = prismaMock.$extends || jest.fn().mockReturnValue(prismaMock);
   });
 
   for (const scenario of scenarios) {
