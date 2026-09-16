@@ -1069,6 +1069,42 @@ describe('Admin — Users', () => {
     const res = await request(app).get('/admin/users').set(adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
+    expect(res.body.pagination).toBeUndefined();
+  });
+
+  test('GET /admin/users returns all users without pagination params (backward compat)', async () => {
+    prismaMock.user.findMany.mockResolvedValue([mockUser, { ...mockUser, id: 'u2' }] as any);
+    const res = await request(app).get('/admin/users').set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.pagination).toBeUndefined();
+    expect(prismaMock.user.count).not.toHaveBeenCalled();
+  });
+
+  test('GET /admin/users applies pagination when page/limit provided', async () => {
+    prismaMock.user.findMany.mockResolvedValue([mockUser] as any);
+    prismaMock.user.count.mockResolvedValue(1);
+    const res = await request(app).get('/admin/users?page=1&limit=10').set(adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.pagination).toEqual({ page: 1, limit: 10, total: 1, totalPages: 1 });
+    expect(prismaMock.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 0, take: 10 }));
+  });
+
+  test('GET /admin/users enforces max limit of 100', async () => {
+    prismaMock.user.findMany.mockResolvedValue([] as any);
+    prismaMock.user.count.mockResolvedValue(0);
+    await request(app).get('/admin/users?page=1&limit=500').set(adminToken);
+    expect(prismaMock.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }));
+  });
+
+  test('GET /admin/users preserves filters with pagination', async () => {
+    prismaMock.user.findMany.mockResolvedValue([] as any);
+    prismaMock.user.count.mockResolvedValue(0);
+    await request(app).get('/admin/users?role=teacher&status=active&page=2&limit=20').set(adminToken);
+    expect(prismaMock.user.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ role: 'teacher', status: 'active' }),
+      skip: 20, take: 20,
+    }));
   });
 
   test('GET /admin/users/:id returns user when found', async () => {

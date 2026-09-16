@@ -588,7 +588,7 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
   const m = parseInt(month as string, 10) || (new Date().getMonth() + 1);
   const y = parseInt(year as string, 10) || new Date().getFullYear();
   const page = Math.max(1, parseInt(pageQ as string, 10) || 1);
-  const limit = Math.min(500, Math.max(1, parseInt(limitQ as string, 10) || 100));
+  const limit = Math.min(200, Math.max(1, parseInt(limitQ as string, 10) || 100));
   const skip = (page - 1) * limit;
   const statusFilter = typeof feeStatus === 'string' && feeStatus.trim() ? feeStatus.trim().toLowerCase() : '';
 
@@ -608,7 +608,7 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
     : { month: m, year: y, academicYearId: ayId };
 
   const needsStatusFilter = !!statusFilter && ['paid', 'partial', 'unpaid'].includes(statusFilter);
-  const total = needsStatusFilter ? undefined : await prisma.student.count({ where });
+  const total = await prisma.student.count({ where });
   const students = await prisma.student.findMany({
     where,
     select: {
@@ -740,7 +740,7 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
   if (needsStatusFilter) {
     filteredData = data.filter(row => matchesFeeStatusFilter(row.status, statusFilter));
   }
-  const filteredTotal = needsStatusFilter ? filteredData.length : (total ?? data.length);
+  const filteredTotal = needsStatusFilter ? filteredData.length : total;
   const pagedData = needsStatusFilter ? filteredData.slice(skip, skip + limit) : filteredData;
 
   res.json({
@@ -758,7 +758,7 @@ router.get('/fees/students-list', asyncHandler(async (req: Request, res: Respons
 router.get('/student-fees', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  const { month, year, status, groupId, search } = req.query;
+  const { month, year, status, groupId, search, page: pageQ, limit: limitQ } = req.query;
   const where: any = { academicYearId: scope.academicYearId };
   if (month) where.month = parseInt(month as string, 10);
   if (year) where.year = parseInt(year as string, 10);
@@ -768,22 +768,38 @@ router.get('/student-fees', asyncHandler(async (req: Request, res: Response) => 
     where.student = { name: { contains: search as string, mode: 'insensitive' } };
   }
 
-  const fees = await prisma.studentFee.findMany({
-    where,
-    include: {
-      student: {
-        select: {
-          id: true, name: true, rollNumber: true, admissionNumber: true, familyId: true, customFeeAmount: true,
-          parents: { include: { parent: { select: { relation: true, phone: true, user: { select: { name: true } } } } } },
-          group: { select: { name: true, section: true, displayOrder: true } },
-        },
+  const hasPage = pageQ != null || limitQ != null;
+  const page = hasPage ? Math.max(1, parseInt(pageQ as string, 10) || 1) : undefined;
+  const limit = hasPage ? Math.min(200, Math.max(1, parseInt(limitQ as string, 10) || 50)) : undefined;
+  const skip = hasPage && page != null && limit != null ? (page - 1) * limit : undefined;
+
+  const include = {
+    student: {
+      select: {
+        id: true, name: true, rollNumber: true, admissionNumber: true, familyId: true, customFeeAmount: true,
+        parents: { include: { parent: { select: { relation: true, phone: true, user: { select: { name: true } } } } } },
+        group: { select: { name: true, section: true, displayOrder: true } },
       },
-      payments: { where: { revertedAt: null } },
-      extraItems: true,
     },
-    orderBy: [{ netAmount: 'desc' }],
-  });
-  res.json({ success: true, data: fees });
+    payments: { where: { revertedAt: null } },
+    extraItems: true,
+  };
+
+  const [fees, total] = await Promise.all([
+    prisma.studentFee.findMany({
+      where,
+      include,
+      orderBy: [{ netAmount: 'desc' }, { id: 'asc' }],
+      ...(hasPage ? { skip, take: limit } : {}),
+    }),
+    hasPage ? prisma.studentFee.count({ where }) : Promise.resolve(undefined),
+  ]);
+
+  if (hasPage && page != null && limit != null && total != null) {
+    res.json({ success: true, data: fees, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 0 } });
+  } else {
+    res.json({ success: true, data: fees });
+  }
 }));
 
 // POST /admin/student-fees/generate — Generate monthly fees with selected categories
@@ -2334,19 +2350,34 @@ router.get('/payments/:id/audit-log', asyncHandler(async (req: Request, res: Res
 router.get('/payments', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  const { studentFeeId, studentId } = req.query;
+  const { studentFeeId, studentId, page: pageQ, limit: limitQ } = req.query;
   const where: any = {
     revertedAt: null,
     studentFee: { academicYearId: scope.academicYearId },
   };
   if (studentFeeId) where.studentFeeId = studentFeeId as string;
   if (studentId) where.studentId = studentId as string;
-  const payments = await prisma.payment.findMany({
-    where,
-    orderBy: { createdAt: 'desc' },
-    include: { recordedBy: { select: { name: true } } },
-  });
-  res.json({ success: true, data: payments });
+
+  const hasPage = pageQ != null || limitQ != null;
+  const page = hasPage ? Math.max(1, parseInt(pageQ as string, 10) || 1) : undefined;
+  const limit = hasPage ? Math.min(200, Math.max(1, parseInt(limitQ as string, 10) || 50)) : undefined;
+  const skip = hasPage && page != null && limit != null ? (page - 1) * limit : undefined;
+
+  const [payments, total] = await Promise.all([
+    prisma.payment.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: { recordedBy: { select: { name: true } } },
+      ...(hasPage ? { skip, take: limit } : {}),
+    }),
+    hasPage ? prisma.payment.count({ where }) : Promise.resolve(undefined),
+  ]);
+
+  if (hasPage && page != null && limit != null && total != null) {
+    res.json({ success: true, data: payments, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 0 } });
+  } else {
+    res.json({ success: true, data: payments });
+  }
 }));
 
 // ═══════════════════════════════════════════════════════════════════

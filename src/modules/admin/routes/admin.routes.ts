@@ -76,7 +76,7 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
 
 router.get('/users', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../../lib/prisma'));
-  const { role, status, search } = req.query;
+  const { role, status, search, page: pageQ, limit: limitQ } = req.query;
 
   const where: any = {};
   if (role) where.role = role;
@@ -90,16 +90,31 @@ router.get('/users', asyncHandler(async (req: Request, res: Response) => {
     ];
   }
 
-  const users = await prisma.user.findMany({
-    where,
-    orderBy: { createdAt: 'desc' },
-    select: {
-      id: true, name: true, username: true, email: true, phone: true,
-      role: true, gender: true, status: true, lastLoginAt: true, createdAt: true,
-    },
-  });
+  const hasPage = pageQ != null || limitQ != null;
+  const page = hasPage ? Math.max(1, parseInt(pageQ as string, 10) || 1) : undefined;
+  const limit = hasPage ? Math.min(100, Math.max(1, parseInt(limitQ as string, 10) || 50)) : undefined;
+  const skip = hasPage && page != null && limit != null ? (page - 1) * limit : undefined;
 
-  res.json({ success: true, data: users });
+  const select = {
+    id: true, name: true, username: true, email: true, phone: true,
+    role: true, gender: true, status: true, lastLoginAt: true, createdAt: true,
+  };
+
+  const [users, total] = await Promise.all([
+    prisma.user.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      select,
+      ...(hasPage ? { skip, take: limit } : {}),
+    }),
+    hasPage ? prisma.user.count({ where }) : Promise.resolve(undefined),
+  ]);
+
+  if (hasPage && page != null && limit != null && total != null) {
+    res.json({ success: true, data: users, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 0 } });
+  } else {
+    res.json({ success: true, data: users });
+  }
 }));
 
 router.get('/users/:id', asyncHandler(async (req: Request, res: Response) => {
