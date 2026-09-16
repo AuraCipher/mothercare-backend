@@ -132,6 +132,27 @@ class ReportCardService {
     });
     if (students.length === 0) throw { status: 400, message: 'No students found in this class' };
 
+    const studentIds = students.map((s) => s.id);
+
+    // ── Batch pre-fetch: grade bands (1 query, shared by all students) ──
+    const gradeBands = await this._fetchGradeBands();
+
+    // ── Batch pre-fetch: all subject results for all students (1 query) ──
+    const allSubjectResults = await prisma.subjectResult.findMany({
+      where: { studentId: { in: studentIds }, examSessionId },
+      include: { subject: { select: { id: true, name: true, code: true } } },
+      orderBy: { subject: { name: 'asc' } },
+    });
+
+    // ── Group subject results by studentId in memory ──
+    const resultsByStudent = new Map<string, typeof allSubjectResults>();
+    for (const sr of allSubjectResults) {
+      const list = resultsByStudent.get(sr.studentId) ?? [];
+      list.push(sr);
+      resultsByStudent.set(sr.studentId, list);
+    }
+
+    // ── Per-student: compute percentage, grade, upsert card ──
     const built: {
       studentId: string;
       card: { id: string; overallPercentage: number; overallGrade: string; classRank: number | null };
@@ -139,10 +160,31 @@ class ReportCardService {
     }[] = [];
 
     for (const s of students) {
-      const row = await this._upsertStudentCard(s.id, examSessionId);
-      if (row) {
-        built.push({ studentId: s.id, card: row.card, subjectResults: row.subjectResults });
-      }
+      const subjectResults = resultsByStudent.get(s.id);
+      if (!subjectResults || subjectResults.length === 0) continue;
+
+      const overallPercentage = computeOverallPercentage(subjectResults);
+      const overallGrade = lookupGrade(overallPercentage, gradeBands);
+
+      const card = await prisma.reportCard.upsert({
+        where: { studentId_examSessionId: { studentId: s.id, examSessionId } },
+        create: {
+          studentId: s.id,
+          examSessionId,
+          overallPercentage,
+          overallGrade,
+          status: 'DRAFT',
+        },
+        update: {
+          overallPercentage,
+          overallGrade,
+          status: 'DRAFT',
+          generatedAt: new Date(),
+          classRank: null,
+        },
+      });
+
+      built.push({ studentId: s.id, card, subjectResults });
     }
 
     if (built.length === 0) return [];

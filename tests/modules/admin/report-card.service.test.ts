@@ -83,10 +83,12 @@ describe('ReportCardService — compute pipeline', () => {
       { id: 's3', name: 'Omar', rollNumber: '3' },
     ] as any);
 
-    prismaMock.subjectResult.findMany
-      .mockResolvedValueOnce([{ subjectId: 'sub1', percentage: 90, grade: 'A+', subject: { id: 'sub1', name: 'M', code: 'M' } }] as any)
-      .mockResolvedValueOnce([{ subjectId: 'sub1', percentage: 90, grade: 'A+', subject: { id: 'sub1', name: 'M', code: 'M' } }] as any)
-      .mockResolvedValueOnce([{ subjectId: 'sub1', percentage: 70, grade: 'B+', subject: { id: 'sub1', name: 'M', code: 'M' } }] as any);
+    // Batch query: all subject results for all students in one call
+    prismaMock.subjectResult.findMany.mockResolvedValue([
+      { studentId: 's1', subjectId: 'sub1', percentage: 90, grade: 'A+', subject: { id: 'sub1', name: 'M', code: 'M' } },
+      { studentId: 's2', subjectId: 'sub1', percentage: 90, grade: 'A+', subject: { id: 'sub1', name: 'M', code: 'M' } },
+      { studentId: 's3', subjectId: 'sub1', percentage: 70, grade: 'B+', subject: { id: 'sub1', name: 'M', code: 'M' } },
+    ] as any);
 
     prismaMock.reportCard.upsert
       .mockResolvedValueOnce({ id: 'rc1', overallPercentage: 90, overallGrade: 'A+', classRank: null } as any)
