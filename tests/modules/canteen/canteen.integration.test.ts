@@ -265,6 +265,27 @@ function mockCanteenStaffMembership() {
   } as any);
 }
 
+// DB-05: Mock $queryRaw for routes that use FOR UPDATE locking.
+// Must be called before sendRequest for POST sales / supplier payments / account payments.
+function mockQueryRawForRoute(label: string) {
+  if (label === 'POST sales' || label.startsWith('cash sale') || label === 'credit sale existing account' || label === 'split payment cash+credit' || label === 'cash sale decrements stock') {
+    // applySaleStockDeltas: FOR UPDATE lock + atomic decrement
+    (prismaMock.$queryRaw as any)
+      .mockResolvedValueOnce([{ unitsPerBox: 1 }])
+      .mockResolvedValueOnce([{ id: prodId }]);
+  } else if (label === 'POST supplier payments' || label === 'log payment we paid') {
+    // logSupplierPayment: FOR UPDATE lock + balance update
+    (prismaMock.$queryRaw as any)
+      .mockResolvedValueOnce([{ balanceOwedToSupplier: 0, balanceSupplierOwesUs: 0 }])
+      .mockResolvedValueOnce([]);
+  } else if (label === 'POST account payments') {
+    // recordAccountPayment: FOR UPDATE lock + balance update
+    (prismaMock.$queryRaw as any)
+      .mockResolvedValueOnce([{ runningBalance: 100 }])
+      .mockResolvedValueOnce([]);
+  }
+}
+
 function mockManagementAdminMembership() {
   prismaMock.branchMember.findUnique.mockResolvedValue({
     id: 'bm-mgmt',
@@ -561,6 +582,7 @@ describe('Canteen integration routes', () => {
 
   describe('success — super_admin all routes', () => {
     test.each(ALL_ROUTES.map((r) => [r.label, r] as const))('%s', async (_label, spec) => {
+      mockQueryRawForRoute(_label);
       const res = await sendRequest(spec, { auth: adminAuth, query: branchQuery });
       expect(res.status).toBe(spec.successStatus ?? 200);
       expect(res.body.success).toBe(true);
@@ -573,6 +595,7 @@ describe('Canteen integration routes', () => {
     beforeEach(() => mockCanteenStaffMembership());
 
     test.each(SALES_ROUTES.map((r) => [r.label, r] as const))('%s', async (_label, spec) => {
+      mockQueryRawForRoute(_label);
       const res = await sendRequest(spec, { auth: staffAuth, query: branchQuery });
       expect(res.status).toBe(spec.successStatus ?? 200);
       expect(res.body.success).toBe(true);
@@ -585,6 +608,7 @@ describe('Canteen integration routes', () => {
     beforeEach(() => mockManagementAdminMembership());
 
     test.each(ADMIN_ROUTES.map((r) => [r.label, r] as const))('%s', async (_label, spec) => {
+      mockQueryRawForRoute(_label);
       const res = await sendRequest(spec, { auth: mgmtAdminAuth, query: branchQuery });
       expect(res.status).toBe(spec.successStatus ?? 200);
       expect(res.body.success).toBe(true);
@@ -788,6 +812,7 @@ describe('Canteen integration routes', () => {
       ['summary by date', null, 200],
       ['summary default date', null, 200],
     ])('%s', async (_label, body, expectedStatus) => {
+      mockQueryRawForRoute(_label);
       let req: request.Test;
       if (body) {
         req = request(app).post('/admin/canteen/sales').query(branchQuery).set(staffAuth).send(body);
@@ -819,6 +844,7 @@ describe('Canteen integration routes', () => {
       ['update supplier', 'patch', `/admin/canteen/suppliers/${supId}`, undefined, 200],
       ['log payment we paid', 'post', `/admin/canteen/suppliers/${supId}/payments`, undefined, 201],
     ])('%s', async (_label, method, path, extraQuery, expectedStatus) => {
+      mockQueryRawForRoute(_label);
       const body =
         method === 'post' && path.includes('/payments')
           ? { amount: 250, direction: 'WE_PAID_SUPPLIER', note: 'partial' }
@@ -850,6 +876,7 @@ describe('Canteen integration routes', () => {
       ['create product opening stock', { categoryId: catId, name: 'Biscuit', unitPrice: 30, stockBoxes: 1, stockUnits: 6, unitsPerBox: 12 }, 201],
     ] as const)('%s', async (_label, body, expectedStatus) => {
       mockCanteenStaffMembership();
+      mockQueryRawForRoute(_label);
       let req: request.Test;
       if (_label.includes('list restock')) {
         req = request(app).get('/admin/canteen/restock-purchases').query(branchQuery).set(adminAuth);

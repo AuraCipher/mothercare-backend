@@ -203,6 +203,25 @@ function setupStationaryMocks() {
   prismaMock.$transaction.mockImplementation(async (fn: any) => fn(prismaMock));
 }
 
+// DB-05: Mock $queryRaw for routes that use FOR UPDATE locking.
+// Must be called before sendRequest for POST supplier payment / restock purchases / inventory adjust.
+function mockQueryRawForRoute(label: string) {
+  if (label === 'POST supplier payment') {
+    // logSupplierPayment: FOR UPDATE lock + balance update
+    (prismaMock.$queryRaw as any)
+      .mockResolvedValueOnce([{ balanceOwedToSupplier: 1000, balanceSupplierOwesUs: 200 }])
+      .mockResolvedValueOnce([]);
+  } else if (label === 'POST restock purchases') {
+    // restock: FOR UPDATE lock on product + findFirst + update
+    (prismaMock.$queryRaw as any)
+      .mockResolvedValueOnce([{ stockBundles: 2, stockUnits: 5 }]);
+  } else if (label === 'POST inventory adjust') {
+    // inventory adjust: FOR UPDATE lock on product
+    (prismaMock.$queryRaw as any)
+      .mockResolvedValueOnce([{ stockBundles: 2, stockUnits: 5 }]);
+  }
+}
+
 function sendRequest(
   spec: Pick<RouteSpec, 'method' | 'path' | 'body' | 'query'>,
   opts?: { auth?: { Authorization: string }; query?: Record<string, string>; body?: Record<string, unknown> },
@@ -345,6 +364,7 @@ describe('Stationary full integration routes', () => {
     test.each(
       BRANCH_WRITE_ROUTES.filter((r) => r.method === 'post').map((r) => [r.label, r] as const),
     )('%s', async (_label, spec) => {
+      mockQueryRawForRoute(_label);
       const res = await sendRequest(spec, { auth: adminAuth, query: branchQuery });
       const expectedStatus = spec.path.includes('/inventory/adjust') ? 200 : (spec.successStatus ?? 201);
       expect(res.status).toBe(expectedStatus);
@@ -383,6 +403,7 @@ describe('Stationary full integration routes', () => {
 
   describe('success — all routes with branchId', () => {
     test.each(ALL_ROUTES.map((r) => [r.label, r] as const))('%s', async (_label, spec) => {
+      mockQueryRawForRoute(_label);
       const res = await sendRequest(spec, { auth: adminAuth, query: branchQuery });
       expect(res.status).toBe(spec.successStatus ?? 200);
       expect(res.body.success).toBe(true);
@@ -537,11 +558,10 @@ describe('Stationary full integration routes', () => {
     });
 
     test('400 insufficient stock on underflow', async () => {
-      prismaMock.stationaryProduct.findUnique.mockResolvedValueOnce({
-        ...mockProduct(),
-        stockBundles: 0,
-        stockUnits: 1,
-      } as any);
+      // DB-05: Mock $queryRaw for FOR UPDATE lock
+      (prismaMock.$queryRaw as any).mockResolvedValueOnce([
+        { stockBundles: 0, stockUnits: 1 },
+      ]);
       const res = await request(app)
         .post('/admin/stationary/inventory/adjust')
         .query(branchQuery)
@@ -552,10 +572,8 @@ describe('Stationary full integration routes', () => {
     });
 
     test('404 when product not in branch', async () => {
-      prismaMock.stationaryProduct.findUnique.mockResolvedValueOnce({
-        ...mockProduct(),
-        branchId: OTHER_BRANCH,
-      } as any);
+      // DB-05: Mock $queryRaw for FOR UPDATE lock — empty result = not found
+      (prismaMock.$queryRaw as any).mockResolvedValueOnce([]);
       const res = await request(app)
         .post('/admin/stationary/inventory/adjust')
         .query(branchQuery)
@@ -633,7 +651,8 @@ describe('Stationary full integration routes', () => {
     });
 
     test('POST supplier payment not found', async () => {
-      prismaMock.stationarySupplier.findFirst.mockResolvedValueOnce(null);
+      // DB-05: Route now uses $queryRaw FOR UPDATE instead of findFirst for supplier check
+      (prismaMock.$queryRaw as any).mockResolvedValueOnce([]);
       const res = await request(app)
         .post(`/admin/stationary/suppliers/${SUP_ID}/payments`)
         .query(branchQuery)
@@ -756,35 +775,41 @@ describe('Stationary full integration routes', () => {
 
   describe('POST supplier payment — balance update', () => {
     test('WE_PAID_SUPPLIER reduces balance owed', async () => {
+      // DB-05: Mock $queryRaw for FOR UPDATE lock + balance update
+      (prismaMock.$queryRaw as any)
+        .mockResolvedValueOnce([{ balanceOwedToSupplier: 1000, balanceSupplierOwesUs: 200 }])
+        .mockResolvedValueOnce([]);
       await request(app)
         .post(`/admin/stationary/suppliers/${SUP_ID}/payments`)
         .query(branchQuery)
         .set(adminAuth)
         .send({ amount: 500, direction: 'WE_PAID_SUPPLIER' });
       expect(prismaMock.stationarySupplierPayment.create).toHaveBeenCalled();
-      expect(prismaMock.stationarySupplier.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ balanceOwedToSupplier: 500 }),
-        }),
-      );
+      // DB-05: Balance is now updated via atomic $queryRaw, not stationarySupplier.update
+      expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
     });
 
     test('SUPPLIER_PAID_US reduces they-owe-us balance', async () => {
+      // DB-05: Mock $queryRaw for FOR UPDATE lock + balance update
+      (prismaMock.$queryRaw as any)
+        .mockResolvedValueOnce([{ balanceOwedToSupplier: 1000, balanceSupplierOwesUs: 200 }])
+        .mockResolvedValueOnce([]);
       await request(app)
         .post(`/admin/stationary/suppliers/${SUP_ID}/payments`)
         .query(branchQuery)
         .set(adminAuth)
         .send({ amount: 100, direction: 'SUPPLIER_PAID_US' });
-      expect(prismaMock.stationarySupplier.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ balanceSupplierOwesUs: 100 }),
-        }),
-      );
+      // DB-05: Balance is now updated via atomic $queryRaw, not stationarySupplier.update
+      expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
     });
   });
 
   describe('POST restock purchase — stock movement', () => {
     test('creates purchase items and stock movements', async () => {
+      // DB-05: Mock $queryRaw for FOR UPDATE lock on product
+      (prismaMock.$queryRaw as any).mockResolvedValueOnce([
+        { stockBundles: 2, stockUnits: 5 },
+      ]);
       await request(app)
         .post('/admin/stationary/restock-purchases')
         .query(branchQuery)
@@ -799,6 +824,10 @@ describe('Stationary full integration routes', () => {
 
   describe('POST inventory adjust — stock movement', () => {
     test('creates adjustment movement', async () => {
+      // DB-05: Mock $queryRaw for FOR UPDATE lock on product
+      (prismaMock.$queryRaw as any).mockResolvedValueOnce([
+        { stockBundles: 2, stockUnits: 5 },
+      ]);
       await request(app)
         .post('/admin/stationary/inventory/adjust')
         .query(branchQuery)

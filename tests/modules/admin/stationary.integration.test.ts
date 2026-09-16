@@ -16,6 +16,7 @@ describe('Stationary integration routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prismaMock.$transaction.mockImplementation(async (fn: any) => fn(prismaMock));
+    prismaMock.$queryRaw.mockResolvedValue([]);
     prismaMock.academicYear.findUnique.mockResolvedValue({ id: ayId, branchId } as any);
   });
 
@@ -34,12 +35,10 @@ describe('Stationary integration routes', () => {
   });
 
   test('POST /admin/stationary/inventory/adjust rejects underflow', async () => {
-    prismaMock.stationaryProduct.findUnique.mockResolvedValue({
-      id: 'p1',
-      branchId,
-      stockBundles: 0,
-      stockUnits: 1,
-    } as any);
+    // Mock $queryRaw for FOR UPDATE lock — returns current stock
+    (prismaMock.$queryRaw as any).mockResolvedValueOnce([
+      { stockBundles: 0, stockUnits: 1 },
+    ]);
 
     const res = await request(app)
       .post(`/admin/stationary/inventory/adjust?branchId=${branchId}`)
@@ -97,6 +96,10 @@ describe('Stationary integration routes', () => {
         category: { id: 'c-1', name: 'Tools' },
       },
     ] as any);
+    // Mock $queryRaw for FOR UPDATE lock on product rows
+    (prismaMock.$queryRaw as any).mockResolvedValueOnce([
+      { id: 'p-1', stockBundles: 0, stockUnits: 20, unitsPerBundle: null },
+    ]);
     prismaMock.studentStationaryRecord.create.mockResolvedValue({ id: 'rec-1' } as any);
     prismaMock.studentStationaryRecordItem.create.mockResolvedValue({ id: 'item-1' } as any);
     prismaMock.feeExtraItem.aggregate.mockResolvedValue({ _sum: { amount: 1000 } } as any);
