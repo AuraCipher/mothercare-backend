@@ -21,7 +21,51 @@ type StartInput = {
 
 const PRISMA_UNIQUE_ERROR = 'P2002';
 
+type LockedRun = {
+  id: string;
+  branchId: string;
+  sourceAcademicYearId: string;
+  targetAcademicYearId: string;
+  phase: string;
+  carryOptions: unknown;
+  snapshotId: string | null;
+  promotedById: string;
+  notes: string | null;
+  errorMessage: string | null;
+  publishedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 class BatchPromotionService {
+  /**
+   * Lock the promotion-run row with FOR UPDATE and validate the expected phase.
+   * Must be called as the FIRST statement inside a $transaction callback.
+   * The lock is held until the transaction commits or rolls back.
+   */
+  private async lockAndValidateRun(
+    tx: { $queryRaw: Prisma.TransactionClient['$queryRaw'] },
+    runId: string,
+    branchId: string,
+    expectedPhase: string,
+  ): Promise<LockedRun> {
+    const rows = await tx.$queryRaw<LockedRun[]>`
+      SELECT * FROM "BatchPromotionRun"
+      WHERE id = ${runId} AND "branchId" = ${branchId}
+      FOR UPDATE
+    `;
+    if (!rows.length) {
+      throw { status: 404, message: 'Promotion run not found' };
+    }
+    const run = rows[0];
+    if (run.phase !== expectedPhase) {
+      throw {
+        status: 400,
+        message: `Cannot proceed: promotion run is in '${run.phase}' phase (expected '${expectedPhase}')`,
+      };
+    }
+    return run;
+  }
   private async findInProgressRun(branchId: string) {
     return prisma.batchPromotionRun.findFirst({
       where: {
@@ -172,9 +216,6 @@ class BatchPromotionService {
 
   async snapshotRun(runId: string, branchId: string, userId: string) {
     const run = await this.getRun(runId, branchId);
-    if (run.phase !== 'DRAFT') {
-      throw { status: 400, message: 'Snapshot already created for this run' };
-    }
 
     const source = await prisma.academicYear.findUnique({
       where: { id: run.sourceAcademicYearId },
@@ -186,24 +227,28 @@ class BatchPromotionService {
     if (!source) throw { status: 404, message: 'Source year not found' };
 
     return prisma.$transaction(async (tx) => {
+      await this.lockAndValidateRun(tx, runId, branchId, 'DRAFT');
+
+      const targetYear = await tx.academicYear.findUnique({
+        where: { id: run.targetAcademicYearId },
+        include: { calendar: true },
+      });
+
       const snapshot = await tx.academicYearSnapshot.create({
         data: {
           academicYearId: source.id,
           newAcademicYearId: run.targetAcademicYearId,
           fromLabel: source.calendar.label,
-          toLabel: (await tx.academicYear.findUnique({
-            where: { id: run.targetAcademicYearId },
-            include: { calendar: true },
-          }))!.calendar.label,
+          toLabel: targetYear!.calendar.label,
           triggeredById: userId,
           status: 'IN_PROGRESS',
           totalStudents: await tx.student.count({ where: { academicYearId: source.id, status: 'ACTIVE' } }),
         },
       });
 
-      for (const group of source.groups) {
-        await tx.groupSnapshot.create({
-          data: {
+      if (source.groups.length > 0) {
+        await tx.groupSnapshot.createMany({
+          data: source.groups.map((group) => ({
             snapshotId: snapshot.id,
             groupId: group.id,
             groupName: group.name,
@@ -220,7 +265,8 @@ class BatchPromotionService {
               validFrom: a.validFrom,
               validTo: a.validTo,
             })),
-          },
+          })),
+          skipDuplicates: false,
         });
       }
 
@@ -262,9 +308,6 @@ class BatchPromotionService {
 
   async applyCarry(runId: string, branchId: string) {
     const run = await this.getRun(runId, branchId);
-    if (run.phase !== 'SNAPSHOT_DONE') {
-      throw { status: 400, message: 'Create a snapshot before applying carry options' };
-    }
 
     const carry = mergeCarryOptions(run.carryOptions as Partial<CarryOptions>);
     if (carry.students && !carry.classes) {
@@ -280,6 +323,7 @@ class BatchPromotionService {
     const targetId = run.targetAcademicYearId;
 
     await prisma.$transaction(async (tx) => {
+      await this.lockAndValidateRun(tx, runId, branchId, 'SNAPSHOT_DONE');
       await tx.student.deleteMany({ where: { academicYearId: targetId } });
       await tx.group.deleteMany({ where: { academicYearId: targetId } });
       await tx.subject.deleteMany({ where: { academicYearId: targetId } });
@@ -294,53 +338,72 @@ class BatchPromotionService {
 
       const groupIdMap = new Map<string, string>();
       if (carry.classes) {
+        await tx.group.createMany({
+          data: sourceGroups.map((g) => ({
+            academicYearId: targetId,
+            name: g.name,
+            section: g.section,
+            displayOrder: g.displayOrder,
+            capacity: g.capacity,
+            onlyAdminCanSend: g.onlyAdminCanSend,
+            isActive: g.isActive,
+          })),
+          skipDuplicates: false,
+        });
+        // Target year was cleared — only groups we just created exist.
+        // Match by displayOrder (unique per source group) to build the ID map.
+        const createdGroups = await tx.group.findMany({
+          where: { academicYearId: targetId },
+          select: { id: true, displayOrder: true },
+        });
         for (const g of sourceGroups) {
-          const created = await tx.group.create({
-            data: {
-              academicYearId: targetId,
-              name: g.name,
-              section: g.section,
-              displayOrder: g.displayOrder,
-              capacity: g.capacity,
-              onlyAdminCanSend: g.onlyAdminCanSend,
-              isActive: g.isActive,
-            },
-          });
-          groupIdMap.set(g.id, created.id);
+          const match = createdGroups.find((cg) => cg.displayOrder === g.displayOrder);
+          if (match) groupIdMap.set(g.id, match.id);
         }
       }
 
       const subjectIdMap = new Map<string, string>();
       if (carry.subjects) {
         const subjects = await tx.subject.findMany({ where: { academicYearId: sourceId } });
+        await tx.subject.createMany({
+          data: subjects.map((s) => ({
+            academicYearId: targetId,
+            name: s.name,
+            code: s.code,
+            description: s.description,
+            totalMarks: s.totalMarks,
+            passingMarks: s.passingMarks,
+            isElective: s.isElective,
+            hodId: s.hodId,
+          })),
+          skipDuplicates: false,
+        });
+        // Target year was cleared — only subjects we just created exist.
+        const createdSubjects = await tx.subject.findMany({
+          where: { academicYearId: targetId },
+          select: { id: true, code: true },
+        });
         for (const s of subjects) {
-          const created = await tx.subject.create({
-            data: {
-              academicYearId: targetId,
-              name: s.name,
-              code: s.code,
-              description: s.description,
-              totalMarks: s.totalMarks,
-              passingMarks: s.passingMarks,
-              isElective: s.isElective,
-              hodId: s.hodId,
-            },
-          });
-          subjectIdMap.set(s.id, created.id);
+          const match = createdSubjects.find((cs) => cs.code === s.code);
+          if (match) subjectIdMap.set(s.id, match.id);
         }
         if (carry.classes) {
           const links = await tx.groupSubject.findMany({
             where: { group: { academicYearId: sourceId } },
             include: { group: true },
           });
-          for (const link of links) {
-            const newGroupId = groupIdMap.get(link.groupId);
-            const newSubjectId = subjectIdMap.get(link.subjectId);
-            if (newGroupId && newSubjectId) {
-              await tx.groupSubject.create({
-                data: { groupId: newGroupId, subjectId: newSubjectId },
-              });
-            }
+          const validLinks = links
+            .filter((link) => {
+              const newGroupId = groupIdMap.get(link.groupId);
+              const newSubjectId = subjectIdMap.get(link.subjectId);
+              return newGroupId && newSubjectId;
+            })
+            .map((link) => ({
+              groupId: groupIdMap.get(link.groupId)!,
+              subjectId: subjectIdMap.get(link.subjectId)!,
+            }));
+          if (validLinks.length > 0) {
+            await tx.groupSubject.createMany({ data: validLinks, skipDuplicates: false });
           }
         }
       }
@@ -358,137 +421,150 @@ class BatchPromotionService {
           include: { group: true, person: true },
         });
 
-        for (const s of students) {
-          if (!s.group) continue;
-          if (s.group.displayOrder >= maxOrder) {
-            await tx.student.update({
-              where: { id: s.id },
-              data: {
-                status: 'GRADUATED',
-                isActive: false,
-                credentialTag: 'NO_LOGIN',
-                userId: null,
-              },
-            });
-            continue;
-          }
+      // Batch-clear userId from all source students BEFORE creating new rows.
+      // The unique constraint on Student.userId requires the old row to release it first.
+      await tx.student.updateMany({
+        where: { academicYearId: sourceId, id: { in: students.map((s) => s.id) } },
+        data: { userId: null },
+      });
 
-          const nextOrder = s.group.displayOrder + 1;
-          const targetGroupId = orderToTargetGroup.get(nextOrder);
-          if (!targetGroupId) {
-            // Log warning: student has no target class in the next year
-            console.warn(`[BatchPromotion] Student ${s.id} (${s.name}) skipped: no target class for displayOrder ${nextOrder}`);
-            continue;
-          }
+      const newStudents: Prisma.StudentCreateManyInput[] = [];
+      const graduatedIds: string[] = [];
+      const promotedWithPersonIds: Array<{ oldId: string; personId: string }> = [];
+      const personCreates: Array<{ student: typeof students[number]; personId: string }> = [];
 
-          let personId = s.personId;
-          if (!personId) {
-            const person = await tx.studentPerson.create({
-              data: {
-                branchId,
-                userId: s.userId,
-                admissionNumber: s.admissionNumber,
-                name: s.name,
-              },
-            });
-            personId = person.id;
-            await tx.student.update({ where: { id: s.id }, data: { personId } });
-          }
+      for (const s of students) {
+        if (!s.group) continue;
+        if (s.group.displayOrder >= maxOrder) {
+          graduatedIds.push(s.id);
+          continue;
+        }
 
-          const credTag: StudentCredentialTag = s.credentialSentAt ? 'CRED_CARRIED' : 'CRED_NEW';
-          const linkedUserId = s.userId;
+        const nextOrder = s.group.displayOrder + 1;
+        const targetGroupId = orderToTargetGroup.get(nextOrder);
+        if (!targetGroupId) {
+          console.warn(`[BatchPromotion] Student ${s.id} (${s.name}) skipped: no target class for displayOrder ${nextOrder}`);
+          continue;
+        }
 
-          // Student.userId is globally unique — move link from archived source row to new ACTIVE row.
-          await tx.student.update({
-            where: { id: s.id },
-            data: { userId: null },
-          });
-
-          await tx.student.create({
+        let personId = s.personId;
+        if (!personId) {
+          const person = await tx.studentPerson.create({
             data: {
-              personId,
-              academicYearId: targetId,
-              groupId: targetGroupId,
-              familyId: s.familyId,
+              branchId,
+              userId: s.userId,
+              admissionNumber: s.admissionNumber,
               name: s.name,
-              rollNumber: s.rollNumber,
-              // Identity-level uniques stay on StudentPerson; keep year-row clean to avoid collisions.
-              admissionNumber: null,
-              dateOfBirth: s.dateOfBirth,
-              gender: s.gender,
-              religion: s.religion,
-              nationality: s.nationality,
-              customFeeAmount: s.customFeeAmount,
-              concessionReason: s.concessionReason,
-              feeOverrides: s.feeOverrides ?? undefined,
-              address: s.address,
-              phone: s.phone,
-              bloodGroup: s.bloodGroup,
-              bformCnic: s.bformCnic,
-              motherTongue: s.motherTongue,
-              studentEmail: s.studentEmail,
-              studentWhatsapp: s.studentWhatsapp,
-              city: s.city,
-              postalCode: s.postalCode,
-              country: s.country,
-              previousSchool: s.previousSchool,
-              previousClass: s.previousClass,
-              tcNumber: s.tcNumber,
-              referredBy: s.referredBy,
-              profilePhotoId: null,
-              userId: linkedUserId,
-              username: s.username,
-              studentNumber: null,
-              status: 'ACTIVE',
-              isActive: true,
-              credentialTag: credTag,
-              credentialStatus: s.credentialStatus,
-              credentialSentAt: s.credentialSentAt,
-              credentialGeneratedAt: s.credentialGeneratedAt,
-              credentialDeliveredAt: s.credentialDeliveredAt,
-              credentialSeenAt: s.credentialSeenAt,
-              passwordSetAt: s.passwordSetAt,
             },
           });
+          personId = person.id;
+          personCreates.push({ student: s, personId });
         }
+
+        const credTag: StudentCredentialTag = s.credentialSentAt ? 'CRED_CARRIED' : 'CRED_NEW';
+        const linkedUserId = s.userId;
+
+        newStudents.push({
+          personId,
+          academicYearId: targetId,
+          groupId: targetGroupId,
+          familyId: s.familyId,
+          name: s.name,
+          rollNumber: s.rollNumber,
+          admissionNumber: null,
+          dateOfBirth: s.dateOfBirth,
+          gender: s.gender,
+          religion: s.religion,
+          nationality: s.nationality,
+          customFeeAmount: s.customFeeAmount,
+          concessionReason: s.concessionReason,
+          feeOverrides: s.feeOverrides ?? undefined,
+          address: s.address,
+          phone: s.phone,
+          bloodGroup: s.bloodGroup,
+          bformCnic: s.bformCnic,
+          motherTongue: s.motherTongue,
+          studentEmail: s.studentEmail,
+          studentWhatsapp: s.studentWhatsapp,
+          city: s.city,
+          postalCode: s.postalCode,
+          country: s.country,
+          previousSchool: s.previousSchool,
+          previousClass: s.previousClass,
+          tcNumber: s.tcNumber,
+          referredBy: s.referredBy,
+          profilePhotoId: null,
+          userId: linkedUserId,
+          username: s.username,
+          studentNumber: null,
+          status: 'ACTIVE',
+          isActive: true,
+          credentialTag: credTag,
+          credentialStatus: s.credentialStatus,
+          credentialSentAt: s.credentialSentAt,
+          credentialGeneratedAt: s.credentialGeneratedAt,
+          credentialDeliveredAt: s.credentialDeliveredAt,
+          credentialSeenAt: s.credentialSeenAt,
+          passwordSetAt: s.passwordSetAt,
+        });
+      }
+
+      // Batch-create all promoted students in one query.
+      if (newStudents.length > 0) {
+        await tx.student.createMany({ data: newStudents });
+      }
+
+      // Batch-update graduated students.
+      if (graduatedIds.length > 0) {
+        await tx.student.updateMany({
+          where: { id: { in: graduatedIds } },
+          data: { status: 'GRADUATED', isActive: false, credentialTag: 'NO_LOGIN' },
+        });
+      }
+
+      // Batch-update personId on old student rows (only those that needed a new person).
+      for (const { student: s, personId } of personCreates) {
+        await tx.student.update({ where: { id: s.id }, data: { personId } });
+      }
       }
 
       if (carry.teacherAssignments && carry.classes && carry.subjects) {
         const assignments = await tx.teacherAssignment.findMany({
           where: { academicYearId: sourceId, validTo: null },
         });
-        for (const a of assignments) {
-          const newGroupId = groupIdMap.get(a.groupId);
-          const newSubjectId = subjectIdMap.get(a.subjectId);
-          if (!newGroupId || !newSubjectId) continue;
-          await tx.teacherAssignment.create({
-            data: {
-              academicYearId: targetId,
-              teacherId: a.teacherId,
-              groupId: newGroupId,
-              subjectId: newSubjectId,
-              isClassTeacher: a.isClassTeacher,
-              role: a.role,
-              validFrom: new Date(),
-            },
-          });
+        const validAssignments = assignments
+          .filter((a) => {
+            const newGroupId = groupIdMap.get(a.groupId);
+            const newSubjectId = subjectIdMap.get(a.subjectId);
+            return newGroupId && newSubjectId;
+          })
+          .map((a) => ({
+            academicYearId: targetId,
+            teacherId: a.teacherId,
+            groupId: groupIdMap.get(a.groupId)!,
+            subjectId: subjectIdMap.get(a.subjectId)!,
+            isClassTeacher: a.isClassTeacher,
+            role: a.role,
+            validFrom: new Date(),
+          }));
+        if (validAssignments.length > 0) {
+          await tx.teacherAssignment.createMany({ data: validAssignments, skipDuplicates: false });
         }
       }
 
       if (carry.feeStructures && carry.classes) {
         const structures = await tx.feeStructure.findMany({ where: { academicYearId: sourceId } });
-        for (const fs of structures) {
-          const newGroupId = groupIdMap.get(fs.groupId);
-          if (!newGroupId) continue;
-          await tx.feeStructure.create({
-            data: {
-              academicYearId: targetId,
-              groupId: newGroupId,
-              feeHeadId: fs.feeHeadId,
-              amount: fs.amount,
-              effectiveFrom: new Date(),
-            },
-          });
+        const validStructures = structures
+          .filter((fs) => groupIdMap.get(fs.groupId))
+          .map((fs) => ({
+            academicYearId: targetId,
+            groupId: groupIdMap.get(fs.groupId)!,
+            feeHeadId: fs.feeHeadId,
+            amount: fs.amount,
+            effectiveFrom: new Date(),
+          }));
+        if (validStructures.length > 0) {
+          await tx.feeStructure.createMany({ data: validStructures, skipDuplicates: false });
         }
       }
 
@@ -506,36 +582,59 @@ class BatchPromotionService {
               isActive: tt.isActive,
             },
           });
+
+          // Batch-create all slots for this timetable.
           const slotMap = new Map<string, string>();
-          for (const slot of tt.slots) {
-            const createdSlot = await tx.timetableSlot.create({
-              data: {
+          if (tt.slots.length > 0) {
+            await tx.timetableSlot.createMany({
+              data: tt.slots.map((slot) => ({
                 timetableId: newTt.id,
                 dayOfWeek: slot.dayOfWeek,
                 lectureNumber: slot.lectureNumber,
                 startTime: slot.startTime,
                 endTime: slot.endTime,
                 isActive: slot.isActive,
-              },
+              })),
+              skipDuplicates: false,
             });
-            slotMap.set(slot.id, createdSlot.id);
+            const createdSlots = await tx.timetableSlot.findMany({
+              where: { timetableId: newTt.id },
+              select: { id: true, dayOfWeek: true, lectureNumber: true },
+            });
+            for (const slot of tt.slots) {
+              const match = createdSlots.find(
+                (cs) => cs.dayOfWeek === slot.dayOfWeek && cs.lectureNumber === slot.lectureNumber,
+              );
+              if (match) slotMap.set(slot.id, match.id);
+            }
           }
+
+          // Batch-create all entries for this timetable.
+          const allEntries: Array<{
+            slotId: string;
+            groupId: string;
+            subjectId: string | null;
+            teacherId: string | null;
+            note: string | null;
+          }> = [];
           for (const slot of tt.slots) {
+            const newSlotId = slotMap.get(slot.id);
+            if (!newSlotId) continue;
             for (const entry of slot.entries) {
               const newGroupId = groupIdMap.get(entry.groupId);
               const newSubjectId = entry.subjectId ? subjectIdMap.get(entry.subjectId) : null;
-              const newSlotId = slotMap.get(slot.id);
-              if (!newGroupId || !newSlotId) continue;
-              await tx.timetableEntry.create({
-                data: {
-                  slotId: newSlotId,
-                  groupId: newGroupId,
-                  subjectId: newSubjectId,
-                  teacherId: entry.teacherId,
-                  note: entry.note,
-                },
+              if (!newGroupId) continue;
+              allEntries.push({
+                slotId: newSlotId,
+                groupId: newGroupId,
+                subjectId: newSubjectId ?? null,
+                teacherId: entry.teacherId ?? null,
+                note: entry.note ?? null,
               });
             }
+          }
+          if (allEntries.length > 0) {
+            await tx.timetableEntry.createMany({ data: allEntries, skipDuplicates: false });
           }
         }
       }
@@ -551,11 +650,10 @@ class BatchPromotionService {
 
   async publish(runId: string, branchId: string) {
     const run = await this.getRun(runId, branchId);
-    if (run.phase !== 'APPLIED') {
-      throw { status: 400, message: 'Apply carry options before publishing' };
-    }
 
     await prisma.$transaction(async (tx) => {
+      await this.lockAndValidateRun(tx, runId, branchId, 'APPLIED');
+
       await tx.academicYear.update({
         where: { id: run.sourceAcademicYearId },
         data: { status: 'ARCHIVED' },
