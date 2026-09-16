@@ -9,6 +9,7 @@ import { prisma } from '../../../lib/prisma';
 import {
   computePayrollMonth,
   listPayrollPayees,
+  buildPayrollContext,
   refreshPayrollMonthBalance,
 } from './payroll-calculation.service';
 
@@ -184,10 +185,11 @@ class ExpensesService {
 
   async listPayroll(branchId: string, salaryMonth: string, academicYearId: string) {
     const payees = await listPayrollPayees(branchId);
+    const ctx = await buildPayrollContext(branchId, academicYearId, salaryMonth, payees);
     const results = [];
     for (const p of payees) {
       const computed = await computePayrollMonth(
-        branchId, p.userId, p.payeeType, salaryMonth, academicYearId, p.profileSalary,
+        branchId, p.userId, p.payeeType, salaryMonth, academicYearId, p.profileSalary, ctx,
       );
       results.push({
         ...p,
