@@ -633,6 +633,7 @@ model BranchMember {
 
   @@unique([branchId, userId])
   @@index([userId])
+  @@index([branchId, role, isActive])
   @@map("branch_members")
 }
 
@@ -923,6 +924,7 @@ model TeacherAssignment {
 
   @@index([teacherId])
   @@index([academicYearId])
+  @@index([academicYearId, groupId])
   @@map("teacher_assignments")
 }
 
@@ -1114,6 +1116,8 @@ model Student {
   @@index([groupId])
   @@index([familyId])
   @@index([academicYearId])
+  @@index([academicYearId, groupId])
+  @@index([academicYearId, status])
   @@index([personId])
   @@map("students")
 }
