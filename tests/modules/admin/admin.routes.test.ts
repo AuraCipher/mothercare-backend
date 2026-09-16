@@ -42,6 +42,27 @@ const fileTypeMock = require('file-type') as any;
 const multerMock = require('multer') as any;
 const sharpMock = require('sharp') as any;
 
+// Mock storage for streaming upload path (busboy → temp file → R2/local)
+// Actual R2/local writes are not needed for these unit-style integration tests
+jest.mock('../../../src/modules/upload/storage', () => {
+  const actual = jest.requireActual('../../../src/modules/upload/storage');
+  return {
+    ...actual,
+    storage: {
+      save: jest.fn().mockImplementation((_path: string, body: any) => {
+        if (body && typeof body.on === 'function') {
+          body.on('error', () => {});
+          if (typeof body.resume === 'function') body.resume();
+        }
+        return Promise.resolve('mocked/path');
+      }),
+      get: jest.fn(),
+      delete: jest.fn(),
+    },
+    getDefaultDocumentsBucket: jest.fn(() => 'test-bucket'),
+  };
+});
+
 // ─── Shared auth tokens ─────────────────────────────────────
 
 const adminToken = getAuthHeader(generateTestToken('admin-1', 'super_admin'));
@@ -3069,7 +3090,6 @@ describe('Admin — File Upload', () => {
 
     beforeEach(() => {
       jest.clearAllMocks();
-      multerMock.__resetMockFile();
       sharpMock.__resetMockSharp();
       // Default file-type result: webp
       fileTypeMock.__setFileTypeResult({ ext: 'webp', mime: 'image/webp' });
@@ -3079,16 +3099,12 @@ describe('Admin — File Upload', () => {
 
     test('SVG upload bypasses sharp, stored as image/svg+xml', async () => {
       fileTypeMock.__setFileTypeResult({ ext: 'svg', mime: 'image/svg+xml' });
-      multerMock.__setMockFile({
-        buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="40"/></svg>'),
-        originalname: 'icon.svg',
-        mimetype: 'image/svg+xml',
-        size: 80,
-      }, { purpose: 'document' });
 
       const res = await request(app)
         .post('/api/upload')
-        .set(adminToken);
+        .set(adminToken)
+        .field('purpose', 'document')
+        .attach('file', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="40"/></svg>'), 'icon.svg');
 
       expect(res.status).toBe(201);
       expect(prismaMock.fileRecord.create).toHaveBeenCalledWith(
@@ -3102,16 +3118,12 @@ describe('Admin — File Upload', () => {
 
     test('GIF upload bypasses sharp, stored as image/gif', async () => {
       fileTypeMock.__setFileTypeResult({ ext: 'gif', mime: 'image/gif' });
-      multerMock.__setMockFile({
-        buffer: Buffer.from('GIF89a...mock-gif-data'),
-        originalname: 'animation.gif',
-        mimetype: 'image/gif',
-        size: 200,
-      }, { purpose: 'document' });
 
       const res = await request(app)
         .post('/api/upload')
-        .set(adminToken);
+        .set(adminToken)
+        .field('purpose', 'document')
+        .attach('file', Buffer.from('GIF89a...mock-gif-data'), 'animation.gif');
 
       expect(res.status).toBe(201);
       expect(prismaMock.fileRecord.create).toHaveBeenCalledWith(
@@ -3125,16 +3137,12 @@ describe('Admin — File Upload', () => {
 
     test('Document purpose upload compresses with WebP without resize', async () => {
       fileTypeMock.__setFileTypeResult({ ext: 'jpeg', mime: 'image/jpeg' });
-      multerMock.__setMockFile({
-        buffer: Buffer.from('mock-jpeg-data'),
-        originalname: 'photo.jpg',
-        mimetype: 'image/jpeg',
-        size: 50000,
-      }, { purpose: 'document' });
 
       const res = await request(app)
         .post('/api/upload')
-        .set(adminToken);
+        .set(adminToken)
+        .field('purpose', 'document')
+        .attach('file', Buffer.from('mock-jpeg-data'), 'photo.jpg');
 
       expect(res.status).toBe(201);
       // Should be stored as WebP (compressed)
@@ -3164,19 +3172,17 @@ describe('Admin — File Upload', () => {
 
     test('POST /api/upload accepts entityType + entityId', async () => {
       fileTypeMock.__setFileTypeResult({ ext: 'jpeg', mime: 'image/jpeg' });
-      multerMock.__setMockFile({
-        buffer: Buffer.from('mock-data'),
-        originalname: 'report.pdf',
-        mimetype: 'application/pdf',
-        size: 1000,
-      }, { purpose: 'document', entityType: 'student', entityId: 'stu-123' });
       prismaMock.fileRecord.create.mockResolvedValue({
         id: 'f-new', originalName: 'report.pdf', mimeType: 'image/webp', size: 800, storagePath: '2026/06/test.webp',
       } as any);
 
       const res = await request(app)
         .post('/api/upload')
-        .set(adminToken);
+        .set(adminToken)
+        .field('purpose', 'document')
+        .field('entityType', 'student')
+        .field('entityId', 'stu-123')
+        .attach('file', Buffer.from('mock-data'), 'report.pdf');
 
       expect(res.status).toBe(201);
       expect(prismaMock.fileRecord.create).toHaveBeenCalledWith(
@@ -3226,16 +3232,13 @@ describe('Admin — File Upload', () => {
     });
 
     test('POST /api/upload returns 400 with invalid entityType', async () => {
-      multerMock.__setMockFile({
-        buffer: Buffer.from('data'),
-        originalname: 'test.txt',
-        mimetype: 'text/plain',
-        size: 100,
-      }, { purpose: 'document', entityType: 'invalidType', entityId: 'x' });
-
       const res = await request(app)
         .post('/api/upload')
-        .set(adminToken);
+        .set(adminToken)
+        .field('purpose', 'document')
+        .field('entityType', 'invalidType')
+        .field('entityId', 'x')
+        .attach('file', Buffer.from('data'), 'test.txt');
       expect(res.status).toBe(400);
       expect(res.body.message).toContain('entityType');
     });

@@ -44,9 +44,10 @@ class StorageRouter implements StorageService {
     return isR2Enabled();
   }
 
-  async save(storagePath: string, buffer: Buffer, options?: StorageOptions): Promise<string> {
+  async save(storagePath: string, body: import('stream').Readable | Buffer, options?: StorageOptions): Promise<string> {
     const bucket = options?.bucket || getDefaultDocumentsBucket();
-    return getStorageForBucket(bucket).save(storagePath, buffer, { bucket });
+    const opts: StorageOptions = { ...options, bucket };
+    return getStorageForBucket(bucket).save(storagePath, body as any, opts);
   }
 
   async get(storagePath: string, options?: StorageOptions): Promise<Buffer> {

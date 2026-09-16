@@ -6,8 +6,29 @@ import request from 'supertest';
 import app from '../../../src/app';
 import { generateTestToken, getAuthHeader } from '../../helpers/auth';
 
-const multerMock = require('multer') as any;
 const fileTypeMock = require('file-type') as any;
+
+// Mock storage to avoid real file writes in streaming path
+jest.mock('../../../src/modules/upload/storage', () => {
+  const actual = jest.requireActual('../../../src/modules/upload/storage');
+  return {
+    ...actual,
+    storage: {
+      save: jest.fn().mockImplementation((_path: string, body: any) => {
+        // Consume Readable to prevent ENOENT on temp file delete
+        if (body && typeof body.on === 'function') {
+          body.on('error', () => {});
+          // Drain the stream
+          if (typeof body.resume === 'function') body.resume();
+        }
+        return Promise.resolve('mocked/path');
+      }),
+      get: jest.fn(),
+      delete: jest.fn(),
+    },
+    getDefaultDocumentsBucket: jest.fn(() => 'test-bucket'),
+  };
+});
 
 const adminToken = getAuthHeader(
   generateTestToken('admin-1', 'super_admin', {
@@ -31,30 +52,21 @@ const mockFileRecord = {
 describe('Upload — chat video duration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    multerMock.__resetMockFile();
     fileTypeMock.__setFileTypeResult({ ext: 'mp4', mime: 'video/mp4' });
     prismaMock.fileRecord.create.mockResolvedValue(mockFileRecord as any);
     prismaMock.fileRecord.update.mockResolvedValue(mockFileRecord as any);
   });
 
   test('POST /api/upload rejects video longer than 120 seconds', async () => {
-    multerMock.__setMockFile(
-      {
-        buffer: Buffer.from('fake-video-bytes'),
-        originalname: 'long.mp4',
-        mimetype: 'video/mp4',
-        size: 50_000_000,
-      },
-      {
-        purpose: 'video',
-        entityType: 'chat',
-        roomId: 'room-1',
-        academicYearId: 'ay-1',
-        durationSeconds: '121',
-      },
-    );
-
-    const res = await request(app).post('/api/upload').set(adminToken);
+    const res = await request(app)
+      .post('/api/upload')
+      .set(adminToken)
+      .field('purpose', 'video')
+      .field('entityType', 'chat')
+      .field('roomId', 'room-1')
+      .field('academicYearId', 'ay-1')
+      .field('durationSeconds', '121')
+      .attach('file', Buffer.from('fake-video-bytes'), 'long.mp4');
 
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/2 minutes/i);
@@ -62,45 +74,29 @@ describe('Upload — chat video duration', () => {
   });
 
   test('POST /api/upload rejects video without durationSeconds', async () => {
-    multerMock.__setMockFile(
-      {
-        buffer: Buffer.from('fake-video-bytes'),
-        originalname: 'clip.mp4',
-        mimetype: 'video/mp4',
-        size: 1000,
-      },
-      {
-        purpose: 'video',
-        entityType: 'chat',
-        roomId: 'room-1',
-        academicYearId: 'ay-1',
-      },
-    );
-
-    const res = await request(app).post('/api/upload').set(adminToken);
+    const res = await request(app)
+      .post('/api/upload')
+      .set(adminToken)
+      .field('purpose', 'video')
+      .field('entityType', 'chat')
+      .field('roomId', 'room-1')
+      .field('academicYearId', 'ay-1')
+      .attach('file', Buffer.from('fake-video-bytes'), 'clip.mp4');
 
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/duration is required/i);
   });
 
   test('POST /api/upload accepts video at 120 seconds', async () => {
-    multerMock.__setMockFile(
-      {
-        buffer: Buffer.from('fake-video-bytes'),
-        originalname: 'clip.mp4',
-        mimetype: 'video/mp4',
-        size: 1000,
-      },
-      {
-        purpose: 'video',
-        entityType: 'chat',
-        roomId: 'room-1',
-        academicYearId: 'ay-1',
-        durationSeconds: '120',
-      },
-    );
-
-    const res = await request(app).post('/api/upload').set(adminToken);
+    const res = await request(app)
+      .post('/api/upload')
+      .set(adminToken)
+      .field('purpose', 'video')
+      .field('entityType', 'chat')
+      .field('roomId', 'room-1')
+      .field('academicYearId', 'ay-1')
+      .field('durationSeconds', '120')
+      .attach('file', Buffer.from('fake-video-bytes'), 'clip.mp4');
 
     expect(res.status).toBe(201);
     expect(res.body.data.purpose).toBe('video');

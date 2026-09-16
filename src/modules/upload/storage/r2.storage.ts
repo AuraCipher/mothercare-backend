@@ -4,6 +4,8 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
+import { Readable } from 'stream';
 import env from '../../../config/env';
 import type { StorageOptions, StorageService } from './types';
 import { DOCUMENTS_BUCKET } from './types';
@@ -54,16 +56,35 @@ export class R2StorageAdapter implements StorageService {
     return options?.bucket || this.defaultBucket;
   }
 
-  async save(storagePath: string, buffer: Buffer, options?: StorageOptions): Promise<string> {
+  async save(storagePath: string, body: Readable | Buffer, options?: StorageOptions): Promise<string> {
     const bucket = this.resolveBucket(options);
-    await this.client.send(
-      new PutObjectCommand({
+    if (Buffer.isBuffer(body)) {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: storagePath,
+          Body: body,
+          ContentLength: body.length,
+          ...(options?.contentType ? { ContentType: options.contentType } : {}),
+        }),
+      );
+      return storagePath;
+    }
+    // Streaming path — use multipart Upload for Readable bodies
+    const upload = new Upload({
+      client: this.client,
+      params: {
         Bucket: bucket,
         Key: storagePath,
-        Body: buffer,
-        ContentLength: buffer.length,
-      }),
-    );
+        Body: body as Readable,
+        ...(options?.contentLength != null ? { ContentLength: options.contentLength } : {}),
+        ...(options?.contentType ? { ContentType: options.contentType } : {}),
+      },
+      // Use 5 MB part size for efficient multipart; leave concurrency default
+      partSize: 5 * 1024 * 1024,
+      queueSize: 4,
+    });
+    await upload.done();
     return storagePath;
   }
 
