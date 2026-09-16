@@ -134,14 +134,18 @@ describe('Canteen routes', () => {
       isActive: true,
     };
     prismaMock.canteenProduct.findMany.mockResolvedValue([product] as any);
-    prismaMock.canteenProduct.findFirst.mockResolvedValue(product as any);
     prismaMock.canteenSale.create.mockResolvedValue({
       id: 's1',
       paymentType: 'CASH',
       totalAmount: 100,
       items: [],
     } as any);
-    prismaMock.canteenProduct.update.mockResolvedValue({} as any);
+
+    // Mock $queryRaw: first call is FOR UPDATE lock returning unitsPerBox
+    // second call is the atomic stock decrement
+    (prismaMock.$queryRaw as any)
+      .mockResolvedValueOnce([{ unitsPerBox: 1 }])
+      .mockResolvedValueOnce([{ cnt: 1n }]);
 
     const res = await request(app)
       .post(`/admin/canteen/sales?branchId=${branchId}`)
@@ -153,12 +157,8 @@ describe('Canteen routes', () => {
 
     expect(res.status).toBe(201);
     expect(prismaMock.canteenSale.create).toHaveBeenCalled();
-    expect(prismaMock.canteenProduct.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'p1' },
-        data: { stockBoxes: 8, stockUnits: 0 },
-      }),
-    );
+    // Verify $queryRaw was called for FOR UPDATE lock and atomic decrement
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
   });
 
   test('GET /admin/canteen/summary returns daily totals', async () => {

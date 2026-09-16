@@ -355,10 +355,16 @@ export async function logSupplierPayment(
   createdById?: string,
 ) {
   if (data.amount <= 0) httpError(400, 'Amount must be positive');
-  const supplier = await prisma.canteenSupplier.findFirst({ where: { id: supplierId, branchId } });
-  if (!supplier) httpError(404, 'Supplier not found');
 
   return prisma.$transaction(async (tx) => {
+    // Lock the supplier row inside the transaction to prevent concurrent lost updates.
+    const locked = await tx.$queryRaw<{ balanceOwedToSupplier: unknown; balanceSupplierOwesUs: unknown }[]>`
+      SELECT "balanceOwedToSupplier", "balanceSupplierOwesUs" FROM "canteen_suppliers"
+      WHERE "id" = ${supplierId} AND "branchId" = ${branchId}
+      FOR UPDATE
+    `;
+    if (!locked.length) httpError(404, 'Supplier not found');
+
     const payment = await tx.canteenSupplierPayment.create({
       data: {
         supplierId,
@@ -370,31 +376,21 @@ export async function logSupplierPayment(
     });
 
     if (data.direction === CanteenSupplierPaymentDirection.WE_PAID_SUPPLIER) {
-      const owed = Number(supplier.balanceOwedToSupplier);
-      const owesUs = Number(supplier.balanceSupplierOwesUs);
-      let remaining = data.amount;
-      const appliedToOwed = Math.min(owed, remaining);
-      remaining -= appliedToOwed;
-      await tx.canteenSupplier.update({
-        where: { id: supplierId },
-        data: {
-          balanceOwedToSupplier: money(owed - appliedToOwed),
-          balanceSupplierOwesUs: money(owesUs + remaining),
-        },
-      });
+      // We paid supplier: reduce what we owe, increase what they owe us (overflow)
+      await tx.$queryRaw`
+        UPDATE "canteen_suppliers"
+        SET "balanceOwedToSupplier" = GREATEST(0, "balanceOwedToSupplier" - ${data.amount}),
+            "balanceSupplierOwesUs" = "balanceSupplierOwesUs" + GREATEST(0, ${data.amount} - "balanceOwedToSupplier")
+        WHERE "id" = ${supplierId}
+      `;
     } else {
-      const owesUs = Number(supplier.balanceSupplierOwesUs);
-      const owed = Number(supplier.balanceOwedToSupplier);
-      let remaining = data.amount;
-      const appliedToOwesUs = Math.min(owesUs, remaining);
-      remaining -= appliedToOwesUs;
-      await tx.canteenSupplier.update({
-        where: { id: supplierId },
-        data: {
-          balanceSupplierOwesUs: money(owesUs - appliedToOwesUs),
-          balanceOwedToSupplier: money(owed + remaining),
-        },
-      });
+      // Supplier paid us: reduce what they owe us, increase what we owe them (overflow)
+      await tx.$queryRaw`
+        UPDATE "canteen_suppliers"
+        SET "balanceSupplierOwesUs" = GREATEST(0, "balanceSupplierOwesUs" - ${data.amount}),
+            "balanceOwedToSupplier" = "balanceOwedToSupplier" + GREATEST(0, ${data.amount} - "balanceSupplierOwesUs")
+        WHERE "id" = ${supplierId}
+      `;
     }
 
     return payment;
@@ -768,10 +764,16 @@ export async function recordAccountPayment(
   createdById?: string,
 ) {
   if (data.amountPaid <= 0) httpError(400, 'Amount must be positive');
-  const account = await prisma.canteenAccount.findFirst({ where: { id: accountId, branchId } });
-  if (!account) httpError(404, 'Account not found');
 
   return prisma.$transaction(async (tx) => {
+    // Lock the account row inside the transaction to prevent concurrent lost updates.
+    const locked = await tx.$queryRaw<{ runningBalance: unknown }[]>`
+      SELECT "runningBalance" FROM "canteen_accounts"
+      WHERE "id" = ${accountId} AND "branchId" = ${branchId}
+      FOR UPDATE
+    `;
+    if (!locked.length) httpError(404, 'Account not found');
+
     const payment = await tx.canteenAccountPayment.create({
       data: {
         canteenAccountId: accountId,
@@ -780,11 +782,14 @@ export async function recordAccountPayment(
         createdById,
       },
     });
-    const balance = Number(account.runningBalance);
-    await tx.canteenAccount.update({
-      where: { id: accountId },
-      data: { runningBalance: money(Math.max(0, balance - data.amountPaid)) },
-    });
+
+    // Atomic decrement — prevents concurrent payments from over-deducting.
+    await tx.$queryRaw`
+      UPDATE "canteen_accounts"
+      SET "runningBalance" = GREATEST(0, "runningBalance" - ${data.amountPaid})
+      WHERE "id" = ${accountId}
+    `;
+
     return payment;
   });
 }
@@ -1046,26 +1051,44 @@ async function applySaleStockDeltas(
   items: SaleItemInput[],
 ) {
   for (const item of aggregateSaleItemQuantities(items)) {
-    const product = await tx.canteenProduct.findFirst({
-      where: { id: item.productId, branchId, isActive: true },
-    });
-    if (!product) httpError(400, 'Product not found in this branch');
-    let next: { stockBoxes: number; stockUnits: number };
-    try {
-      next = applyStockDelta(
-        product.stockBoxes,
-        product.stockUnits,
-        -item.quantity,
-        product.unitsPerBox,
-      );
-    } catch (err: any) {
-      if (err?.status) throw err;
-      throw err;
+    // Atomic conditional decrement: lock row + check + update in one SQL statement.
+    // Prevents concurrent sales from overselling the same product.
+    const upbResult = await tx.$queryRaw<{ unitsPerBox: number }[]>`
+      SELECT "unitsPerBox" FROM "canteen_products"
+      WHERE "id" = ${item.productId} AND "branchId" = ${branchId} AND "isActive" = true
+      FOR UPDATE
+    `;
+    if (!upbResult.length) httpError(400, 'Product not found in this branch');
+    const upb = Math.max(1, Number(upbResult[0].unitsPerBox || 1));
+    const qty = item.quantity;
+
+    if (upb <= 1) {
+      // Simple case: stockUnits is the only field
+      const dec = await tx.$queryRaw<{ id: string }[]>`
+        UPDATE "canteen_products" SET "stockUnits" = "stockUnits" - ${qty}
+        WHERE "id" = ${item.productId} AND "stockUnits" >= ${qty}
+        RETURNING "id"
+      `;
+      if (!dec.length) httpError(400, 'Insufficient stock');
+    } else {
+      // Box + unit case: try loose units first, then break boxes
+      const dec1 = await tx.$queryRaw<{ id: string }[]>`
+        UPDATE "canteen_products" SET "stockUnits" = "stockUnits" - ${qty}
+        WHERE "id" = ${item.productId} AND "stockUnits" >= ${qty}
+        RETURNING "id"
+      `;
+      if (!dec1.length) {
+        const dec2 = await tx.$queryRaw<{ id: string }[]>`
+          UPDATE "canteen_products"
+          SET "stockBoxes" = "stockBoxes" - ${Math.ceil(qty / upb)},
+              "stockUnits" = "stockUnits" + ${upb} - ${qty}
+          WHERE "id" = ${item.productId}
+            AND ("stockBoxes" * ${upb} + "stockUnits") >= ${qty}
+          RETURNING "id"
+        `;
+        if (!dec2.length) httpError(400, 'Insufficient stock');
+      }
     }
-    await tx.canteenProduct.update({
-      where: { id: item.productId },
-      data: next,
-    });
   }
 }
 

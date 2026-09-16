@@ -166,11 +166,16 @@ router.post('/stationary/suppliers/:id/payments', asyncHandler(async (req, res) 
     throw { status: 400, message: 'Invalid payment direction' };
   }
   const data = await prisma.$transaction(async (tx) => {
-    const supplier = await tx.stationarySupplier.findFirst({ where: { id: req.params.id, branchId } });
-    if (!supplier) throw { status: 404, message: 'Supplier not found' };
+    // Lock the supplier row to prevent concurrent balance corruption.
+    const locked = await tx.$queryRaw<{ balanceOwedToSupplier: unknown; balanceSupplierOwesUs: unknown }[]>`
+      SELECT "balanceOwedToSupplier", "balanceSupplierOwesUs" FROM "stationary_suppliers"
+      WHERE "id" = ${req.params.id} AND "branchId" = ${branchId}
+      FOR UPDATE
+    `;
+    if (!locked.length) throw { status: 404, message: 'Supplier not found' };
     const payment = await tx.stationarySupplierPayment.create({
       data: {
-        supplierId: supplier.id,
+        supplierId: req.params.id,
         amount,
         direction,
         note: req.body?.note || null,
@@ -178,21 +183,23 @@ router.post('/stationary/suppliers/:id/payments', asyncHandler(async (req, res) 
       },
       include: { createdBy: { select: { name: true } } },
     });
-    const weOwe = Number(supplier.balanceOwedToSupplier);
-    const theyOwe = Number(supplier.balanceSupplierOwesUs);
-    const nextWeOwe = direction === StationarySupplierPaymentDirection.WE_PAID_SUPPLIER
-      ? Math.max(0, weOwe - amount)
-      : weOwe;
-    const nextTheyOwe = direction === StationarySupplierPaymentDirection.SUPPLIER_PAID_US
-      ? Math.max(0, theyOwe - amount)
-      : theyOwe;
-    await tx.stationarySupplier.update({
-      where: { id: supplier.id },
-      data: {
-        balanceOwedToSupplier: nextWeOwe,
-        balanceSupplierOwesUs: nextTheyOwe,
-      },
-    });
+    if (direction === StationarySupplierPaymentDirection.WE_PAID_SUPPLIER) {
+      // We paid supplier: reduce what we owe, overflow goes to what they owe us
+      await tx.$queryRaw`
+        UPDATE "stationary_suppliers"
+        SET "balanceOwedToSupplier" = GREATEST(0, "balanceOwedToSupplier" - ${amount}),
+            "balanceSupplierOwesUs" = "balanceSupplierOwesUs" + GREATEST(0, ${amount} - "balanceOwedToSupplier")
+        WHERE "id" = ${req.params.id}
+      `;
+    } else {
+      // Supplier paid us: reduce what they owe us, overflow goes to what we owe them
+      await tx.$queryRaw`
+        UPDATE "stationary_suppliers"
+        SET "balanceSupplierOwesUs" = GREATEST(0, "balanceSupplierOwesUs" - ${amount}),
+            "balanceOwedToSupplier" = "balanceOwedToSupplier" + GREATEST(0, ${amount} - "balanceSupplierOwesUs")
+        WHERE "id" = ${req.params.id}
+      `;
+    }
     return payment;
   });
   res.status(201).json({ success: true, data });
@@ -321,9 +328,16 @@ router.post('/stationary/restock-purchases', asyncHandler(async (req, res) => {
     });
 
     for (const item of normalizedItems) {
-      const product = await tx.stationaryProduct.findUnique({ where: { id: item.productId } });
-      if (!product) continue;
-      const unitsPerBundle = Math.max(1, Number(product.unitsPerBundle || 1));
+      // Lock the product row to prevent concurrent restock races.
+      const locked = await tx.$queryRaw<{ stockBundles: number; stockUnits: number }[]>`
+        SELECT "stockBundles", "stockUnits" FROM "stationary_products"
+        WHERE "id" = ${item.productId}
+        FOR UPDATE
+      `;
+      if (!locked.length) continue;
+      const unitsPerBundle = Math.max(1, Number(
+        (await tx.stationaryProduct.findUnique({ where: { id: item.productId }, select: { unitsPerBundle: true } }))?.unitsPerBundle || 1
+      ));
       const addBundles = unitsPerBundle > 1 ? Math.floor(item.quantity / unitsPerBundle) : 0;
       const addUnits = unitsPerBundle > 1 ? item.quantity % unitsPerBundle : item.quantity;
       await tx.stationaryPurchaseItem.create({
@@ -337,8 +351,8 @@ router.post('/stationary/restock-purchases', asyncHandler(async (req, res) => {
       await tx.stationaryProduct.update({
         where: { id: item.productId },
         data: {
-          stockBundles: product.stockBundles + addBundles,
-          stockUnits: product.stockUnits + addUnits,
+          stockBundles: locked[0].stockBundles + addBundles,
+          stockUnits: locked[0].stockUnits + addUnits,
         },
       });
       await tx.stationaryStockMovement.create({
@@ -382,8 +396,14 @@ router.post('/stationary/inventory/adjust', asyncHandler(async (req, res) => {
   if (deltaBundles === 0 && deltaUnits === 0) throw { status: 400, message: 'quantityBundles or quantityUnits is required' };
 
   const data = await prisma.$transaction(async (tx) => {
-    const product = await tx.stationaryProduct.findUnique({ where: { id: productId } });
-    if (!product || product.branchId !== branchId) throw { status: 404, message: 'Product not found' };
+    // Lock the product row to prevent concurrent adjustment races.
+    const locked = await tx.$queryRaw<{ stockBundles: number; stockUnits: number }[]>`
+      SELECT "stockBundles", "stockUnits" FROM "stationary_products"
+      WHERE "id" = ${productId}
+      FOR UPDATE
+    `;
+    if (!locked.length) throw { status: 404, message: 'Product not found' };
+    const product = locked[0];
     const nextBundles = product.stockBundles + deltaBundles;
     const nextUnits = product.stockUnits + deltaUnits;
     if (nextBundles < 0 || nextUnits < 0) throw { status: 400, message: 'Insufficient stock for adjustment' };

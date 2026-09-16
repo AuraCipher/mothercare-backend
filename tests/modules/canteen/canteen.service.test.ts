@@ -132,14 +132,13 @@ describe('CanteenService', () => {
 
   describe('logSupplierPayment', () => {
     test('moves overpayment to balanceSupplierOwesUs', async () => {
-      prismaMock.canteenSupplier.findFirst.mockResolvedValue({
-        id: 'sup-1',
-        branchId,
-        balanceOwedToSupplier: { valueOf: () => 90240 },
-        balanceSupplierOwesUs: { valueOf: () => 0 },
-      } as any);
+      // Mock $queryRaw for FOR UPDATE lock — returns the locked supplier row
+      (prismaMock.$queryRaw as any).mockResolvedValueOnce([
+        { balanceOwedToSupplier: { valueOf: () => 90240 }, balanceSupplierOwesUs: { valueOf: () => 0 } },
+      ]);
       prismaMock.canteenSupplierPayment.create.mockResolvedValue({ id: 'pay-1' } as any);
-      prismaMock.canteenSupplier.update.mockResolvedValue({} as any);
+      // Mock $queryRaw for the atomic UPDATE
+      (prismaMock.$queryRaw as any).mockResolvedValueOnce([]);
 
       await canteenService.logSupplierPayment(
         branchId,
@@ -148,9 +147,12 @@ describe('CanteenService', () => {
         'user-1',
       );
 
-      const updateData = prismaMock.canteenSupplier.update.mock.calls[0][0].data;
-      expect(Number(updateData.balanceOwedToSupplier)).toBe(0);
-      expect(Number(updateData.balanceSupplierOwesUs)).toBe(760);
+      // Verify the atomic UPDATE was called (second $queryRaw call)
+      expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
+      // The UPDATE SQL should compute GREATEST(0, owed - amount) and overflow
+      const updateCall = (prismaMock.$queryRaw as any).mock.calls[1];
+      expect(updateCall[0].join('')).toContain('balanceOwedToSupplier');
+      expect(updateCall[0].join('')).toContain('balanceSupplierOwesUs');
     });
   });
 

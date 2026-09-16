@@ -2228,47 +2228,58 @@ router.post('/payments/:id/revert', asyncHandler(async (req: Request, res: Respo
   if (!payment) { res.status(404).json({ success: false, message: 'Payment not found' }); return; }
   if (payment.revertedAt) { res.status(400).json({ success: false, message: 'Payment already reverted' }); return; }
 
-  // Revert the payment
-  await prisma.payment.update({
-    where: { id: req.params.id },
-    data: { revertedAt: new Date(), revertedById: userId, revertReason: reason },
+  // Wrap in transaction with FOR UPDATE on the student fee row to prevent
+  // concurrent payments/reverts from corrupting the fee balance.
+  const result = await prisma.$transaction(async (tx) => {
+    // Lock the student fee row to serialize concurrent operations on the same fee.
+    await tx.$queryRaw`
+      SELECT id FROM "student_fees" WHERE id = ${payment.studentFeeId} FOR UPDATE
+    `;
+
+    // Soft-delete the payment
+    await tx.payment.update({
+      where: { id: req.params.id },
+      data: { revertedAt: new Date(), revertedById: userId, revertReason: reason },
+    });
+
+    // Re-aggregate from source of truth (non-reverted payments)
+    const allPayments = await tx.payment.aggregate({
+      where: { studentFeeId: payment.studentFeeId, revertedAt: null },
+      _sum: { amount: true },
+    });
+    const paidAmount = allPayments._sum.amount || 0;
+    const studentFee = await tx.studentFee.findUnique({
+      where: { id: payment.studentFeeId },
+      include: { extraItems: { select: { amount: true } } },
+    });
+    const revertExtraSum = (studentFee as any)?.extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
+    const revertTotalDue = (studentFee?.netAmount || 0) + revertExtraSum;
+    let status = 'UNPAID';
+    if (paidAmount > 0) {
+      if (paidAmount > revertTotalDue) status = 'OVERPAID';
+      else if (paidAmount >= revertTotalDue) status = 'PAID';
+      else status = 'PARTIAL';
+    }
+
+    await tx.studentFee.update({
+      where: { id: payment.studentFeeId },
+      data: { paidAmount, status },
+    });
+
+    // Audit log: REVERTED
+    await tx.paymentAuditLog.create({
+      data: {
+        paymentId: payment.id,
+        action: 'REVERTED',
+        previousValue: { amount: payment.amount, receiptNumber: payment.receiptNumber, reason },
+        performedById: userId,
+      },
+    });
+
+    return { status };
   });
 
-  // Recalculate StudentFee
-  const allPayments = await prisma.payment.aggregate({
-    where: { studentFeeId: payment.studentFeeId, revertedAt: null },
-    _sum: { amount: true },
-  });
-  const paidAmount = allPayments._sum.amount || 0;
-  const studentFee = await prisma.studentFee.findUnique({
-    where: { id: payment.studentFeeId },
-    include: { extraItems: { select: { amount: true } } },
-  });
-  const revertExtraSum = (studentFee as any)?.extraItems?.reduce((s: number, e: any) => s + e.amount, 0) || 0;
-  const revertTotalDue = (studentFee?.netAmount || 0) + revertExtraSum;
-  let status = 'UNPAID';
-  if (paidAmount > 0) {
-    if (paidAmount > revertTotalDue) status = 'OVERPAID';
-    else if (paidAmount >= revertTotalDue) status = 'PAID';
-    else status = 'PARTIAL';
-  }
-
-  await prisma.studentFee.update({
-    where: { id: payment.studentFeeId },
-    data: { paidAmount, status },
-  });
-
-  // Audit log: REVERTED
-  await prisma.paymentAuditLog.create({
-    data: {
-      paymentId: payment.id,
-      action: 'REVERTED',
-      previousValue: { amount: payment.amount, receiptNumber: payment.receiptNumber, reason },
-      performedById: userId,
-    },
-  });
-
-  const balanceDue = Math.max(0, revertTotalDue - paidAmount);
+  const balanceDue = Math.max(0, ((payment as any).netAmount || 0) - (payment.amount || 0));
   void notifyPaymentReverted({
     studentId: payment.studentId,
     paymentId: payment.id,
@@ -2277,7 +2288,7 @@ router.post('/payments/:id/revert', asyncHandler(async (req: Request, res: Respo
     balanceDuePaise: balanceDue,
   }).catch(() => undefined);
 
-  res.json({ success: true, data: { reverted: payment.id, status } });
+  res.json({ success: true, data: { reverted: payment.id, status: result.status } });
 }));
 
 // GET /admin/payments/:id/receipt — Fetch receipt snapshot for a payment
@@ -3703,19 +3714,34 @@ router.post('/fees/stationary/assign', asyncHandler(async (req: Request, res: Re
 
   const result = await prisma.$transaction(async (tx) => {
     const productIds = [...new Set(cleaned.map((i: any) => i.productId))];
+
+    // Lock all product rows with FOR UPDATE to prevent concurrent sale races.
+    // Replaces the old findMany+map pattern which read stock from a snapshot
+    // that could be stale by the time we decrement.
+    const lockedRows = await tx.$queryRaw<{ id: string; stockBundles: number; stockUnits: number; unitsPerBundle: unknown }[]>`
+      SELECT "id", "stockBundles", "stockUnits", "unitsPerBundle"
+      FROM "stationary_products"
+      WHERE "id" IN (${productIds.join(',')}) AND "branchId" = ${scope.branchId} AND "isActive" = true
+      FOR UPDATE
+    `;
+    if (lockedRows.length !== productIds.length) {
+      throw { status: 400, message: 'One or more products are invalid for this branch' };
+    }
+    const byId = new Map(lockedRows.map((r) => [r.id, r]));
+
+    // Also fetch display fields (name, unitPrice, category) for the record items.
     const products = await tx.stationaryProduct.findMany({
       where: { id: { in: productIds }, branchId: scope.branchId, isActive: true },
       include: { category: true },
     });
-    if (products.length !== productIds.length) {
-      throw { status: 400, message: 'One or more products are invalid for this branch' };
-    }
-    const byId = new Map(products.map((p) => [p.id, p]));
+    const productsById = new Map(products.map((p) => [p.id, p]));
 
     for (const it of cleaned) {
-      const p = byId.get(it.productId)!;
-      const available = toStockUnits(p.stockBundles, p.stockUnits, p.unitsPerBundle);
+      const locked = byId.get(it.productId)!;
+      const upb = Math.max(1, Number(locked.unitsPerBundle || 1));
+      const available = locked.stockBundles * upb + locked.stockUnits;
       if (available < it.quantity) {
+        const p = productsById.get(it.productId)!;
         throw { status: 400, message: `Insufficient stock for ${p.name}` };
       }
     }
@@ -3733,7 +3759,9 @@ router.post('/fees/stationary/assign', asyncHandler(async (req: Request, res: Re
 
     const createdItems: any[] = [];
     for (const it of cleaned) {
-      const p = byId.get(it.productId)!;
+      const locked = byId.get(it.productId)!;
+      const p = productsById.get(it.productId)!;
+      const upb = Math.max(1, Number(locked.unitsPerBundle || 1));
       const lineTotal = p.unitPrice * it.quantity;
       const item = await tx.studentStationaryRecordItem.create({
         data: {
@@ -3759,12 +3787,18 @@ router.post('/fees/stationary/assign', asyncHandler(async (req: Request, res: Re
         },
       });
 
-      const currentUnits = toStockUnits(p.stockBundles, p.stockUnits, p.unitsPerBundle);
-      const next = fromStockUnits(currentUnits - it.quantity, p.unitsPerBundle);
+      // Decrement stock using the locked values — safe from concurrent sales.
+      const currentUnits = locked.stockBundles * upb + locked.stockUnits - it.quantity;
+      const nextBundles = Math.floor(currentUnits / upb);
+      const nextUnits = currentUnits % upb;
       await tx.stationaryProduct.update({
         where: { id: p.id },
-        data: { stockBundles: next.stockBundles, stockUnits: next.stockUnits },
+        data: { stockBundles: nextBundles, stockUnits: nextUnits },
       });
+      // Update the in-memory locked row so subsequent items in the same request see the new stock.
+      locked.stockBundles = nextBundles;
+      locked.stockUnits = nextUnits;
+
       await tx.stationaryStockMovement.create({
         data: {
           branchId: scope.branchId,
