@@ -768,10 +768,9 @@ router.get('/student-fees', asyncHandler(async (req: Request, res: Response) => 
     where.student = { name: { contains: search as string, mode: 'insensitive' } };
   }
 
-  const hasPage = pageQ != null || limitQ != null;
-  const page = hasPage ? Math.max(1, parseInt(pageQ as string, 10) || 1) : undefined;
-  const limit = hasPage ? Math.min(200, Math.max(1, parseInt(limitQ as string, 10) || 50)) : undefined;
-  const skip = hasPage && page != null && limit != null ? (page - 1) * limit : undefined;
+  const page = Math.max(1, parseInt(pageQ as string, 10) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(limitQ as string, 10) || 50));
+  const skip = (page - 1) * limit;
 
   const include = {
     student: {
@@ -790,16 +789,13 @@ router.get('/student-fees', asyncHandler(async (req: Request, res: Response) => 
       where,
       include,
       orderBy: [{ netAmount: 'desc' }, { id: 'asc' }],
-      ...(hasPage ? { skip, take: limit } : {}),
+      skip,
+      take: limit,
     }),
-    hasPage ? prisma.studentFee.count({ where }) : Promise.resolve(undefined),
+    prisma.studentFee.count({ where }),
   ]);
 
-  if (hasPage && page != null && limit != null && total != null) {
-    res.json({ success: true, data: fees, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 0 } });
-  } else {
-    res.json({ success: true, data: fees });
-  }
+  res.json({ success: true, data: fees, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 0 } });
 }));
 
 // POST /admin/student-fees/generate — Generate monthly fees with selected categories
@@ -2358,26 +2354,22 @@ router.get('/payments', asyncHandler(async (req: Request, res: Response) => {
   if (studentFeeId) where.studentFeeId = studentFeeId as string;
   if (studentId) where.studentId = studentId as string;
 
-  const hasPage = pageQ != null || limitQ != null;
-  const page = hasPage ? Math.max(1, parseInt(pageQ as string, 10) || 1) : undefined;
-  const limit = hasPage ? Math.min(200, Math.max(1, parseInt(limitQ as string, 10) || 50)) : undefined;
-  const skip = hasPage && page != null && limit != null ? (page - 1) * limit : undefined;
+  const page = Math.max(1, parseInt(pageQ as string, 10) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(limitQ as string, 10) || 50));
+  const skip = (page - 1) * limit;
 
   const [payments, total] = await Promise.all([
     prisma.payment.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       include: { recordedBy: { select: { name: true } } },
-      ...(hasPage ? { skip, take: limit } : {}),
+      skip,
+      take: limit,
     }),
-    hasPage ? prisma.payment.count({ where }) : Promise.resolve(undefined),
+    prisma.payment.count({ where }),
   ]);
 
-  if (hasPage && page != null && limit != null && total != null) {
-    res.json({ success: true, data: payments, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 0 } });
-  } else {
-    res.json({ success: true, data: payments });
-  }
+  res.json({ success: true, data: payments, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 0 } });
 }));
 
 // ═══════════════════════════════════════════════════════════════════

@@ -531,17 +531,19 @@ describe('GET /admin/student-fees', () => {
     (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({ id: 'ay1', branchId: 'b1', status: 'ACTIVE' });
   };
 
-  test('returns all fees without pagination params (backward compat)', async () => {
+  test('returns bounded default page when no pagination params (no unbounded findMany)', async () => {
     setupScope();
     prismaMock.studentFee.findMany.mockResolvedValue([mockFee, { ...mockFee, id: 'sf2' }] as any);
+    prismaMock.studentFee.count.mockResolvedValue(2);
     const res = await request(app).get('/admin/student-fees?academicYearId=ay1').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(2);
-    expect(res.body.pagination).toBeUndefined();
-    expect(prismaMock.studentFee.count).not.toHaveBeenCalled();
+    expect(res.body.pagination).toEqual({ page: 1, limit: 50, total: 2, totalPages: 1 });
+    expect(prismaMock.studentFee.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 0, take: 50 }));
+    expect(prismaMock.studentFee.count).toHaveBeenCalled();
   });
 
-  test('applies pagination when page/limit provided', async () => {
+  test('applies explicit pagination when page/limit provided', async () => {
     setupScope();
     prismaMock.studentFee.findMany.mockResolvedValue([mockFee] as any);
     prismaMock.studentFee.count.mockResolvedValue(1);
@@ -588,6 +590,19 @@ describe('GET /admin/student-fees', () => {
       orderBy: [{ netAmount: 'desc' }, { id: 'asc' }],
     }));
   });
+
+  test('REGRESSION: findMany always receives a bounded take (never unbounded)', async () => {
+    setupScope();
+    prismaMock.studentFee.findMany.mockResolvedValue([] as any);
+    prismaMock.studentFee.count.mockResolvedValue(0);
+    await request(app).get('/admin/student-fees?academicYearId=ay1').query(feeQuery).set('Authorization', adminToken);
+    const call = prismaMock.studentFee.findMany.mock.calls[0]![0]!;
+    expect(typeof call.take).toBe('number');
+    expect(call.take).toBeGreaterThan(0);
+    expect(call.take).toBeLessThanOrEqual(200);
+    expect(typeof call.skip).toBe('number');
+    expect(call.skip).toBeGreaterThanOrEqual(0);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -610,17 +625,19 @@ describe('GET /admin/payments', () => {
     (prismaMock.academicYear.findUnique as jest.Mock).mockResolvedValue({ id: 'ay1', branchId: 'b1', status: 'ACTIVE' });
   };
 
-  test('returns all payments without pagination params (backward compat)', async () => {
+  test('returns bounded default page when no pagination params (no unbounded findMany)', async () => {
     setupScope();
     prismaMock.payment.findMany.mockResolvedValue([mockPayment] as any);
+    prismaMock.payment.count.mockResolvedValue(1);
     const res = await request(app).get('/admin/payments?academicYearId=ay1').query(feeQuery).set('Authorization', adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
-    expect(res.body.pagination).toBeUndefined();
-    expect(prismaMock.payment.count).not.toHaveBeenCalled();
+    expect(res.body.pagination).toEqual({ page: 1, limit: 50, total: 1, totalPages: 1 });
+    expect(prismaMock.payment.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 0, take: 50 }));
+    expect(prismaMock.payment.count).toHaveBeenCalled();
   });
 
-  test('applies pagination when page/limit provided', async () => {
+  test('applies explicit pagination when page/limit provided', async () => {
     setupScope();
     prismaMock.payment.findMany.mockResolvedValue([mockPayment] as any);
     prismaMock.payment.count.mockResolvedValue(1);
@@ -646,6 +663,19 @@ describe('GET /admin/payments', () => {
     expect(prismaMock.payment.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ studentId: 's1' }),
     }));
+  });
+
+  test('REGRESSION: findMany always receives a bounded take (never unbounded)', async () => {
+    setupScope();
+    prismaMock.payment.findMany.mockResolvedValue([] as any);
+    prismaMock.payment.count.mockResolvedValue(0);
+    await request(app).get('/admin/payments?academicYearId=ay1').query(feeQuery).set('Authorization', adminToken);
+    const call = prismaMock.payment.findMany.mock.calls[0]![0]!;
+    expect(typeof call.take).toBe('number');
+    expect(call.take).toBeGreaterThan(0);
+    expect(call.take).toBeLessThanOrEqual(200);
+    expect(typeof call.skip).toBe('number');
+    expect(call.skip).toBeGreaterThanOrEqual(0);
   });
 });
 

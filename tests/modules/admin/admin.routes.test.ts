@@ -1066,22 +1066,25 @@ describe('Admin — Users', () => {
 
   test('GET /admin/users returns list of users', async () => {
     prismaMock.user.findMany.mockResolvedValue([mockUser] as any);
+    prismaMock.user.count.mockResolvedValue(1);
     const res = await request(app).get('/admin/users').set(adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
-    expect(res.body.pagination).toBeUndefined();
+    expect(res.body.pagination).toEqual({ page: 1, limit: 50, total: 1, totalPages: 1 });
   });
 
-  test('GET /admin/users returns all users without pagination params (backward compat)', async () => {
+  test('GET /admin/users returns bounded default page when no pagination params (no unbounded findMany)', async () => {
     prismaMock.user.findMany.mockResolvedValue([mockUser, { ...mockUser, id: 'u2' }] as any);
+    prismaMock.user.count.mockResolvedValue(2);
     const res = await request(app).get('/admin/users').set(adminToken);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(2);
-    expect(res.body.pagination).toBeUndefined();
-    expect(prismaMock.user.count).not.toHaveBeenCalled();
+    expect(res.body.pagination).toEqual({ page: 1, limit: 50, total: 2, totalPages: 1 });
+    expect(prismaMock.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 0, take: 50 }));
+    expect(prismaMock.user.count).toHaveBeenCalled();
   });
 
-  test('GET /admin/users applies pagination when page/limit provided', async () => {
+  test('GET /admin/users applies explicit pagination when page/limit provided', async () => {
     prismaMock.user.findMany.mockResolvedValue([mockUser] as any);
     prismaMock.user.count.mockResolvedValue(1);
     const res = await request(app).get('/admin/users?page=1&limit=10').set(adminToken);
@@ -1105,6 +1108,18 @@ describe('Admin — Users', () => {
       where: expect.objectContaining({ role: 'teacher', status: 'active' }),
       skip: 20, take: 20,
     }));
+  });
+
+  test('GET /admin/users REGRESSION: findMany always receives a bounded take (never unbounded)', async () => {
+    prismaMock.user.findMany.mockResolvedValue([] as any);
+    prismaMock.user.count.mockResolvedValue(0);
+    await request(app).get('/admin/users').set(adminToken);
+    const call = prismaMock.user.findMany.mock.calls[0]![0]!;
+    expect(typeof call.take).toBe('number');
+    expect(call.take).toBeGreaterThan(0);
+    expect(call.take).toBeLessThanOrEqual(100);
+    expect(typeof call.skip).toBe('number');
+    expect(call.skip).toBeGreaterThanOrEqual(0);
   });
 
   test('GET /admin/users/:id returns user when found', async () => {

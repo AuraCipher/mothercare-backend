@@ -90,10 +90,9 @@ router.get('/users', asyncHandler(async (req: Request, res: Response) => {
     ];
   }
 
-  const hasPage = pageQ != null || limitQ != null;
-  const page = hasPage ? Math.max(1, parseInt(pageQ as string, 10) || 1) : undefined;
-  const limit = hasPage ? Math.min(100, Math.max(1, parseInt(limitQ as string, 10) || 50)) : undefined;
-  const skip = hasPage && page != null && limit != null ? (page - 1) * limit : undefined;
+  const page = Math.max(1, parseInt(pageQ as string, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(limitQ as string, 10) || 50));
+  const skip = (page - 1) * limit;
 
   const select = {
     id: true, name: true, username: true, email: true, phone: true,
@@ -105,16 +104,13 @@ router.get('/users', asyncHandler(async (req: Request, res: Response) => {
       where,
       orderBy: { createdAt: 'desc' },
       select,
-      ...(hasPage ? { skip, take: limit } : {}),
+      skip,
+      take: limit,
     }),
-    hasPage ? prisma.user.count({ where }) : Promise.resolve(undefined),
+    prisma.user.count({ where }),
   ]);
 
-  if (hasPage && page != null && limit != null && total != null) {
-    res.json({ success: true, data: users, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 0 } });
-  } else {
-    res.json({ success: true, data: users });
-  }
+  res.json({ success: true, data: users, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 0 } });
 }));
 
 router.get('/users/:id', asyncHandler(async (req: Request, res: Response) => {
