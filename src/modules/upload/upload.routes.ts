@@ -345,12 +345,50 @@ router.get('/uploads/:id/meta', asyncHandler(async (req: Request, res: Response)
 }));
 
 router.get('/uploads/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { buffer, mimeType, originalName } = await uploadService.getFile(req.params.id);
+  let result: Awaited<ReturnType<typeof uploadService.getFileStream>>;
+  try {
+    result = await uploadService.getFileStream(req.params.id, req.headers.range as string | undefined);
+  } catch (err: any) {
+    if (err?.status === 416) {
+      res.setHeader('Content-Range', `bytes */${err?.size ?? '*'}`);
+      res.status(416).json({ success: false, message: 'Range Not Satisfiable' });
+      return;
+    }
+    throw err;
+  }
+
+  const { stream, mimeType, originalName, contentLength, etag, lastModified, contentRange, statusCode } = result;
+
   res.setHeader('Content-Type', mimeType);
   res.setHeader('Cache-Control', 'private, max-age=3600');
   res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(originalName)}`);
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  res.send(buffer);
+  res.setHeader('Accept-Ranges', 'bytes');
+  if (etag) res.setHeader('ETag', etag);
+  if (lastModified) res.setHeader('Last-Modified', lastModified.toUTCString());
+  if (contentLength != null) res.setHeader('Content-Length', String(contentLength));
+  if (contentRange) res.setHeader('Content-Range', contentRange);
+  if (statusCode) res.status(statusCode);
+
+  // Handle client disconnect — destroy source stream to abort R2 download
+  const onClose = () => {
+    try { (stream as any).destroy(); } catch {}
+  };
+  req.on('close', onClose);
+  res.on('close', onClose);
+
+  try {
+    await pipeline(stream as any, res as any);
+  } catch (err: any) {
+    // After headers sent, do not attempt JSON response; just abort
+    // If headers not yet sent, propagate to errorHandler
+    if (!res.headersSent) throw err;
+    // Otherwise, log and destroy
+    try { (stream as any).destroy(); } catch {}
+  } finally {
+    req.off('close', onClose);
+    res.off('close', onClose);
+  }
 }));
 
 export default router;

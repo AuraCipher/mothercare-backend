@@ -55,6 +55,11 @@ class StorageRouter implements StorageService {
     return getStorageForBucket(bucket).get(storagePath, options);
   }
 
+  async getStream(storagePath: string, options?: StorageOptions): Promise<import('./types').StorageGetResult> {
+    const bucket = options?.bucket || getDefaultDocumentsBucket();
+    return getStorageForBucket(bucket).getStream(storagePath, { ...options, bucket });
+  }
+
   async delete(storagePath: string, options?: StorageOptions): Promise<void> {
     const bucket = options?.bucket || getDefaultDocumentsBucket();
     return getStorageForBucket(bucket).delete(storagePath, options);

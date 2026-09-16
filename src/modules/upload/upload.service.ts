@@ -333,6 +333,27 @@ export class UploadService {
     return { buffer, mimeType: record.mimeType, originalName: record.originalName, record };
   }
 
+  async getFileStream(fileId: string, range?: string) {
+    const record = await prisma.fileRecord.findUnique({ where: { id: fileId } });
+    if (!record) throw { status: 404, message: 'File not found' };
+    const result = await storage.getStream(record.storagePath, {
+      bucket: record.storageBucket,
+      range,
+    });
+    return {
+      stream: result.body,
+      mimeType: record.mimeType,
+      originalName: record.originalName,
+      record,
+      contentLength: result.contentLength ?? record.size,
+      contentType: result.contentType,
+      etag: result.etag,
+      lastModified: result.lastModified,
+      contentRange: result.contentRange,
+      statusCode: result.statusCode,
+    };
+  }
+
   async listByEntity(entityType: string, entityId: string) {
     const records = await prisma.fileRecord.findMany({
       where: { entityType, entityId },

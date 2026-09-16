@@ -89,14 +89,45 @@ export class R2StorageAdapter implements StorageService {
   }
 
   async get(storagePath: string, options?: StorageOptions): Promise<Buffer> {
+    const result = await this.getStream(storagePath, options);
+    return streamToBuffer(result.body as unknown as AsyncIterable<Uint8Array>);
+  }
+
+  async getStream(storagePath: string, options?: StorageOptions): Promise<import('./types').StorageGetResult> {
     const bucket = this.resolveBucket(options);
     const result = await this.client.send(
       new GetObjectCommand({
         Bucket: bucket,
         Key: storagePath,
+        ...(options?.range ? { Range: options.range } : {}),
       }),
     );
-    return streamToBuffer(result.Body);
+    let body: Readable;
+    const rawBody: any = result.Body;
+    if (!rawBody) {
+      body = Readable.from(Buffer.alloc(0));
+    } else if (rawBody instanceof Readable) {
+      body = rawBody as Readable;
+    } else if (typeof rawBody.transformToByteArray === 'function') {
+      // Web ReadableStream
+      body = Readable.fromWeb(rawBody as any);
+    } else if (Buffer.isBuffer(rawBody)) {
+      body = Readable.from(rawBody);
+    } else if (typeof rawBody[Symbol.asyncIterator] === 'function') {
+      body = Readable.from(rawBody as AsyncIterable<Uint8Array>);
+    } else {
+      // Fallback: treat as Readable
+      body = rawBody as Readable;
+    }
+    return {
+      body,
+      contentLength: result.ContentLength,
+      contentType: result.ContentType,
+      etag: result.ETag,
+      lastModified: result.LastModified,
+      contentRange: (result as any).ContentRange,
+      statusCode: options?.range && (result as any).ContentRange ? 206 : 200,
+    };
   }
 
   async delete(storagePath: string, options?: StorageOptions): Promise<void> {
