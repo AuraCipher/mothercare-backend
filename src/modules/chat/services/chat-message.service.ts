@@ -3,6 +3,7 @@ import type { ChatMessageType } from '@prisma/client';
 import { assertCanPost, assertRoomMember } from './chat-access.service';
 import { ensureChatRoomAccess } from './chat-room-access.service';
 import { ensureStudentSystemRoomAccess } from './chat-student-room-access.service';
+import { authorizeChatMedia } from '../../upload/upload-authorization';
 
 export async function listRoomMessages(
   roomId: string,
@@ -37,6 +38,14 @@ export async function createRoomMessage(input: {
   metadata?: Record<string, unknown>;
 }) {
   await assertCanPost(input.roomId, input.senderId);
+
+  // R2-04: Validate mediaFileId — sender must own the file or it must be a chat file in this room
+  if (input.mediaFileId) {
+    const { allowed } = await authorizeChatMedia(input.senderId, input.roomId, input.mediaFileId);
+    if (!allowed) {
+      throw { status: 403, message: 'Not authorized to attach this file' };
+    }
+  }
 
   const message = await prisma.chatMessage.create({
     data: {

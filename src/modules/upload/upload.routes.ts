@@ -12,6 +12,7 @@ import { uploadService, getMaxBytesForPurpose } from './upload.service';
 import { UPLOAD_ENTITY_TYPES } from './storage-paths';
 import { prisma } from '../../lib/prisma';
 import { teacherAppChatAllowsAttachments } from '../chat/services/teacher-app-chat-permissions.service';
+import { authorizeFileAccess, authorizeFileMutation } from './upload-authorization';
 
 const router = Router();
 
@@ -320,6 +321,20 @@ router.get('/uploads', asyncHandler(async (req: Request, res: Response) => {
     res.status(400).json({ success: false, message: `entityType must be one of: ${UPLOAD_ENTITY_TYPES.join(', ')}` });
     return;
   }
+
+  // R2-04: Entity access check — students can only list their own files
+  const user = (req as any).user;
+  if (user.role === 'student' && entityType === 'student') {
+    const student = await prisma.student.findFirst({
+      where: { userId: user.id },
+      select: { id: true },
+    });
+    if (!student || student.id !== entityId) {
+      res.status(403).json({ success: false, message: 'Access denied' });
+      return;
+    }
+  }
+
   const records = await uploadService.listByEntity(entityType, entityId);
   res.json({ success: true, data: records });
 }));
@@ -330,21 +345,50 @@ router.put('/uploads/:id/rename', asyncHandler(async (req: Request, res: Respons
     res.status(400).json({ success: false, message: 'originalName is required' });
     return;
   }
+  // R2-04: Authorize mutation BEFORE rename (prevents IDOR rename)
+  const user = (req as any).user;
+  const { allowed } = await authorizeFileMutation(user, req.params.id);
+  if (!allowed) {
+    res.status(404).json({ success: false, message: 'File not found' });
+    return;
+  }
   const result = await uploadService.renameFile(req.params.id, originalName);
   res.json({ success: true, data: result });
 }));
 
 router.delete('/uploads/:id', asyncHandler(async (req: Request, res: Response) => {
+  // R2-04: Authorize mutation BEFORE delete (prevents IDOR deletion)
+  const user = (req as any).user;
+  const { allowed } = await authorizeFileMutation(user, req.params.id);
+  if (!allowed) {
+    res.status(404).json({ success: false, message: 'File not found' });
+    return;
+  }
   await uploadService.deleteFile(req.params.id);
   res.json({ success: true, message: 'File deleted' });
 }));
 
 router.get('/uploads/:id/meta', asyncHandler(async (req: Request, res: Response) => {
+  // R2-04: Authorize BEFORE metadata access (prevents IDOR metadata leakage)
+  const user = (req as any).user;
+  const { allowed } = await authorizeFileAccess(user, req.params.id);
+  if (!allowed) {
+    res.status(404).json({ success: false, message: 'File not found' });
+    return;
+  }
   const result = await uploadService.getMeta(req.params.id);
   res.json({ success: true, data: result });
 }));
 
 router.get('/uploads/:id', asyncHandler(async (req: Request, res: Response) => {
+  // R2-04: Authorize BEFORE any storage access (prevents IDOR + R2 object key leakage)
+  const user = (req as any).user;
+  const { allowed, reason } = await authorizeFileAccess(user, req.params.id);
+  if (!allowed) {
+    res.status(404).json({ success: false, message: 'File not found' });
+    return;
+  }
+
   let result: Awaited<ReturnType<typeof uploadService.getFileStream>>;
   try {
     result = await uploadService.getFileStream(req.params.id, req.headers.range as string | undefined);
