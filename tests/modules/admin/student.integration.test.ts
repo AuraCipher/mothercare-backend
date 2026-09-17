@@ -203,6 +203,7 @@ function resetPrismaMocks() {
   (prismaMock.parentProfile.create as jest.Mock).mockResolvedValue({ id: 'pp1', userId: 'u-parent' });
   (prismaMock.studentParent.create as jest.Mock).mockResolvedValue({ studentId: STUDENT_ID, parentId: 'pp1' });
   (prismaMock.parentProfile.update as jest.Mock).mockResolvedValue({ id: 'pp1', phone: '03001112222' });
+  (prismaMock.emergencyContact.findUnique as jest.Mock).mockResolvedValue({ id: CONTACT_ID, studentId: STUDENT_ID });
   (prismaMock.emergencyContact.update as jest.Mock).mockResolvedValue({ id: CONTACT_ID, name: 'Mother' });
   (prismaMock.$transaction as jest.Mock).mockResolvedValue([{ id: STUDENT_ID }, { id: 'log1' }]);
   (prismaMock.studentStatusLog.findMany as jest.Mock).mockResolvedValue([]);

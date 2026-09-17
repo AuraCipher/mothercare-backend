@@ -24,6 +24,7 @@ export default function errorHandler(err: any, req: Request, res: Response, _nex
   }
 
   // Always log errors (production + development)
+  const isDev = process.env.APP_MODE === 'development';
   logger.error('Request failed', {
     message,
     status,
@@ -31,12 +32,10 @@ export default function errorHandler(err: any, req: Request, res: Response, _nex
     url: req.originalUrl,
     // @ts-ignore
     userId: req.user?.id,
-    stack: err.stack,
+    ...(isDev && { stack: err.stack }),
   });
 
   // Don't leak error details in production
-  const isDev = process.env.APP_MODE === 'development';
-
   res.status(status).json({
     success: false,
     message: isDev ? message : (status === 500 ? 'Internal server error' : message),

@@ -21,7 +21,14 @@ router.post('/', auth, roleMiddleware(['super_admin']), asyncHandler(async (req:
     return;
   }
 
-  const result = await invitationService.createInvitation(email, branchId, (req as any).user?.id);
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (typeof email !== 'string' || !emailRegex.test(email.trim())) {
+    res.status(400).json({ success: false, message: 'Invalid email format' });
+    return;
+  }
+
+  const result = await invitationService.createInvitation(email.trim().toLowerCase(), branchId, (req as any).user?.id);
   res.status(201).json({ success: true, data: result });
 }));
 

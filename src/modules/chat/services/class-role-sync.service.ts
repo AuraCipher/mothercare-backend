@@ -1,5 +1,48 @@
 import { prisma, basePrisma } from '../../../lib/prisma';
 
+/**
+ * Maximum rows per batch INSERT to stay well under PostgreSQL's 65535
+ * parameter limit.  Each row uses 7 parameters → 200 rows = 1400 params
+ * (2.1 % of limit).  Chosen to keep SQL string under 100 KB and bound
+ * per-chunk execution time.
+ */
+const CHUNK_SIZE = 200;
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
+type UpsertRow = {
+  roomId: string; userId: string; access: string; canPost: boolean;
+  displayTitle: string | null; classRoleAssignmentId: string | null; isPostingRestricted: boolean;
+};
+
+function buildBatchSql(rows: UpsertRow[]): { sql: string; params: unknown[] } {
+  const parts: string[] = [];
+  const params: unknown[] = [];
+  let idx = 1;
+  for (const v of rows) {
+    const p = () => `$${idx++}`;
+    params.push(
+      v.roomId, v.userId, v.access, v.canPost,
+      v.displayTitle, v.classRoleAssignmentId, v.isPostingRestricted,
+    );
+    parts.push(
+      `INSERT INTO chat_room_members (id, "roomId", "userId", access, "canPost", "canRead", "displayTitle", "classRoleAssignmentId", "isPostingRestricted", "joinedAt", "createdAt", "updatedAt")
+       VALUES (gen_random_uuid(), ${p()}, ${p()}, ${p()}, ${p()}, true, ${p()}, ${p()}, ${p()}, now(), now(), now())
+       ON CONFLICT ("roomId", "userId")
+       DO UPDATE SET "leftAt" = NULL, access = EXCLUDED.access, "canPost" = EXCLUDED."canPost", "canRead" = true,
+                    "displayTitle" = EXCLUDED."displayTitle", "classRoleAssignmentId" = EXCLUDED."classRoleAssignmentId",
+                    "isPostingRestricted" = EXCLUDED."isPostingRestricted", "updatedAt" = now()`,
+    );
+  }
+  return { sql: parts.join(';\n'), params };
+}
+
 /** Reconcile group_chat memberships after role definition or assignment changes. */
 export async function syncClassRoleMemberships(communityId: string): Promise<void> {
   const community = await prisma.chatCommunity.findUnique({
@@ -47,11 +90,7 @@ export async function syncClassRoleMemberships(communityId: string): Promise<voi
     assignmentsByUser.set(assignment.userId, list);
   }
 
-  // Build all upsert values, then execute in a single round-trip
-  const upsertValues: {
-    roomId: string; userId: string; access: string; canPost: boolean;
-    displayTitle: string | null; classRoleAssignmentId: string | null; isPostingRestricted: boolean;
-  }[] = [];
+  const upsertValues: UpsertRow[] = [];
 
   for (const room of groupChatRooms) {
     for (const student of students) {
@@ -74,20 +113,11 @@ export async function syncClassRoleMemberships(communityId: string): Promise<voi
 
   if (upsertValues.length === 0) return;
 
-  const cteParts: string[] = [];
-  const flatParams: unknown[] = [];
-  let paramIdx = 1;
-  for (const v of upsertValues) {
-    const p = () => `$${paramIdx++}`;
-    flatParams.push(v.roomId, v.userId, v.access, v.canPost, v.displayTitle, v.classRoleAssignmentId, v.isPostingRestricted);
-    cteParts.push(
-      `INSERT INTO chat_room_members (id, "roomId", "userId", access, "canPost", "canRead", "displayTitle", "classRoleAssignmentId", "isPostingRestricted", "joinedAt", "createdAt", "updatedAt")
-       VALUES (gen_random_uuid(), ${p()}, ${p()}, ${p()}, ${p()}, true, ${p()}, ${p()}, ${p()}, now(), now(), now())
-       ON CONFLICT ("roomId", "userId")
-       DO UPDATE SET "leftAt" = NULL, access = EXCLUDED.access, "canPost" = EXCLUDED."canPost", "canRead" = true,
-                    "displayTitle" = EXCLUDED."displayTitle", "classRoleAssignmentId" = EXCLUDED."classRoleAssignmentId",
-                    "isPostingRestricted" = EXCLUDED."isPostingRestricted", "updatedAt" = now()`,
-    );
+  // Chunk into bounded batches to avoid giant SQL strings and stay
+  // well under PostgreSQL's65535-parameter limit (200 rows × 7 = 1400).
+  const chunks = chunkArray(upsertValues, CHUNK_SIZE);
+  for (const chunk of chunks) {
+    const { sql, params } = buildBatchSql(chunk);
+    await basePrisma.$executeRawUnsafe(sql, ...params);
   }
-  await basePrisma.$executeRawUnsafe(cteParts.join(';\n'), ...flatParams);
 }

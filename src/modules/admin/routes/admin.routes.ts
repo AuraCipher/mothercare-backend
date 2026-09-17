@@ -134,9 +134,32 @@ router.post('/users', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../../lib/prisma'));
   const { name, username, email, phone, password, role, gender, dateOfBirth, address } = req.body;
 
-  if (!name || !username || !password) {
+  if (!name?.trim() || !username?.trim() || !password) {
     res.status(400).json({ success: false, message: 'Name, username, and password are required' });
     return;
+  }
+
+  if (typeof password !== 'string' || password.length < 6) {
+    res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+    return;
+  }
+
+  // Privilege escalation guard: restrict which roles can be created
+  const allowedRoles = ['parent', 'teacher', 'student', 'staff', 'canteen_staff'];
+  const requestedRole = role || 'parent';
+  const userRole = (req as any).user?.role;
+
+  if (!allowedRoles.includes(requestedRole)) {
+    // Only super_admin can create management users; nobody can create super_admin via this endpoint
+    if (requestedRole === 'management' && userRole === 'super_admin') {
+      // allowed — proceed
+    } else if (requestedRole === 'super_admin') {
+      res.status(403).json({ success: false, message: 'Cannot create super_admin users via this endpoint' });
+      return;
+    } else {
+      res.status(400).json({ success: false, message: `Invalid role. Allowed: ${allowedRoles.join(', ')}` });
+      return;
+    }
   }
 
   const bc = await import('bcryptjs');
@@ -144,12 +167,12 @@ router.post('/users', asyncHandler(async (req: Request, res: Response) => {
 
   const user = await prisma.user.create({
     data: {
-      name,
-      username,
-      email,
-      phone,
+      name: name.trim(),
+      username: username.trim().toLowerCase(),
+      email: email?.trim()?.toLowerCase() || null,
+      phone: phone?.trim() || null,
       passwordHash,
-      role: role || 'parent',
+      role: requestedRole,
       gender,
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
       address,

@@ -2,6 +2,10 @@ import { prisma } from '../../../lib/prisma';
 import { basePrisma } from '../../../lib/prisma';
 import { logAudit } from '../../../services/audit.service';
 import { notifyMarksAbsent, notifyMarksEntered } from '../../chat/services/system-notification.service';
+import { pLimit } from '../../../lib/p-limit';
+
+/** Bounded concurrency for batch DB upserts — see p-limit.ts rationale. */
+const DB_CONCURRENCY = 5;
 
 type MarksEntryInput = {
   studentId: string;
@@ -165,32 +169,35 @@ class MarksEntryService {
       });
     }
 
-    // Concurrent upserts — all fire in parallel instead of sequential for-loop
+    // Bounded-concurrency upserts — at most DB_CONCURRENCY in-flight DB operations
+    const limit = pLimit(DB_CONCURRENCY);
     await Promise.all(
       entries.map((entry) =>
-        prisma.marksEntry.upsert({
-          where: {
-            examClassSubjectId_studentId: {
+        limit(() =>
+          prisma.marksEntry.upsert({
+            where: {
+              examClassSubjectId_studentId: {
+                examClassSubjectId,
+                studentId: entry.studentId,
+              },
+            },
+            create: {
               examClassSubjectId,
               studentId: entry.studentId,
+              marksObtained: entry.isAbsent ? null : (entry.marksObtained ?? null),
+              isAbsent: entry.isAbsent ?? false,
+              enteredBy: enteredById,
+              createdById: enteredById,
+              updatedById: enteredById,
             },
-          },
-          create: {
-            examClassSubjectId,
-            studentId: entry.studentId,
-            marksObtained: entry.isAbsent ? null : (entry.marksObtained ?? null),
-            isAbsent: entry.isAbsent ?? false,
-            enteredBy: enteredById,
-            createdById: enteredById,
-            updatedById: enteredById,
-          },
-          update: {
-            marksObtained: entry.isAbsent ? null : (entry.marksObtained ?? null),
-            isAbsent: entry.isAbsent ?? false,
-            enteredBy: enteredById,
-            updatedById: enteredById,
-          },
-        }),
+            update: {
+              marksObtained: entry.isAbsent ? null : (entry.marksObtained ?? null),
+              isAbsent: entry.isAbsent ?? false,
+              enteredBy: enteredById,
+              updatedById: enteredById,
+            },
+          }),
+        ),
       ),
     );
 

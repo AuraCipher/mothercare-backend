@@ -3,6 +3,8 @@ import { prisma } from '../../../lib/prisma';
 import { studentService } from '../services/student.service';
 import { passwordSetLimiter } from '../../../middleware/security/rateLimiter';
 import { requireScope } from '../utils/scope-context';
+import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 
 const router = Router();
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
@@ -57,6 +59,15 @@ router.post('/students/:id/emergency-contact', asyncHandler(async (req: Request,
 
 // PUT /students/:id/emergency-contact/:contactId — Update emergency contact
 router.put('/students/:id/emergency-contact/:contactId', asyncHandler(async (req: Request, res: Response) => {
+  // Verify the contact belongs to this student (IDOR prevention)
+  const contact = await prisma.emergencyContact.findUnique({
+    where: { id: req.params.contactId },
+    select: { id: true, studentId: true },
+  });
+  if (!contact || contact.studentId !== req.params.id) {
+    res.status(404).json({ success: false, message: 'Emergency contact not found for this student' });
+    return;
+  }
   const updated = await prisma.emergencyContact.update({
     where: { id: req.params.contactId },
     data: { ...req.body, updatedById: (req as any).user?.id },
@@ -100,12 +111,15 @@ router.put('/students/:id/parent', asyncHandler(async (req: Request, res: Respon
     res.json({ success: true, data: updated });
   } else if (name) {
     // Create new parent user + profile + link
+    // Use a random unguessable password hash — parent accounts are password-reset by admin only
+    const unusablePassword = crypto.randomBytes(32).toString('hex');
+    const unusableHash = await bcrypt.hash(unusablePassword, 12);
     const baseUsername = `parent_${student.id.slice(0, 8)}`;
     const parentUser = await prisma.user.create({
-      data: { name, username: baseUsername, passwordHash: '$2a$12$placeholder', role: 'parent', status: 'active' },
+      data: { name, username: baseUsername, passwordHash: unusableHash, role: 'parent', status: 'active' },
     }).catch(async () => {
       return prisma.user.create({
-        data: { name, username: `${baseUsername}_${Math.random().toString(36).slice(2, 6)}`, passwordHash: '$2a$12$placeholder', role: 'parent', status: 'active' },
+        data: { name, username: `${baseUsername}_${Math.random().toString(36).slice(2, 6)}`, passwordHash: unusableHash, role: 'parent', status: 'active' },
       });
     });
     const profile = await prisma.parentProfile.create({

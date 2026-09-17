@@ -79,6 +79,17 @@ router.patch('/messages/:messageId', asyncHandler(async (req, res) => {
 router.post('/devices', asyncHandler(async (req, res) => {
   const userId = (req as any).user.id;
   const { token, platform } = req.body;
+
+  if (!token || typeof token !== 'string' || token.length < 1 || token.length > 512) {
+    res.status(400).json({ success: false, message: 'A valid device token is required (max 512 characters)' });
+    return;
+  }
+  const validPlatforms = ['android', 'ios', 'web'];
+  if (platform && !validPlatforms.includes(platform)) {
+    res.status(400).json({ success: false, message: `platform must be one of: ${validPlatforms.join(', ')}` });
+    return;
+  }
+
   const row = await registerDeviceToken(userId, token, platform);
   res.status(201).json({ success: true, data: { id: row.id, platform: row.platform } });
 }));
@@ -86,6 +97,12 @@ router.post('/devices', asyncHandler(async (req, res) => {
 router.delete('/devices', asyncHandler(async (req, res) => {
   const userId = (req as any).user.id;
   const { token } = req.body;
+
+  if (!token || typeof token !== 'string') {
+    res.status(400).json({ success: false, message: 'token is required' });
+    return;
+  }
+
   await removeDeviceToken(userId, token);
   res.json({ success: true });
 }));

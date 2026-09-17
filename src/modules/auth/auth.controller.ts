@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import authService from './auth.service';
+import { blacklistToken } from '../../lib/jwt';
 import {
   loginSchema,
   changePasswordSchema,
@@ -62,6 +63,12 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
   // @ts-ignore: req.user is set by auth middleware
   const userId = req.user?.id;
   const result = await authService.logout(userId);
+
+  // Blacklist the JWT so it cannot be reused until natural expiry
+  const currentToken = (req as any).token || req.cookies?.token;
+  if (currentToken) {
+    await blacklistToken(currentToken).catch(() => undefined);
+  }
 
   // Clear httpOnly cookie
   res.clearCookie('token', { path: '/' });

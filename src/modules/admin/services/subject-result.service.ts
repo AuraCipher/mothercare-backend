@@ -1,6 +1,7 @@
 import { prisma } from '../../../lib/prisma';
 import { basePrisma } from '../../../lib/prisma';
 import { logAudit } from '../../../services/audit.service';
+import { pLimit } from '../../../lib/p-limit';
 import type { ScopeContext } from '../utils/scope-context';
 import {
   assertExamSessionInScope,
@@ -8,6 +9,9 @@ import {
   assertSubjectInScope,
   assertStudentInScope,
 } from '../utils/exam-scope';
+
+/** Bounded concurrency for batch DB upserts — see p-limit.ts rationale. */
+const DB_CONCURRENCY = 5;
 
 // ─── Pure Math Functions (individually testable) ──────────────────────
 
@@ -290,32 +294,35 @@ class SubjectResultService {
     results.sort((a, b) => b.percentage - a.percentage);
     const ranks = computeCompetitionRanks(results.map((r) => r.percentage));
 
-    // Concurrent upserts — all fire in parallel instead of sequential for-loop
+    // Bounded-concurrency upserts — at most DB_CONCURRENCY in-flight DB operations
     if (results.length > 0) {
+      const limit = pLimit(DB_CONCURRENCY);
       await Promise.all(
         results.map((r, i) =>
-          prisma.subjectResult.upsert({
-            where: {
-              studentId_examSessionId_subjectId: {
+          limit(() =>
+            prisma.subjectResult.upsert({
+              where: {
+                studentId_examSessionId_subjectId: {
+                  studentId: r.studentId,
+                  examSessionId,
+                  subjectId,
+                },
+              },
+              create: {
                 studentId: r.studentId,
                 examSessionId,
                 subjectId,
+                percentage: r.percentage,
+                grade: r.grade,
+                subjectRank: ranks[i],
               },
-            },
-            create: {
-              studentId: r.studentId,
-              examSessionId,
-              subjectId,
-              percentage: r.percentage,
-              grade: r.grade,
-              subjectRank: ranks[i],
-            },
-            update: {
-              percentage: r.percentage,
-              grade: r.grade,
-              subjectRank: ranks[i],
-            },
-          }),
+              update: {
+                percentage: r.percentage,
+                grade: r.grade,
+                subjectRank: ranks[i],
+              },
+            }),
+          ),
         ),
       );
     }
