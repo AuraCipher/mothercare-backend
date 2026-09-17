@@ -40,6 +40,9 @@ async function main() {
       server.listen(PORT, HOST, () => resolve());
     });
 
+    // ─── Request timeout — 60 s safety net ────────────────
+    server.requestTimeout = 60_000;
+
     logger.info(`🚀 Server running on http://${HOST}:${PORT}`);
     logger.info(`📍 Environment: ${env.NODE_ENV}`);
     logger.info(`🔧 App Mode: ${env.APP_MODE}`);

@@ -1,5 +1,4 @@
-import { prisma } from '../../../lib/prisma';
-import { ensureRoomMembership } from './chat-access.service';
+import { prisma, basePrisma } from '../../../lib/prisma';
 
 /** Reconcile group_chat memberships after role definition or assignment changes. */
 export async function syncClassRoleMemberships(communityId: string): Promise<void> {
@@ -48,6 +47,12 @@ export async function syncClassRoleMemberships(communityId: string): Promise<voi
     assignmentsByUser.set(assignment.userId, list);
   }
 
+  // Build all upsert values, then execute in a single round-trip
+  const upsertValues: {
+    roomId: string; userId: string; access: string; canPost: boolean;
+    displayTitle: string | null; classRoleAssignmentId: string | null; isPostingRestricted: boolean;
+  }[] = [];
+
   for (const room of groupChatRooms) {
     for (const student of students) {
       if (!student.userId) continue;
@@ -59,13 +64,30 @@ export async function syncClassRoleMemberships(communityId: string): Promise<voi
         userAssignments.length > 0 &&
         userAssignments.every((a) => a.isMessagingRestricted || !a.roleDefinition.canPostInGroups);
 
-      await ensureRoomMembership(room.id, student.userId, {
-        access: 'member',
-        canPost: !!postingAssignment,
-        displayTitle: postingAssignment?.publicDisplayName ?? null,
-        classRoleAssignmentId: postingAssignment?.id ?? null,
-        isPostingRestricted,
+      upsertValues.push({
+        roomId: room.id, userId: student.userId, access: 'member',
+        canPost: !!postingAssignment, displayTitle: postingAssignment?.publicDisplayName ?? null,
+        classRoleAssignmentId: postingAssignment?.id ?? null, isPostingRestricted,
       });
     }
   }
+
+  if (upsertValues.length === 0) return;
+
+  const cteParts: string[] = [];
+  const flatParams: unknown[] = [];
+  let paramIdx = 1;
+  for (const v of upsertValues) {
+    const p = () => `$${paramIdx++}`;
+    flatParams.push(v.roomId, v.userId, v.access, v.canPost, v.displayTitle, v.classRoleAssignmentId, v.isPostingRestricted);
+    cteParts.push(
+      `INSERT INTO chat_room_members (id, "roomId", "userId", access, "canPost", "canRead", "displayTitle", "classRoleAssignmentId", "isPostingRestricted", "joinedAt", "createdAt", "updatedAt")
+       VALUES (gen_random_uuid(), ${p()}, ${p()}, ${p()}, ${p()}, true, ${p()}, ${p()}, ${p()}, now(), now(), now())
+       ON CONFLICT ("roomId", "userId")
+       DO UPDATE SET "leftAt" = NULL, access = EXCLUDED.access, "canPost" = EXCLUDED."canPost", "canRead" = true,
+                    "displayTitle" = EXCLUDED."displayTitle", "classRoleAssignmentId" = EXCLUDED."classRoleAssignmentId",
+                    "isPostingRestricted" = EXCLUDED."isPostingRestricted", "updatedAt" = now()`,
+    );
+  }
+  await basePrisma.$executeRawUnsafe(cteParts.join(';\n'), ...flatParams);
 }

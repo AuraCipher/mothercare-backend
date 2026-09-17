@@ -290,33 +290,35 @@ class SubjectResultService {
     results.sort((a, b) => b.percentage - a.percentage);
     const ranks = computeCompetitionRanks(results.map((r) => r.percentage));
 
-    // Bulk upsert
-    await basePrisma.$transaction(async (tx) => {
-      for (let i = 0; i < results.length; i++) {
-        await tx.subjectResult.upsert({
-          where: {
-            studentId_examSessionId_subjectId: {
-              studentId: results[i].studentId,
+    // Concurrent upserts — all fire in parallel instead of sequential for-loop
+    if (results.length > 0) {
+      await Promise.all(
+        results.map((r, i) =>
+          prisma.subjectResult.upsert({
+            where: {
+              studentId_examSessionId_subjectId: {
+                studentId: r.studentId,
+                examSessionId,
+                subjectId,
+              },
+            },
+            create: {
+              studentId: r.studentId,
               examSessionId,
               subjectId,
+              percentage: r.percentage,
+              grade: r.grade,
+              subjectRank: ranks[i],
             },
-          },
-          create: {
-            studentId: results[i].studentId,
-            examSessionId,
-            subjectId,
-            percentage: results[i].percentage,
-            grade: results[i].grade,
-            subjectRank: ranks[i],
-          },
-          update: {
-            percentage: results[i].percentage,
-            grade: results[i].grade,
-            subjectRank: ranks[i],
-          },
-        });
-      }
-    });
+            update: {
+              percentage: r.percentage,
+              grade: r.grade,
+              subjectRank: ranks[i],
+            },
+          }),
+        ),
+      );
+    }
 
     await logAudit({
       action: 'CREATE',

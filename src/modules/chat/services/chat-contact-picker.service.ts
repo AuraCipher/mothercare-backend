@@ -151,24 +151,36 @@ export async function getTeacherContactPicker(input: {
     select: { id: true, name: true, section: true },
   });
 
-  const classGroups: PickerClassGroup[] = [];
-  for (const g of groups) {
-    const students = await prisma.student.findMany({
-      where: { groupId: g.id, academicYearId: input.academicYearId, isActive: true, status: 'ACTIVE' },
-      select: {
-        id: true,
-        name: true,
-        rollNumber: true,
-        parents: {
-          include: {
-            parent: {
-              include: { user: { select: { id: true, name: true, status: true, role: true } } },
-            },
+  // Batch: fetch all students for all groups in one query
+  const allStudents = await prisma.student.findMany({
+    where: { groupId: { in: groupIds }, academicYearId: input.academicYearId, isActive: true, status: 'ACTIVE' },
+    select: {
+      id: true,
+      name: true,
+      rollNumber: true,
+      groupId: true,
+      parents: {
+        include: {
+          parent: {
+            include: { user: { select: { id: true, name: true, status: true, role: true } } },
           },
         },
       },
-      orderBy: [{ rollNumber: 'asc' }, { name: 'asc' }],
-    });
+    },
+    orderBy: [{ rollNumber: 'asc' }, { name: 'asc' }],
+  });
+
+  const studentsByGroup = new Map<string, typeof allStudents>();
+  for (const s of allStudents) {
+    if (!s.groupId) continue;
+    const list = studentsByGroup.get(s.groupId) ?? [];
+    list.push(s);
+    studentsByGroup.set(s.groupId, list);
+  }
+
+  const classGroups: PickerClassGroup[] = [];
+  for (const g of groups) {
+    const students = studentsByGroup.get(g.id) ?? [];
 
     const parentContacts: PickerContact[] = [];
     const seenParents = new Set<string>();
@@ -258,13 +270,24 @@ export async function getAdminContactPicker(input: {
     select: { id: true, name: true, section: true },
   });
 
+  // Batch: fetch all students for all groups in one query
+  const allStudentsAdmin = await prisma.student.findMany({
+    where: { groupId: { in: groups.map((g) => g.id) }, academicYearId: input.academicYearId, isActive: true, status: 'ACTIVE' },
+    include: { user: { select: { id: true, name: true, status: true } } },
+    orderBy: [{ rollNumber: 'asc' }, { name: 'asc' }],
+  });
+
+  const studentsByGroupAdmin = new Map<string, typeof allStudentsAdmin>();
+  for (const s of allStudentsAdmin) {
+    if (!s.groupId) continue;
+    const list = studentsByGroupAdmin.get(s.groupId) ?? [];
+    list.push(s);
+    studentsByGroupAdmin.set(s.groupId, list);
+  }
+
   const classGroups: PickerClassGroup[] = [];
   for (const g of groups) {
-    const students = await prisma.student.findMany({
-      where: { groupId: g.id, academicYearId: input.academicYearId, isActive: true, status: 'ACTIVE' },
-      include: { user: { select: { id: true, name: true, status: true } } },
-      orderBy: [{ rollNumber: 'asc' }, { name: 'asc' }],
-    });
+    const students = studentsByGroupAdmin.get(g.id) ?? [];
 
     const studentContacts = students
       .filter((s) => s.user?.status === 'active' && s.user!.id !== input.userId)

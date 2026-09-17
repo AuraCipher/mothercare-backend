@@ -8,6 +8,9 @@ import { listDeviceTokensForUsers } from './device-token.service';
 
 let initialized = false;
 
+/** Timeout for a single FCM sendEachForMulticast call (ms). */
+const FCM_SEND_TIMEOUT_MS = 30_000;
+
 function initFirebase(): boolean {
   if (initialized) return true;
   if (env.FCM_ENABLED !== 'true') return false;
@@ -62,7 +65,7 @@ export async function sendEncryptedPushToUsers(
     const encrypted = encryptPushPayload(key.toString('base64'), payload);
 
     try {
-      const res = await admin.messaging().sendEachForMulticast({
+      const sendPromise = admin.messaging().sendEachForMulticast({
         tokens: userTokens,
         data: {
           v: String(keyVersion),
@@ -77,9 +80,20 @@ export async function sendEncryptedPushToUsers(
           payload: { aps: { contentAvailable: true } },
         },
       });
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('FCM request timed out')), FCM_SEND_TIMEOUT_MS);
+      });
+
+      const res = await Promise.race([sendPromise, timeoutPromise]);
       sent += res.successCount;
     } catch (err: unknown) {
-      logger.error('FCM send failed', { userId, error: err instanceof Error ? err.message : String(err) });
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('timed out') || msg.includes('timeout') || msg.includes('Timeout')) {
+        logger.warn('FCM send timed out', { userId, timeoutMs: FCM_SEND_TIMEOUT_MS });
+      } else {
+        logger.error('FCM send failed', { userId, error: msg });
+      }
     }
   }
 

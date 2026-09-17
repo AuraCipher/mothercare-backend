@@ -192,15 +192,26 @@ class ReportCardService {
     built.sort((a, b) => b.card.overallPercentage - a.card.overallPercentage);
     const ranks = computeCompetitionRanks(built.map((b) => b.card.overallPercentage));
 
-    await basePrisma.$transaction(async (tx) => {
+    // Batch rank update — single round-trip instead of N sequential updates
+    if (built.length > 0) {
+      const caseParts: string[] = [];
+      const params: unknown[] = [];
+      let paramIdx = 1;
       for (let i = 0; i < built.length; i++) {
-        await tx.reportCard.update({
-          where: { id: built[i].card.id },
-          data: { classRank: ranks[i] },
-        });
+        params.push(ranks[i], built[i].card.id);
+        caseParts.push(`WHEN id = $${paramIdx++} THEN $${paramIdx++}`);
+      }
+      const ids = built.map((b) => b.card.id);
+      const placeholders = ids.map(() => `$${paramIdx++}`).join(', ');
+      params.push(...ids);
+      await basePrisma.$executeRawUnsafe(
+        `UPDATE report_cards SET "classRank" = CASE id ${caseParts.join(' ')} END, "updatedAt" = now() WHERE id IN (${placeholders})`,
+        ...params,
+      );
+      for (let i = 0; i < built.length; i++) {
         built[i].card.classRank = ranks[i];
       }
-    });
+    }
 
     const studentMap = new Map(students.map((s) => [s.id, s]));
 

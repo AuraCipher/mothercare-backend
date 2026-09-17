@@ -17,6 +17,9 @@ export class TwilioWhatsAppError extends Error {
   }
 }
 
+/** Timeout for a single Twilio REST API fetch call (ms). */
+const TWILIO_FETCH_TIMEOUT_MS = 15_000;
+
 export type CredentialRecipientType = 'student' | 'teacher' | 'staff';
 
 const TEMPLATE_SIDS: Record<CredentialRecipientType, string | undefined> = {
@@ -66,7 +69,7 @@ function getTwilioConfig() {
   return { accountSid, authToken, from };
 }
 
-function classifyTwilioError(statusCode: number, body: any): TwilioWhatsAppError {
+export function classifyTwilioError(statusCode: number, body: any): TwilioWhatsAppError {
   const errCode = body?.code != null ? String(body.code) : 'unknown';
   const message = body?.message || `Twilio API error (${statusCode})`;
 
@@ -127,9 +130,15 @@ export async function sendTemplateMessage(params: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: payload.toString(),
+      signal: AbortSignal.timeout(TWILIO_FETCH_TIMEOUT_MS),
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Network error';
+    const name = err instanceof Error ? err.name : '';
+    if (name === 'TimeoutError' || msg.includes('timeout') || msg.includes('abort')) {
+      logger.error('Twilio WhatsApp request timed out', { to: to.slice(0, 6) + '****', timeoutMs: TWILIO_FETCH_TIMEOUT_MS });
+      throw new TwilioWhatsAppError(`Twilio request timed out after ${TWILIO_FETCH_TIMEOUT_MS}ms`, 'timeout', true, false);
+    }
     logger.error('Twilio WhatsApp network failure', { to: to.slice(0, 6) + '****', msg });
     throw new TwilioWhatsAppError(msg, 'network_error', true, false);
   }

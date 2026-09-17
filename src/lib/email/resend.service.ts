@@ -16,6 +16,21 @@ export interface SendEmailResult {
   messageId?: string;
 }
 
+/** Timeout for a single Resend API call (ms). */
+const RESEND_SEND_TIMEOUT_MS = 30_000;
+
+/** Singleton Resend client — reuse HTTP connection pool across calls. */
+let resendClient: Resend | null = null;
+
+function getResendClient(): Resend | null {
+  if (!resendClient) {
+    const apiKey = env.RESEND_API_KEY?.trim();
+    if (!apiKey) return null;
+    resendClient = new Resend(apiKey);
+  }
+  return resendClient;
+}
+
 function isResendConfigured(): boolean {
   return Boolean(env.RESEND_API_KEY?.trim() && env.RESEND_FROM_EMAIL?.trim());
 }
@@ -47,13 +62,20 @@ export async function sendAdminInvitationEmail(
   const subject = `You're invited to manage ${params.branchName} — ${schoolName}`;
 
   try {
-    const resend = new Resend(env.RESEND_API_KEY!);
-    const result = await resend.emails.send({
-      from: env.RESEND_FROM_EMAIL!,
-      to: params.to,
-      subject,
-      html,
-    });
+    const resend = getResendClient();
+    if (!resend) {
+      return { sent: false, warning: 'Resend client could not be initialized.' };
+    }
+
+    const result = await resend.emails.send(
+      {
+        from: env.RESEND_FROM_EMAIL!,
+        to: params.to,
+        subject,
+        html,
+      },
+      { abortSignal: AbortSignal.timeout(RESEND_SEND_TIMEOUT_MS) } as any,
+    );
 
     if (result.error) {
       const warning = `Failed to send invitation email: ${result.error.message}`;

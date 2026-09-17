@@ -3,14 +3,9 @@ import env from '../config/env';
 import { getRedisConnectionConfig } from '../config/redis-tcp';
 import logger from '../lib/logger';
 import { sendEncryptedPushToUsers } from '../modules/chat/push/fcm.service';
-import { flushPendingSystemNotifications } from '../modules/chat/services/system-notification.service';
-import { runAttendanceDailyReport } from '../modules/chat/services/attendance-daily-report.service';
 import {
-  ATTENDANCE_DAILY_REPORT_JOB,
-  CHAT_OFFLINE_DELIVER_JOB,
   CHAT_PUSH_FANOUT_JOB,
   CHAT_QUEUE_NAME,
-  type AttendanceDailyReportJob,
   type ChatPushFanoutJob,
 } from './chat.queue';
 
@@ -25,14 +20,6 @@ async function handlePushFanout(data: ChatPushFanoutJob) {
     preview: data.preview,
     roomName: data.roomName,
   });
-}
-
-async function handleAttendanceDailyReport(data: AttendanceDailyReportJob) {
-  await runAttendanceDailyReport(data);
-}
-
-async function handleOfflineDeliver() {
-  await flushPendingSystemNotifications();
 }
 
 export function startChatWorker(): Worker | null {
@@ -51,12 +38,6 @@ export function startChatWorker(): Worker | null {
         case CHAT_PUSH_FANOUT_JOB:
           await handlePushFanout(job.data as ChatPushFanoutJob);
           break;
-        case CHAT_OFFLINE_DELIVER_JOB:
-          await handleOfflineDeliver();
-          break;
-        case ATTENDANCE_DAILY_REPORT_JOB:
-          await handleAttendanceDailyReport(job.data as AttendanceDailyReportJob);
-          break;
         default:
           throw new Error(`Unknown chat job: ${job.name}`);
       }
@@ -66,6 +47,10 @@ export function startChatWorker(): Worker | null {
 
   worker.on('failed', (job, err) => {
     logger.error('Chat worker job failed', { jobId: job?.id, name: job?.name, error: err.message });
+  });
+
+  worker.on('error', (err) => {
+    logger.error('Chat worker error', { error: err.message });
   });
 
   logger.info('Chat worker started', { concurrency });

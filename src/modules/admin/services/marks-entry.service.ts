@@ -155,21 +155,20 @@ class MarksEntryService {
       throw { status: 400, message: 'Validation failed', errors };
     }
 
-    // Persist ceiling + entries in a transaction
-    await basePrisma.$transaction(async (tx) => {
-      // Update ceiling if provided
-      if (totalMarks !== undefined) {
+    // Persist ceiling in a transaction
+    if (totalMarks !== undefined) {
+      await basePrisma.$transaction(async (tx) => {
         await tx.examClassSubject.update({
           where: { id: examClassSubjectId },
           data: { totalMarks: effectiveTotal, passingMarks: effectivePassing ?? null },
         });
-      }
+      });
+    }
 
-      // Upsert each MarksEntry
-      for (const entry of entries) {
-        const marksObtained = entry.isAbsent ? null : (entry.marksObtained ?? null);
-
-        await tx.marksEntry.upsert({
+    // Concurrent upserts — all fire in parallel instead of sequential for-loop
+    await Promise.all(
+      entries.map((entry) =>
+        prisma.marksEntry.upsert({
           where: {
             examClassSubjectId_studentId: {
               examClassSubjectId,
@@ -179,21 +178,21 @@ class MarksEntryService {
           create: {
             examClassSubjectId,
             studentId: entry.studentId,
-            marksObtained,
+            marksObtained: entry.isAbsent ? null : (entry.marksObtained ?? null),
             isAbsent: entry.isAbsent ?? false,
             enteredBy: enteredById,
             createdById: enteredById,
             updatedById: enteredById,
           },
           update: {
-            marksObtained,
+            marksObtained: entry.isAbsent ? null : (entry.marksObtained ?? null),
             isAbsent: entry.isAbsent ?? false,
             enteredBy: enteredById,
             updatedById: enteredById,
           },
-        });
-      }
-    });
+        }),
+      ),
+    );
 
     await logAudit({
       action: 'CREATE',
@@ -212,23 +211,25 @@ class MarksEntryService {
     const subjectName = ecs.subject.name;
     const totalForNotify = effectiveTotal!;
 
+    // Batch-fetch all saved entries in one query (replaces N sequential findUnique)
+    const savedEntries = await prisma.marksEntry.findMany({
+      where: {
+        examClassSubjectId,
+        studentId: { in: entries.map((e) => e.studentId) },
+      },
+      select: { id: true, studentId: true },
+    });
+    const entryIdByStudent = new Map(savedEntries.map((e) => [e.studentId, e.id]));
+
     for (const entry of entries) {
-      const savedEntry = await prisma.marksEntry.findUnique({
-        where: {
-          examClassSubjectId_studentId: {
-            examClassSubjectId,
-            studentId: entry.studentId,
-          },
-        },
-        select: { id: true },
-      });
-      if (!savedEntry) continue;
+      const marksEntryId = entryIdByStudent.get(entry.studentId);
+      if (!marksEntryId) continue;
 
       if (entry.isAbsent) {
         void notifyMarksAbsent({
           studentId: entry.studentId,
           examClassSubjectId,
-          marksEntryId: savedEntry.id,
+          marksEntryId,
           examName,
           subjectName,
         }).catch(() => undefined);
@@ -236,7 +237,7 @@ class MarksEntryService {
         void notifyMarksEntered({
           studentId: entry.studentId,
           examClassSubjectId,
-          marksEntryId: savedEntry.id,
+          marksEntryId,
           examName,
           subjectName,
           marksObtained: entry.marksObtained,

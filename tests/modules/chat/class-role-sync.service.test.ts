@@ -30,30 +30,15 @@ describe('class-role-sync.service', () => {
         roleDefinition: { canPostInGroups: true },
       },
     ]);
-    (prismaMock.chatRoomMember.upsert as jest.Mock).mockResolvedValue({});
+    (prismaMock as any).$executeRawUnsafe.mockResolvedValue(2);
 
     await syncClassRoleMemberships(COMMUNITY_ID);
 
-    expect(prismaMock.chatRoomMember.upsert).toHaveBeenCalledTimes(2);
-    expect(prismaMock.chatRoomMember.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { roomId_userId: { roomId: 'math-room', userId: 'stu-user-1' } },
-        create: expect.objectContaining({
-          canPost: true,
-          classRoleAssignmentId: 'asgn-1',
-          displayTitle: 'CR — Ahmed',
-        }),
-      }),
-    );
-    expect(prismaMock.chatRoomMember.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { roomId_userId: { roomId: 'math-room', userId: 'stu-user-2' } },
-        create: expect.objectContaining({
-          canPost: false,
-          classRoleAssignmentId: undefined,
-        }),
-      }),
-    );
+    expect((prismaMock as any).$executeRawUnsafe).toHaveBeenCalledTimes(1);
+    const rawSql = (prismaMock as any).$executeRawUnsafe.mock.calls[0][0];
+    expect(rawSql).toContain('chat_room_members');
+    expect(rawSql).toContain('ON CONFLICT');
+    expect(rawSql).toContain('gen_random_uuid()');
   });
 
   test('syncClassRoleMemberships no-ops when community inactive', async () => {

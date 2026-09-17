@@ -13,6 +13,8 @@ import { enqueueChatPushFanout } from '../../../queues/chat.queue';
 import { prisma } from '../../../lib/prisma';
 
 let io: Server | null = null;
+let redisPub: Redis | null = null;
+let redisSub: Redis | null = null;
 
 async function authenticateSocket(socket: Socket): Promise<{ id: string; role: string; name: string } | null> {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.toString().replace(/^Bearer\s+/i, '');
@@ -38,10 +40,12 @@ export async function initChatSocket(server: HttpServer): Promise<Server | null>
 
   const redisConfig = getRedisConnectionConfig();
   if (redisConfig) {
-    const pub = new Redis(redisConfig);
-    const sub = pub.duplicate();
-    io.adapter(createAdapter(pub, sub));
+    redisPub = new Redis(redisConfig);
+    redisSub = redisPub.duplicate();
+    io.adapter(createAdapter(redisPub, redisSub));
     logger.info('Socket.IO Redis adapter enabled');
+  } else {
+    logger.info('Socket.IO Redis adapter disabled — REDIS_URL not configured');
   }
 
   io.use(async (socket, next) => {
@@ -173,5 +177,13 @@ export async function closeChatSocket(): Promise<void> {
   if (io) {
     await io.close();
     io = null;
+  }
+  if (redisPub) {
+    await redisPub.quit().catch(() => {});
+    redisPub = null;
+  }
+  if (redisSub) {
+    await redisSub.quit().catch(() => {});
+    redisSub = null;
   }
 }

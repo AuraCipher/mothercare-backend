@@ -27,6 +27,7 @@ const baseInput = {
 beforeEach(() => {
   jest.clearAllMocks();
   (mockPrisma.chatDmThread.findMany as jest.Mock).mockResolvedValue([]);
+  (mockPrisma.student.findMany as jest.Mock).mockResolvedValue([]);
 });
 
 describe('chat-contact-picker.service', () => {

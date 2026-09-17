@@ -70,6 +70,10 @@ describe('MarksEntryService', () => {
       (prismaMock as any).$transaction.mockImplementation(async (cb: any) => cb(prismaMock));
       prismaMock.examClassSubject.update.mockResolvedValue({} as any);
       prismaMock.marksEntry.upsert.mockResolvedValue({} as any);
+      prismaMock.marksEntry.findMany.mockResolvedValue([
+        { id: 'me-1', studentId: 's1' },
+        { id: 'me-2', studentId: 's2' },
+      ] as any);
       prismaMock.examClassSubject.findMany.mockResolvedValue([ceilingECS] as any);
       prismaMock.student.findMany.mockResolvedValue([]);
 
@@ -162,6 +166,9 @@ describe('MarksEntryService', () => {
       prismaMock.examClassSubject.findUnique.mockResolvedValue(ceilingECS as any);
       (prismaMock as any).$transaction.mockImplementation(async (cb: any) => cb(prismaMock));
       prismaMock.marksEntry.upsert.mockResolvedValue({} as any);
+      prismaMock.marksEntry.findMany.mockResolvedValue([
+        { id: 'me-1', studentId: 's1' },
+      ] as any);
       prismaMock.examClassSubject.findMany.mockResolvedValue([ceilingECS] as any);
       prismaMock.student.findMany.mockResolvedValue([]);
 

@@ -213,6 +213,9 @@ describe('Teacher portal — E2E API flow', () => {
     expect(marksGrid.body.data.canWrite).toBe(true);
 
     (prismaMock.marksEntry.upsert as jest.Mock).mockResolvedValue({});
+    (prismaMock.marksEntry.findMany as jest.Mock).mockResolvedValue([
+      { id: 'me-1', studentId: 's1' },
+    ]);
     (prismaMock.examClassSubject.update as jest.Mock).mockResolvedValue(mockEcsRow);
     const marksPost = await request(app)
       .post('/teacher/marks/grid/ecs1')

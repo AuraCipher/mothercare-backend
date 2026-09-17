@@ -123,34 +123,39 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// Deep health check — verifies DB + Redis connectivity
+// Deep health check — verifies DB + Redis connectivity (5 s deadline)
 app.get('/health/deep', async (_req, res) => {
   const checks: Record<string, string> = {};
   let healthy = true;
 
-  // Database check
+  // Database check (bounded)
   try {
     const { prisma } = await import('./lib/prisma');
-    await prisma.$queryRaw`SELECT 1`;
+    await Promise.race([
+      prisma.$queryRaw`SELECT 1`,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('DB timeout')), 5000)),
+    ]);
     checks.database = 'ok';
   } catch {
     checks.database = 'fail';
     healthy = false;
   }
 
-  // Redis check
+  // Redis check (bounded)
   try {
     const { getUpstashRedis } = await import('./config/redis');
     const client = getUpstashRedis();
     if (client) {
-      await client.ping();
+      await Promise.race([
+        client.ping(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Redis timeout')), 5000)),
+      ]);
       checks.redis = 'ok';
     } else {
       checks.redis = 'not_configured';
     }
   } catch {
     checks.redis = 'fail';
-    // Redis is non-critical — don't fail the health check
   }
 
   res.status(healthy ? 200 : 503).json({
