@@ -175,12 +175,8 @@ app.use('/chat', chatRoutes);
 app.use('/me', meRouter);
 app.use('/branches', branchAdminRoutes);
 
-// ─── Upload routes — GET (serving) is public for <img> tags, POST needs auth ──
+// ─── Upload routes (authenticated) ───────────────────────
 app.use('/api', uploadRoutes);
-
-// ─── Legacy local uploads (dev fallback when R2 is not configured) ─
-const uploadsDir = path.resolve(__dirname, '..', 'uploads');
-app.use('/uploads', express.static(uploadsDir, { maxAge: '1y', immutable: true }));
 
 // ─── 404 Handler ─────────────────────────────────────────────
 app.use('*', (_req, res) => {

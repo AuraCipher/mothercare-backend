@@ -105,8 +105,4 @@ export class LocalStorageAdapter implements StorageService {
       await fs.promises.unlink(fullPath);
     }
   }
-
-  url(storagePath: string): string {
-    return `/uploads/${storagePath}`;
-  }
 }

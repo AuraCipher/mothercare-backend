@@ -64,13 +64,6 @@ class StorageRouter implements StorageService {
     const bucket = options?.bucket || getDefaultDocumentsBucket();
     return getStorageForBucket(bucket).delete(storagePath, options);
   }
-
-  url(storagePath: string): string {
-    if (isR2Enabled()) {
-      return getR2Storage().url(storagePath);
-    }
-    return localStorage.url(storagePath);
-  }
 }
 
 export const storage = new StorageRouter();

@@ -139,14 +139,6 @@ export class R2StorageAdapter implements StorageService {
       }),
     );
   }
-
-  url(storagePath: string): string {
-    const publicBase = env.R2_PUBLIC_BASE_URL?.replace(/\/$/, '');
-    if (publicBase) {
-      return `${publicBase}/${storagePath}`;
-    }
-    return storagePath;
-  }
 }
 
 export function createR2Client(): S3Client {

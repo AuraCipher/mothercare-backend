@@ -27,7 +27,5 @@ export interface StorageService {
   /** Streaming read — preferred for download path (no Buffer.concat) */
   getStream(storagePath: string, options?: StorageOptions): Promise<StorageGetResult>;
   delete(storagePath: string, options?: StorageOptions): Promise<void>;
-  /** Legacy static path hint; prefer FileRecord.publicUrl or /api/uploads/:id */
-  url(storagePath: string): string;
   isRemote(): boolean;
 }
