@@ -3097,7 +3097,7 @@ describe('Admin — File Upload', () => {
       prismaMock.fileRecord.create.mockResolvedValue(mockFileRecord as any);
     });
 
-    test('SVG upload bypasses sharp, stored as image/svg+xml', async () => {
+    test('SVG upload is rejected (R2-06: active-content safety)', async () => {
       fileTypeMock.__setFileTypeResult({ ext: 'svg', mime: 'image/svg+xml' });
 
       const res = await request(app)
@@ -3106,14 +3106,8 @@ describe('Admin — File Upload', () => {
         .field('purpose', 'document')
         .attach('file', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="40"/></svg>'), 'icon.svg');
 
-      expect(res.status).toBe(201);
-      expect(prismaMock.fileRecord.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            mimeType: 'image/svg+xml',
-          }),
-        }),
-      );
+      expect(res.status).toBe(400);
+      expect(prismaMock.fileRecord.create).not.toHaveBeenCalled();
     });
 
     test('GIF upload bypasses sharp, stored as image/gif', async () => {

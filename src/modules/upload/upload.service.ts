@@ -181,7 +181,6 @@ export class UploadService {
     // Decide whether Sharp is needed (image that will be re-encoded to webp)
     const needsSharp =
       mime.startsWith('image/') &&
-      mime !== 'image/svg+xml' &&
       mime !== 'image/gif' &&
       requestedPurpose !== 'voice_note';
 
@@ -257,8 +256,8 @@ export class UploadService {
       if (mime.startsWith('audio/')) finalMime = mime;
       else if (mime === 'video/mp4' || ext === 'm4a') finalMime = 'audio/mp4';
       else finalMime = 'audio/mp4';
-    } else if (mime.startsWith('image/') && (mime === 'image/svg+xml' || mime === 'image/gif')) {
-      finalExt = sniffExt || (mime === 'image/svg+xml' ? 'svg' : 'gif');
+    } else if (mime === 'image/gif') {
+      finalExt = sniffExt || 'gif';
       finalMime = mime;
     } else if (!mime.startsWith('image/')) {
       // For non-image passthrough, keep sniffed or ext mapping already resolved

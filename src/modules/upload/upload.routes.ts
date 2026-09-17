@@ -18,6 +18,32 @@ const router = Router();
 
 router.use(authMiddleware, uploadDocumentPermissionMiddleware);
 
+// R2-06: MIME types that can execute active browser content.
+// If a FileRecord has one of these MIME types (from a legacy upload before R2-06),
+// override Content-Type to prevent same-origin script execution.
+const DANGEROUS_MIMES = new Set([
+  'text/html',
+  'application/xhtml+xml',
+  'image/svg+xml',
+  'text/javascript',
+  'application/javascript',
+  'application/xml',
+  'text/xml',
+]);
+
+function getSafeResponseHeaders(mimeType: string, originalName: string) {
+  if (DANGEROUS_MIMES.has(mimeType)) {
+    return {
+      contentType: 'application/octet-stream',
+      contentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(originalName)}`,
+    };
+  }
+  return {
+    contentType: mimeType,
+    contentDisposition: `inline; filename*=UTF-8''${encodeURIComponent(originalName)}`,
+  };
+}
+
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
   (req: Request, res: Response, next: NextFunction) => { fn(req, res, next).catch(next); };
 
@@ -403,9 +429,12 @@ router.get('/uploads/:id', asyncHandler(async (req: Request, res: Response) => {
 
   const { stream, mimeType, originalName, contentLength, etag, lastModified, contentRange, statusCode } = result;
 
-  res.setHeader('Content-Type', mimeType);
+  // R2-06: Use safe headers — override dangerous MIME types to prevent active-content execution
+  const safeHeaders = getSafeResponseHeaders(mimeType, originalName);
+  res.setHeader('Content-Type', safeHeaders.contentType);
   res.setHeader('Cache-Control', 'private, max-age=3600');
-  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(originalName)}`);
+  res.setHeader('Content-Disposition', safeHeaders.contentDisposition);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.setHeader('Accept-Ranges', 'bytes');
   if (etag) res.setHeader('ETag', etag);
