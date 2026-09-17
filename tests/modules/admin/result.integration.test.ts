@@ -12,6 +12,8 @@ jest.mock('bcryptjs', () => ({
 jest.mock('../../../src/middleware/security/rateLimiter', () => ({
   passwordSetLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
   uploadLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
+  loginLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
+  globalLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
 jest.mock('../../../src/services/audit.service', () => ({
