@@ -2,6 +2,7 @@ import fs from 'fs';
 import { Readable } from 'stream';
 import { fileTypeFromBuffer } from 'file-type';
 import { prisma } from '../../lib/prisma';
+import logger from '../../lib/logger';
 import {
   getDefaultDocumentsBucket,
   storage,
@@ -33,6 +34,35 @@ export interface UploadFileOptions {
 }
 
 export class UploadService {
+  /**
+   * Attempt deterministic storage cleanup when a DB write fails after
+   * the storage object was already created. Logs the outcome — does NOT
+   * throw (caller is already handling the original DB error).
+   */
+  private async attemptStorageCleanup(
+    storagePath: string,
+    bucket: string,
+    context: { operation: string; fileId?: string },
+  ): Promise<void> {
+    try {
+      await storage.delete(storagePath, { bucket });
+      logger.warn('storage:cleanup:success', {
+        operation: context.operation,
+        storagePath,
+        bucket,
+        fileId: context.fileId,
+      });
+    } catch (cleanupErr: any) {
+      logger.error('storage:cleanup:failed', {
+        operation: context.operation,
+        storagePath,
+        bucket,
+        fileId: context.fileId,
+        error: cleanupErr?.message || String(cleanupErr),
+      });
+    }
+  }
+
   async uploadFile(
     buffer: Buffer,
     originalName: string,
@@ -76,34 +106,53 @@ export class UploadService {
     const bucket = getDefaultDocumentsBucket();
     await storage.save(storagePath, processed.buffer, { bucket });
 
-    const record = await prisma.fileRecord.create({
-      data: {
-        originalName,
-        storagePath,
-        storageBucket: bucket,
-        purpose: resolvedPurpose,
-        mimeType: processed.mimeType,
-        size: processed.buffer.length,
-        width: processed.mimeType.startsWith('image/') ? (processed.width ?? undefined) : undefined,
-        height: processed.mimeType.startsWith('image/') ? (processed.height ?? undefined) : undefined,
-        uploadedById: options.uploadedById || undefined,
-        entityType: options.entityType || undefined,
-        entityId: options.entityId || undefined,
-        metadata: {
-          ...(options.metadata || {}),
-          ...(options.roomId ? { roomId: options.roomId } : {}),
-          ...(options.academicYearId ? { academicYearId: options.academicYearId } : {}),
-          ...(options.durationSeconds != null ? { durationSeconds: options.durationSeconds } : {}),
+    let record: any;
+    try {
+      record = await prisma.fileRecord.create({
+        data: {
+          originalName,
+          storagePath,
+          storageBucket: bucket,
+          purpose: resolvedPurpose,
+          mimeType: processed.mimeType,
+          size: processed.buffer.length,
+          width: processed.mimeType.startsWith('image/') ? (processed.width ?? undefined) : undefined,
+          height: processed.mimeType.startsWith('image/') ? (processed.height ?? undefined) : undefined,
+          uploadedById: options.uploadedById || undefined,
+          entityType: options.entityType || undefined,
+          entityId: options.entityId || undefined,
+          metadata: {
+            ...(options.metadata || {}),
+            ...(options.roomId ? { roomId: options.roomId } : {}),
+            ...(options.academicYearId ? { academicYearId: options.academicYearId } : {}),
+            ...(options.durationSeconds != null ? { durationSeconds: options.durationSeconds } : {}),
+          },
+          publicUrl: undefined,
         },
-        publicUrl: undefined,
-      },
-    });
+      });
+    } catch (dbErr) {
+      // R2 object exists but DB write failed — attempt cleanup to prevent orphan
+      await this.attemptStorageCleanup(storagePath, bucket, { operation: 'upload:create' });
+      throw dbErr;
+    }
 
     const publicUrl = buildFileServeUrl(record.id);
-    await prisma.fileRecord.update({
-      where: { id: record.id },
-      data: { publicUrl },
-    });
+    try {
+      await prisma.fileRecord.update({
+        where: { id: record.id },
+        data: { publicUrl },
+      });
+    } catch (dbErr) {
+      // FileRecord exists (without publicUrl) but storage object also exists.
+      // The record IS in the DB — do NOT delete it. Log and re-throw so the
+      // client sees the error, but the record is recoverable by later update.
+      logger.error('storage:upload:publicUrl-update-failed', {
+        fileId: record.id,
+        storagePath,
+        error: dbErr instanceof Error ? dbErr.message : String(dbErr),
+      });
+      throw dbErr;
+    }
 
     return {
       id: record.id,
@@ -211,30 +260,45 @@ export class UploadService {
         contentLength: processed.buffer.length,
         contentType: processed.mimeType,
       });
-      const record = await prisma.fileRecord.create({
-        data: {
-          originalName,
-          storagePath,
-          storageBucket: bucket,
-          purpose: resolvedPurpose,
-          mimeType: processed.mimeType,
-          size: processed.buffer.length,
-          width: processed.mimeType.startsWith('image/') ? (processed.width ?? undefined) : undefined,
-          height: processed.mimeType.startsWith('image/') ? (processed.height ?? undefined) : undefined,
-          uploadedById: params.uploadedById || undefined,
-          entityType: params.entityType || undefined,
-          entityId: params.entityId || undefined,
-          metadata: {
-            ...(params.metadata || {}),
-            ...(params.roomId ? { roomId: params.roomId } : {}),
-            ...(params.academicYearId ? { academicYearId: params.academicYearId } : {}),
-            ...(params.durationSeconds != null ? { durationSeconds: params.durationSeconds } : {}),
+      let record: any;
+      try {
+        record = await prisma.fileRecord.create({
+          data: {
+            originalName,
+            storagePath,
+            storageBucket: bucket,
+            purpose: resolvedPurpose,
+            mimeType: processed.mimeType,
+            size: processed.buffer.length,
+            width: processed.mimeType.startsWith('image/') ? (processed.width ?? undefined) : undefined,
+            height: processed.mimeType.startsWith('image/') ? (processed.height ?? undefined) : undefined,
+            uploadedById: params.uploadedById || undefined,
+            entityType: params.entityType || undefined,
+            entityId: params.entityId || undefined,
+            metadata: {
+              ...(params.metadata || {}),
+              ...(params.roomId ? { roomId: params.roomId } : {}),
+              ...(params.academicYearId ? { academicYearId: params.academicYearId } : {}),
+              ...(params.durationSeconds != null ? { durationSeconds: params.durationSeconds } : {}),
+            },
+            publicUrl: undefined,
           },
-          publicUrl: undefined,
-        },
-      });
+        });
+      } catch (dbErr) {
+        await this.attemptStorageCleanup(storagePath, bucket, { operation: 'upload-streamed:create' });
+        throw dbErr;
+      }
       const publicUrl = buildFileServeUrl(record.id);
-      await prisma.fileRecord.update({ where: { id: record.id }, data: { publicUrl } });
+      try {
+        await prisma.fileRecord.update({ where: { id: record.id }, data: { publicUrl } });
+      } catch (dbErr) {
+        logger.error('storage:upload:publicUrl-update-failed', {
+          fileId: record.id,
+          storagePath,
+          error: dbErr instanceof Error ? dbErr.message : String(dbErr),
+        });
+        throw dbErr;
+      }
       return {
         id: record.id,
         url: publicUrl,
@@ -281,30 +345,45 @@ export class UploadService {
       contentLength: byteCount,
       contentType: finalMime,
     });
-    const record = await prisma.fileRecord.create({
-      data: {
-        originalName,
-        storagePath,
-        storageBucket: bucket,
-        purpose: resolvedPurpose,
-        mimeType: finalMime,
-        size: byteCount,
-        width: undefined,
-        height: undefined,
-        uploadedById: params.uploadedById || undefined,
-        entityType: params.entityType || undefined,
-        entityId: params.entityId || undefined,
-        metadata: {
-          ...(params.metadata || {}),
-          ...(params.roomId ? { roomId: params.roomId } : {}),
-          ...(params.academicYearId ? { academicYearId: params.academicYearId } : {}),
-          ...(params.durationSeconds != null ? { durationSeconds: params.durationSeconds } : {}),
+    let record: any;
+    try {
+      record = await prisma.fileRecord.create({
+        data: {
+          originalName,
+          storagePath,
+          storageBucket: bucket,
+          purpose: resolvedPurpose,
+          mimeType: finalMime,
+          size: byteCount,
+          width: undefined,
+          height: undefined,
+          uploadedById: params.uploadedById || undefined,
+          entityType: params.entityType || undefined,
+          entityId: params.entityId || undefined,
+          metadata: {
+            ...(params.metadata || {}),
+            ...(params.roomId ? { roomId: params.roomId } : {}),
+            ...(params.academicYearId ? { academicYearId: params.academicYearId } : {}),
+            ...(params.durationSeconds != null ? { durationSeconds: params.durationSeconds } : {}),
+          },
+          publicUrl: undefined,
         },
-        publicUrl: undefined,
-      },
-    });
+      });
+    } catch (dbErr) {
+      await this.attemptStorageCleanup(storagePath, bucket, { operation: 'upload-streamed-passthrough:create' });
+      throw dbErr;
+    }
     const publicUrl = buildFileServeUrl(record.id);
-    await prisma.fileRecord.update({ where: { id: record.id }, data: { publicUrl } });
+    try {
+      await prisma.fileRecord.update({ where: { id: record.id }, data: { publicUrl } });
+    } catch (dbErr) {
+      logger.error('storage:upload:publicUrl-update-failed', {
+        fileId: record.id,
+        storagePath,
+        error: dbErr instanceof Error ? dbErr.message : String(dbErr),
+      });
+      throw dbErr;
+    }
     return {
       id: record.id,
       url: publicUrl,
@@ -376,12 +455,30 @@ export class UploadService {
   async deleteFile(fileId: string) {
     const record = await prisma.fileRecord.findUnique({ where: { id: fileId } });
     if (!record) throw { status: 404, message: 'File not found' };
+    let storageDeleteFailed = false;
     try {
       await storage.delete(record.storagePath, { bucket: record.storageBucket });
-    } catch {
-      /* object may already be missing */
+    } catch (storageErr: any) {
+      // Log but continue — a missing R2 object should not prevent DB cleanup.
+      // The FileRecord is still removed so the system doesn't pretend deletion
+      // was rolled back when storage cannot participate in the DB transaction.
+      storageDeleteFailed = true;
+      logger.warn('storage:delete:failed', {
+        fileId: record.id,
+        storagePath: record.storagePath,
+        bucket: record.storageBucket,
+        error: storageErr?.message || String(storageErr),
+      });
     }
     await prisma.fileRecord.delete({ where: { id: fileId } });
+    if (storageDeleteFailed) {
+      logger.warn('storage:delete:orphan-possible', {
+        fileId: record.id,
+        storagePath: record.storagePath,
+        bucket: record.storageBucket,
+        note: 'FileRecord deleted but storage object may still exist',
+      });
+    }
   }
 
   async renameFile(fileId: string, newName: string) {
