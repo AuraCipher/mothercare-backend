@@ -311,6 +311,7 @@ model User {
   academicYearSnapshots     AcademicYearSnapshot[] @relation("SnapshotTriggeredBy")
   timetableEntries          TimetableEntry[]       @relation("TimetableTeacher")
   uploadedFiles             FileRecord[]
+  uploadSessions            UploadSession[]
   student                   Student?
   studentPerson             StudentPerson?
   createdStudents           Student[]              @relation("StudentCreatedBy")
@@ -356,7 +357,22 @@ model User {
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║                    FILE RECORD                                 ║
 // ║  Universal file reference for profile photos, documents, etc.  ║
+// ║  A FileRecord row always represents a COMPLETED file. In-progress ║
+// ║  resumable transfers live in UploadSession (below) and link here ║
+// ║  exactly once at finalization.                                 ║
 // ╚══════════════════════════════════════════════════════════════════╝
+
+// M1 — resumable-upload control plane. Terminal states (COMPLETED,
+// CANCELLED, EXPIRED, FAILED) never transition; see upload-session.service.ts.
+enum UploadSessionStatus {
+  INITIATED
+  UPLOADING
+  COMPLETING
+  COMPLETED
+  FAILED
+  CANCELLED
+  EXPIRED
+}
 
 model FileRecord {
   id           String   @id @default(uuid())
@@ -379,11 +395,58 @@ model FileRecord {
   profileUser    User?    @relation("UserProfilePhoto")
   profileStudent Student? @relation("StudentProfilePhoto")
   chatMessages   ChatMessage[] @relation("ChatMessageMedia")
+  uploadSession  UploadSession?
 
   updatedAt DateTime @updatedAt
 
   @@index([entityType, entityId])
   @@map("file_records")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                    UPLOAD SESSION                              ║
+// ║  M1 — durable control plane for resumable uploads. Represents  ║
+// ║  an IN-PROGRESS transfer; the completed file is a FileRecord   ║
+// ║  linked exactly once at finalization (fileRecordId).           ║
+// ║  bytesUploaded is authoritative only after the M2 transfer     ║
+// ║  layer writes it; clients must never set it. providerUploadId /║
+// ║  providerState carry opaque R2/S3 multipart state for M2 and   ║
+// ║  are never exposed to clients.                                 ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model UploadSession {
+  id               String              @id @default(uuid())
+  userId           String // owner — every operation is owner-scoped
+  idempotencyKey   String // client-generated; unique per owner (retry identity)
+  status           UploadSessionStatus @default(INITIATED)
+  purpose          String // one of UPLOAD_PURPOSES (validated in service)
+  originalFilename String // sanitized client filename (length-capped)
+  mimeType         String // declared MIME (syntactic check; bytes validated at finalize)
+  expectedSize     Int // total bytes declared at create (1..per-purpose max)
+  bytesUploaded    Int                 @default(0) // authoritative server offset (M2 writes)
+  storageKey       String              @unique // server-minted final object key
+  providerUploadId String? // opaque R2/S3 multipart id (M2; never exposed)
+  providerState    Json? // opaque provider part ledger (M2; never exposed)
+  checksum         String? // optional client sha256 hex, verified at finalize (M2)
+  fileRecordId     String?             @unique // set exactly once at finalization
+  entityType       String? // optional UPLOAD_ENTITY_TYPES scope
+  entityId         String?
+  roomId           String? // chat scope — membership verified server-side
+  academicYearId   String?
+  metadata         Json? // e.g. durationSeconds for video
+  retryCount       Int                 @default(0) // transient-failure counter (M2 bumps)
+  lastActivityAt   DateTime            @default(now())
+  expiresAt        DateTime
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileRecord FileRecord? @relation(fields: [fileRecordId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, status])
+  @@index([status, expiresAt])
+  @@map("upload_sessions")
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗

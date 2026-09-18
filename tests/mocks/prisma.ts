@@ -160,6 +160,16 @@ jest.mock('@prisma/client', () => ({
     OTHER: 'OTHER',
   },
 
+  UploadSessionStatus: {
+    INITIATED: 'INITIATED',
+    UPLOADING: 'UPLOADING',
+    COMPLETING: 'COMPLETING',
+    COMPLETED: 'COMPLETED',
+    FAILED: 'FAILED',
+    CANCELLED: 'CANCELLED',
+    EXPIRED: 'EXPIRED',
+  },
+
   Prisma: {
     Decimal: class {
       constructor(public value: number) {}

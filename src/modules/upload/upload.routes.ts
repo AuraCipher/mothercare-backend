@@ -9,6 +9,7 @@ import authMiddleware from '../../middleware/auth/auth.middleware';
 import { uploadDocumentPermissionMiddleware } from '../../middleware/auth/upload-document-permission.middleware';
 import { uploadLimiter } from '../../middleware/security/rateLimiter';
 import { uploadService, getMaxBytesForPurpose } from './upload.service';
+import { uploadSessionService } from './upload-session.service';
 import { UPLOAD_ENTITY_TYPES } from './storage-paths';
 import { prisma } from '../../lib/prisma';
 import { teacherAppChatAllowsAttachments } from '../chat/services/teacher-app-chat-permissions.service';
@@ -334,6 +335,34 @@ router.post('/upload', uploadLimiter, asyncHandler(async (req: Request, res: Res
     // For R2, multipart Upload will be aborted on error by lib-storage
     throw err;
   }
+}));
+
+// ─── POST /api/upload-sessions — Create resumable upload session (M1 control plane) ─
+// No bytes move here: allocates the durable session identity, reserves the
+// storage key, and returns the authoritative state the future transfer
+// layer (M2) will advance. Idempotent on [user, idempotencyKey].
+router.post('/upload-sessions', uploadLimiter, asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  const { session, created } = await uploadSessionService.createSession(userId, req.body ?? {});
+  res.status(created ? 201 : 200).json({ success: true, created, data: session });
+}));
+
+// ─── GET /api/upload-sessions/:id — Resume query (M1) ─────────
+// Returns the authoritative bytesUploaded / status / expiry the client
+// seeks after any interruption. Owner-only (others get 404).
+router.get('/upload-sessions/:id', asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  const session = await uploadSessionService.getSession(req.params.id, userId);
+  res.json({ success: true, data: session });
+}));
+
+// ─── DELETE /api/upload-sessions/:id — Cancel session (M1) ───
+// Terminal CANCELLED; never touches a FileRecord (only COMPLETED sessions
+// own one, and COMPLETED cannot cancel by construction).
+router.delete('/upload-sessions/:id', asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  const session = await uploadSessionService.cancelSession(req.params.id, userId);
+  res.json({ success: true, data: session });
 }));
 
 // ─── GET /api/uploads — List files by entity (auth required) ─────────
