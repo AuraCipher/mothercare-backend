@@ -5,7 +5,7 @@ import { Redis } from 'ioredis';
 import env from '../../../config/env';
 import { getRedisConnectionConfig } from '../../../config/redis-tcp';
 import logger from '../../../lib/logger';
-import { verifyToken } from '../../../lib/jwt';
+import { verifyToken, isBlacklisted } from '../../../lib/jwt';
 import { createRoomMessage, markRoomRead, listOfflineRecipientUserIds } from '../services/chat-message.service';
 import { ensureChatRoomAccess } from '../services/chat-room-access.service';
 import { assertRoomMember, listUserRoomIds } from '../services/chat-access.service';
@@ -20,6 +20,10 @@ async function authenticateSocket(socket: Socket): Promise<{ id: string; role: s
   const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.toString().replace(/^Bearer\s+/i, '');
   if (!token) return null;
   try {
+    // Check blacklist before verifying — matches HTTP auth middleware pattern.
+    // isBlacklisted() fails closed (returns true on Redis error), so a
+    // revoked token or unavailable Redis will reject the connection.
+    if (await isBlacklisted(token)) return null;
     const payload = verifyToken(token) as { id: string; role: string; name: string };
     return payload;
   } catch {

@@ -64,4 +64,43 @@ if (!parsed.success) {
   process.exit(1);
 }
 
-export default parsed.data;
+// ─── Production-only hardening (post-parse) ────────────────────
+const data = parsed.data;
+const isProduction = data.NODE_ENV === 'production' || data.APP_MODE === 'production';
+const isTest = data.NODE_ENV === 'test';
+const hardened = isProduction && !isTest;
+
+if (hardened) {
+  const errors: string[] = [];
+
+  // ISSUE 1: Reject known JWT_SECRET placeholders in production
+  const JWT_SECRET_PLACEHOLDERS = [
+    'your_super_secret',
+    'change_me',
+    'replace_me',
+    'default_secret',
+    'secret_key',
+    'minimum_32_characters',
+  ];
+  const jwtLower = data.JWT_SECRET.toLowerCase();
+  if (JWT_SECRET_PLACEHOLDERS.some((p) => jwtLower.includes(p))) {
+    errors.push(
+      'JWT_SECRET contains a known placeholder value. Generate a real secret: openssl rand -base64 48',
+    );
+  }
+
+  // ISSUE 2: Require PUSH_MASTER_SECRET when FCM is enabled in production
+  if (data.FCM_ENABLED === 'true' && !data.PUSH_MASTER_SECRET) {
+    errors.push(
+      'PUSH_MASTER_SECRET is required when FCM_ENABLED=true in production. Generate one: openssl rand -base64 48',
+    );
+  }
+
+  if (errors.length) {
+    console.error('❌ Production configuration errors:');
+    errors.forEach((e) => console.error(` - ${e}`));
+    process.exit(1);
+  }
+}
+
+export default data;

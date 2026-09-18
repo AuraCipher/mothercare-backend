@@ -114,7 +114,8 @@ describe('R2-12c — JWT_SECRET validation', () => {
     });
     // This is 48 chars — passes length but is a placeholder
     // The Zod schema enforces length only, not content
-    // This test documents that the schema does NOT catch placeholder values
+    // Post-parse hardening in env.ts catches this in production mode
+    // (tested in tests/config/production-hardening.test.ts)
     expect(result.success).toBe(true);
   });
 });
