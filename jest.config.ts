@@ -30,6 +30,14 @@ const config: Config = {
     '!src/**/*.d.ts',
     '!src/server.ts',
   ],
+  coverageThreshold: {
+    global: {
+      statements: 50,
+      branches: 40,
+      functions: 50,
+      lines: 50,
+    },
+  },
 
   // Reporters: default + jest-junit output to tests/results
   reporters: [

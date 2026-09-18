@@ -2,6 +2,7 @@ import { Worker } from 'bullmq';
 import env from '../config/env';
 import { getRedisConnectionConfig } from '../config/redis-tcp';
 import logger from '../lib/logger';
+import { markReady, markDegraded } from '../lib/componentStatus';
 import { deliverCredential, type SendCredentialResult } from '../services/credential-delivery.service';
 import {
   CREDENTIAL_SEND_JOB,
@@ -58,6 +59,9 @@ export function startMessageWorker(): Worker | null {
         consecutiveErrors: consecutiveWorkerErrors,
       });
     }
+    if (consecutiveWorkerErrors === 1) {
+      markDegraded('messageWorker', 'Connection errors');
+    }
   });
 
   worker.on('ready', () => {
@@ -65,6 +69,7 @@ export function startMessageWorker(): Worker | null {
       logger.info('Message worker reconnected', { afterErrors: consecutiveWorkerErrors });
     }
     consecutiveWorkerErrors = 0;
+    markReady('messageWorker', `concurrency=${concurrency}`);
   });
 
   logger.info('Message worker started', { concurrency });

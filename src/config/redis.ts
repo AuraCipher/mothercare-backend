@@ -1,5 +1,6 @@
 import { Redis as UpstashRedis } from '@upstash/redis';
 import env from './env';
+import logger from '../lib/logger';
 
 // ─── Upstash (cloud/REST) ───────────────────────────────────────
 // We use Upstash (REST API) instead of local Redis.
@@ -12,7 +13,7 @@ export function getUpstashRedis(): UpstashRedis | null {
   if (_upstash) return _upstash;
 
   if (!env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) {
-    console.warn('[Redis] Upstash credentials not configured. JWT blacklist disabled.');
+    logger.warn('Upstash credentials not configured — JWT blacklist disabled');
     return null;
   }
 
@@ -50,7 +51,7 @@ export async function testRedisConnection(): Promise<boolean> {
     ]);
     return result;
   } catch (err: any) {
-    console.warn('[Redis] Upstash test failed:', err.message);
+    logger.warn('Upstash connection test failed', { error: err.message });
     return false;
   }
 }

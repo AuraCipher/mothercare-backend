@@ -334,14 +334,24 @@ describe('SEC-03: JWT blacklisting on logout', () => {
 
 describe('SEC-04: Error handler stack trace handling', () => {
   test('error handler does not include stack in 500 response in production', async () => {
-    // The error handler checks process.env.APP_MODE
     const original = process.env.APP_MODE;
     process.env.APP_MODE = 'production';
 
-    // Trigger a 500 via a non-existent route that throws
-    // We test the error handler logic directly by checking the response
-    const res = await request(app).get('/health');
-    expect(res.status).toBe(200);
+    // Create a minimal Express app that throws a 500, wired to the real errorHandler
+    const express = jest.requireActual('express');
+    const testApp = express();
+    const errorHandler = (await import('../../../src/middleware/error/errorHandler')).default;
+    testApp.get('/trigger-error', () => {
+      throw new Error('Test internal error');
+    });
+    testApp.use(errorHandler);
+
+    const res = await request(testApp).get('/trigger-error');
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toBe('Internal server error');
+    expect(res.body.stack).toBeUndefined();
+    expect(res.body.errors).toBeUndefined();
 
     process.env.APP_MODE = original;
   });

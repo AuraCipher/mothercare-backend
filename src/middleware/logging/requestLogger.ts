@@ -7,7 +7,7 @@ import logger from '../../lib/logger';
  */
 function sanitizeBody(body: any): any {
   if (!body || typeof body !== 'object') return body;
-  const SENSITIVE_KEYS = /^(password|adminPassword|newPassword|token|secret|keyHash)$/i;
+  const SENSITIVE_KEYS = /^(password|adminPassword|newPassword|token|secret|keyHash|apiKey|apiKeyHash|authorization)$/i;
   const sanitized: any = {};
   for (const [key, value] of Object.entries(body)) {
     if (SENSITIVE_KEYS.test(key)) {
@@ -25,7 +25,9 @@ function sanitizeBody(body: any): any {
  * Request/Response logging middleware
  * - Adds X-Request-ID correlation header to every request
  * - Logs incoming request and outgoing response (sanitized)
- * - In production: structured JSON logs for log aggregation
+ * - Works in ALL environments (dev + production)
+ * - Production: structured JSON logs for log aggregation
+ * - Development: pretty-printed console output
  */
 export default function requestLogger(req: Request, res: Response, next: NextFunction) {
   const start = Date.now();
@@ -42,8 +44,8 @@ export default function requestLogger(req: Request, res: Response, next: NextFun
     requestId,
   };
 
-  // Log incoming request — sanitized
-  logger.req(req.method, req.originalUrl, sanitizeBody(req.body));
+  // Log incoming request — sanitized (works in ALL environments now)
+  logger.req(req.method, req.originalUrl, requestId, sanitizeBody(req.body));
 
   // Capture the original end function
   const originalEnd = res.end.bind(res);
@@ -51,7 +53,7 @@ export default function requestLogger(req: Request, res: Response, next: NextFun
   // @ts-ignore: monkey-patch res.end to log response
   res.end = (chunk: any, encoding?: any, cb?: any) => {
     const duration = Date.now() - start;
-    logger.res(req.method, req.originalUrl, res.statusCode, duration);
+    logger.res(req.method, req.originalUrl, res.statusCode, duration, requestId);
     return originalEnd(chunk, encoding, cb);
   };
 

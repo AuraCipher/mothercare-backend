@@ -9,6 +9,7 @@ import logger from './src/lib/logger';
 import { startMessageWorker } from './src/queues/message.worker';
 import { startChatWorker } from './src/queues/chat.worker';
 import { initChatSocket } from './src/modules/chat/socket/chat.socket';
+import { markServerStarted, markReady } from './src/lib/componentStatus';
 
 const PORT = parseInt(env.PORT as any, 10) || 5000;
 const HOST = (env as any).HOST || '0.0.0.0';
@@ -23,7 +24,10 @@ async function main() {
     // ─── 2. Create and start HTTP server ───────────────────
     const server = http.createServer(app);
 
-    await initChatSocket(server);
+    const io = await initChatSocket(server);
+    if (io) {
+      markReady('socketIo', 'Connected');
+    }
 
     await new Promise<void>((resolve, reject) => {
       server.once('error', (err: NodeJS.ErrnoException) => {
@@ -43,12 +47,15 @@ async function main() {
     // ─── Request timeout — 60 s safety net ────────────────
     server.requestTimeout = 60_000;
 
-    logger.info(`🚀 Server running on http://${HOST}:${PORT}`);
-    logger.info(`📍 Environment: ${env.NODE_ENV}`);
-    logger.info(`🔧 App Mode: ${env.APP_MODE}`);
-    logger.info(`📅 Started at: ${new Date().toISOString()}`);
-    logger.info(`➡️  Health check:  http://${HOST}:${PORT}/health`);
-    logger.info(`➡️  Key Manager:   http://${HOST}:${PORT}/key-manager`);
+    // ─── Mark server as started (for uptime tracking) ──────
+    markServerStarted();
+
+    logger.info(`Server running on http://${HOST}:${PORT}`);
+    logger.info(`Environment: ${env.NODE_ENV}`);
+    logger.info(`App Mode: ${env.APP_MODE}`);
+    logger.info(`Started at: ${new Date().toISOString()}`);
+    logger.info(`Health (liveness):  http://${HOST}:${PORT}/health/live`);
+    logger.info(`Health (readiness): http://${HOST}:${PORT}/health/ready`);
 
     // ─── 3. Setup graceful shutdown ────────────────────────
     setupGracefulShutdown(prisma, server);

@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import { fileTypeFromBuffer } from 'file-type';
+import { pLimit } from '../../lib/p-limit';
 
 export const ALLOWED_MIMES = new Set([
   'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff', 'image/x-icon', 'image/vnd.microsoft.icon',
@@ -42,6 +43,10 @@ export const EXT_MAP: Record<string, string> = {
 
 export const PROFILE_MAX_DIM = 300;
 export const CHAT_IMAGE_MAX_DIM = 2048;
+/** Absolute max decode dimension — prevents OOM from massive images (e.g. 20000x20000 TIFF). */
+export const MAX_IMAGE_DIM = 8192;
+/** Bound Sharp concurrency to prevent memory exhaustion on the 4GB VPS. */
+const sharpConcurrency = pLimit(3);
 
 export interface ProcessedMedia {
   buffer: Buffer;
@@ -102,45 +107,13 @@ export async function processUploadBuffer(input: ProcessMediaInput): Promise<Pro
       };
     }
 
-    const img = sharp(buffer).rotate();
-    const meta = await img.metadata();
-    let width = meta.width || null;
-    let height = meta.height || null;
-    let pipeline = img;
-
-    if (purpose === 'profile') {
-      pipeline = pipeline.resize(PROFILE_MAX_DIM, PROFILE_MAX_DIM, {
-        fit: 'cover',
-        position: 'centre',
-        withoutEnlargement: true,
-      });
-      const resized = await pipeline.webp({ quality: 80 }).toBuffer();
-      const resizedMeta = await sharp(resized).metadata();
-      return {
-        buffer: resized,
-        mimeType: 'image/webp',
-        ext: 'webp',
-        width: resizedMeta.width || width,
-        height: resizedMeta.height || height,
-      };
-    }
-
-    if (purpose === 'chat') {
-      pipeline = pipeline.resize(CHAT_IMAGE_MAX_DIM, CHAT_IMAGE_MAX_DIM, {
-        fit: 'inside',
-        withoutEnlargement: true,
-      });
-    }
-
-    const processed = await pipeline.webp({ quality: 80 }).toBuffer();
-    const processedMeta = await sharp(processed).metadata();
-    return {
-      buffer: processed,
-      mimeType: 'image/webp',
-      ext: 'webp',
-      width: processedMeta.width || width,
-      height: processedMeta.height || height,
-    };
+    return sharpConcurrency(() => processImage(buffer, purpose, mime, type?.ext).catch((err) => {
+      // Sharp throws a generic Error for pixel-limit violations — translate to structured 413.
+      if (err instanceof Error && err.message?.includes('pixel limit')) {
+        throw { status: 413, message: `Image dimensions too large (max ${MAX_IMAGE_DIM}×${MAX_IMAGE_DIM})` };
+      }
+      throw err;
+    }));
   }
 
   return {
@@ -149,6 +122,55 @@ export async function processUploadBuffer(input: ProcessMediaInput): Promise<Pro
     ext: type?.ext || fileExt || 'bin',
     width: null,
     height: null,
+  };
+}
+
+async function processImage(
+  buffer: Buffer,
+  purpose: string | undefined,
+  mime: string,
+  detectedExt: string | undefined,
+): Promise<ProcessedMedia> {
+  // Safety: cap decode dimensions to prevent OOM from massive images (e.g. 20000x20000 TIFF).
+  // limitInputPixels takes total pixel count (width × height). 8192×8192 = 67,108,864.
+  const img = sharp(buffer, { limitInputPixels: MAX_IMAGE_DIM * MAX_IMAGE_DIM }).rotate();
+
+  const meta = await img.metadata();
+  let width = meta.width || null;
+  let height = meta.height || null;
+  let pipeline = img;
+
+  if (purpose === 'profile') {
+    pipeline = pipeline.resize(PROFILE_MAX_DIM, PROFILE_MAX_DIM, {
+      fit: 'cover',
+      position: 'centre',
+      withoutEnlargement: true,
+    });
+    // Use resolveWithObject to avoid a third Sharp instance for metadata
+    const { data: resized, info } = await pipeline.webp({ quality: 80 }).toBuffer({ resolveWithObject: true });
+    return {
+      buffer: resized,
+      mimeType: 'image/webp',
+      ext: 'webp',
+      width: info.width || width,
+      height: info.height || height,
+    };
+  }
+
+  if (purpose === 'chat') {
+    pipeline = pipeline.resize(CHAT_IMAGE_MAX_DIM, CHAT_IMAGE_MAX_DIM, {
+      fit: 'inside',
+      withoutEnlargement: true,
+    });
+  }
+
+  const { data: processed, info: processedInfo } = await pipeline.webp({ quality: 80 }).toBuffer({ resolveWithObject: true });
+  return {
+    buffer: processed,
+    mimeType: 'image/webp',
+    ext: 'webp',
+    width: processedInfo.width || width,
+    height: processedInfo.height || height,
   };
 }
 

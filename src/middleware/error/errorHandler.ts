@@ -13,6 +13,7 @@ export default function errorHandler(err: any, req: Request, res: Response, _nex
 
   const status = err.status || err.statusCode || 500;
   const message = err.message || 'Internal server error';
+  const requestId = (req.headers['x-request-id'] as string) || undefined;
 
   if (status >= 500) {
     captureRequestError(err, {
@@ -32,14 +33,26 @@ export default function errorHandler(err: any, req: Request, res: Response, _nex
     url: req.originalUrl,
     // @ts-ignore
     userId: req.user?.id,
+    ...(requestId ? { requestId } : {}),
     ...(isDev && { stack: err.stack }),
   });
 
-  // Don't leak error details in production
-  res.status(status).json({
+  // Production-safe response: never leak internals
+  const response: Record<string, any> = {
     success: false,
     message: isDev ? message : (status === 500 ? 'Internal server error' : message),
-    ...(isDev && { stack: err.stack }),
-    ...(err.errors && { errors: err.errors }),
-  });
+  };
+
+  if (isDev) {
+    response.stack = err.stack;
+  }
+
+  // Only include structured validation errors in dev mode.
+  // In production, raw err.errors could leak SQL, Zod internals,
+  // or Prisma schema details.
+  if (isDev && err.errors) {
+    response.errors = err.errors;
+  }
+
+  res.status(status).json(response);
 }

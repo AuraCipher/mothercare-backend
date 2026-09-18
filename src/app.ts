@@ -21,6 +21,7 @@ import requestLogger from './middleware/logging/requestLogger';
 import { auditContextMiddleware } from './middleware/auth/auditContext.middleware';
 import { globalLimiter } from './middleware/security/rateLimiter';
 import env from './config/env';
+import { isReady, getReadinessReport, getComponentStatus, getUptimeMs } from './lib/componentStatus';
 
 const app = express();
 
@@ -68,7 +69,8 @@ app.use(cookieParser());
 app.use('/api', globalLimiter);
 app.use('/admin', globalLimiter);
 
-// ─── Request / Response Logger (development only) ──────────────
+// ─── Request / Response Logger ──────────────────────────────────
+// Now works in ALL environments (dev + production) with requestId propagation
 app.use(requestLogger);
 
 // ─── Global Audit Context ───────────────────────────────────────
@@ -114,16 +116,76 @@ app.get('/', (_req, res) => {
       student: '/student',
       chat: '/chat',
       health: '/health',
+      healthLive: '/health/live',
+      healthReady: '/health/ready',
       keyManager: '/key-manager',
     },
   });
 });
 
-app.get('/health', (_req, res) => {
-  res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
+// ─── Health Endpoints ──────────────────────────────────────────
+
+/**
+ * Liveness: "Is the process alive?"
+ *
+ * Must remain lightweight — no external dependency checks.
+ * This answers the load balancer question: should this instance
+ * be kept in the rotation or killed and restarted?
+ *
+ * K8s/Docker: use as livenessProbe.
+ */
+app.get('/health/live', (_req, res) => {
+  res.status(200).json({
+    status: 'alive',
+    timestamp: new Date().toISOString(),
+  });
 });
 
-// Deep health check — verifies DB + Redis connectivity (5 s deadline)
+/**
+ * Readiness: "Can this instance serve normal traffic?"
+ *
+ * Checks only dependencies that are REQUIRED for normal operation.
+ * Currently: PostgreSQL is the only critical dependency.
+ * Redis, Socket.IO, and BullMQ workers are optional (graceful degradation).
+ *
+ * K8s/Docker: use as readinessProbe.
+ */
+app.get('/health/ready', async (_req, res) => {
+  const report = getReadinessReport();
+
+  // Database is the only critical dependency for readiness.
+  // Other components degrade gracefully (queue → direct, auth → no blacklist).
+  if (!isReady()) {
+    return res.status(503).json({
+      ...report,
+      status: 'not_ready',
+      message: 'Database not ready — instance cannot serve traffic',
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  res.status(200).json({
+    ...report,
+    status: 'ready',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * Backward-compatible: GET /health
+ * Returns liveness status (same as /health/live).
+ */
+app.get('/health', (_req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/**
+ * Deep health check — verifies DB + Redis connectivity (5 s deadline)
+ * Kept for backward compatibility. Prefer /health/ready for probes.
+ */
 app.get('/health/deep', async (_req, res) => {
   const checks: Record<string, string> = {};
   let healthy = true;

@@ -155,9 +155,10 @@ router.post('/upload', uploadLimiter, asyncHandler(async (req: Request, res: Res
       reject(err);
     };
 
-    // Note: client disconnect handling is deferred — temp file cleanup is handled
-    // after busboy completes and after service. Do not delete on req 'close' here
-    // to avoid racing with service's read.
+    // R2-11a: Client disconnect cleanup is handled after busboy completes.
+    // Do NOT add req.on('close') here — it fires when the request body is fully
+    // received (before busboy 'finish'), racing with the service's file read.
+    // Busboy pipe errors already trigger fail() → cleanupTemp().
 
     bb.on('field', (name: string, val: string) => {
       fields[name] = val;

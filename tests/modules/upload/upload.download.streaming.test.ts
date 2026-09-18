@@ -153,16 +153,21 @@ describe('Download streaming — R2-03', () => {
       contentLength: 100,
     });
 
+    let caught = false;
     try {
       const res = await request(app).get('/api/uploads/file-dl-1').set(adminToken);
-      // If error happens before headers, it will be 500; if after, socket hang up is also acceptable (stream destroyed)
+      // If error happens before headers sent → 500; if after headers → socket hang up
       expect([500, 200]).toContain(res.status);
-      expect(getStreamMock).toHaveBeenCalled();
+      caught = true;
     } catch (err: any) {
-      // Socket hang up is also acceptable for stream error after headers sent — means pipeline destroyed correctly and didn't hang
+      // Socket hang up / ECONNRESET is expected when stream errors after headers
       expect(err.message).toMatch(/hang up|Parse Error|ECONNRESET/i);
-      expect(getStreamMock).toHaveBeenCalled();
+      caught = true;
     }
+    // The critical assertion: we must have entered either try or catch
+    // If neither was entered, the test would pass vacuously
+    expect(caught).toBe(true);
+    expect(getStreamMock).toHaveBeenCalled();
   });
 
   // Test E: Client abort does not drain remaining object (stream destroyed)
@@ -196,7 +201,13 @@ describe('Download streaming — R2-03', () => {
       const res = await request(app).get('/api/uploads/file-dl-1').set(adminToken);
       expect(res.status).toBe(200);
       await new Promise((r) => setTimeout(r, 10));
-      expect(largeReadable.readableEnded || destroyed || (largeReadable as any).destroyed || pushed === 10).toBeTruthy();
+      // Stream must be destroyed OR ended — but NOT fully consumed without destroy
+      // (pushed===10 alone is not sufficient evidence of abort handling)
+      const streamTerminated = destroyed || (largeReadable as any).destroyed || largeReadable.readableEnded;
+      expect(streamTerminated).toBeTruthy();
+      // If stream ended naturally (readableEnded), all chunks were consumed — acceptable
+      // If destroyed, abort handling worked — also acceptable
+      // The key: we don't accept pushed===10 as proof, because that just means the read() pushed all data
     } catch (err: any) {
       // Supertest may throw Parse Error if stream is destroyed mid-response (client abort simulation)
       expect(err.message).toMatch(/hang up|Parse Error|ECONNRESET/i);

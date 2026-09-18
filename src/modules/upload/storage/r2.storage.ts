@@ -5,6 +5,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { Readable } from 'stream';
 import env from '../../../config/env';
 import type { StorageOptions, StorageService } from './types';
@@ -45,6 +46,11 @@ export class R2StorageAdapter implements StorageService {
         accessKeyId: env.R2_ACCESS_KEY_ID!,
         secretAccessKey: env.R2_SECRET_ACCESS_KEY!,
       },
+      // 30s request timeout prevents hung connections from blocking the event loop.
+      // Connection timeout is left at the default (3s) — Cloudflare R2 is a CDN edge.
+      requestHandler: new NodeHttpHandler({
+        requestTimeout: 30_000,
+      }),
     });
   }
 
@@ -149,5 +155,8 @@ export function createR2Client(): S3Client {
       accessKeyId: env.R2_ACCESS_KEY_ID!,
       secretAccessKey: env.R2_SECRET_ACCESS_KEY!,
     },
+    requestHandler: new NodeHttpHandler({
+      requestTimeout: 30_000,
+    }),
   });
 }

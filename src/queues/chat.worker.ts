@@ -2,6 +2,7 @@ import { Worker } from 'bullmq';
 import env from '../config/env';
 import { getRedisConnectionConfig } from '../config/redis-tcp';
 import logger from '../lib/logger';
+import { markReady, markDegraded } from '../lib/componentStatus';
 import { sendEncryptedPushToUsers } from '../modules/chat/push/fcm.service';
 import {
   CHAT_PUSH_FANOUT_JOB,
@@ -58,6 +59,9 @@ export function startChatWorker(): Worker | null {
         consecutiveErrors: consecutiveWorkerErrors,
       });
     }
+    if (consecutiveWorkerErrors === 1) {
+      markDegraded('chatWorker', 'Connection errors');
+    }
   });
 
   worker.on('ready', () => {
@@ -65,6 +69,7 @@ export function startChatWorker(): Worker | null {
       logger.info('Chat worker reconnected', { afterErrors: consecutiveWorkerErrors });
     }
     consecutiveWorkerErrors = 0;
+    markReady('chatWorker', `concurrency=${concurrency}`);
   });
 
   logger.info('Chat worker started', { concurrency });

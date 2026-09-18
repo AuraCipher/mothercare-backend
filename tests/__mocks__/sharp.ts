@@ -6,15 +6,21 @@ export function __resetMockSharp() {
   __resizeCalled = false;
 }
 
-const sharp: any = () => ({
+const sharp: any = (input?: any, opts?: any) => ({
   metadata: () => Promise.resolve({ width: 300, height: 300, format: 'jpeg' }),
   resize: (...args: any[]) => {
     __resizeCalled = true;
-    return sharp();
+    return sharp(input, opts);
   },
-  webp: () => sharp(),
-  toBuffer: () => Promise.resolve(Buffer.from('mocked-image-data')),
-  rotate: () => sharp(),
+  webp: () => sharp(input, opts),
+  toBuffer: (options?: any) => {
+    const buf = Buffer.from('mocked-image-data');
+    if (options?.resolveWithObject) {
+      return Promise.resolve({ data: buf, info: { width: 300, height: 300, format: 'webp', channels: 3, size: buf.length } });
+    }
+    return Promise.resolve(buf);
+  },
+  rotate: () => sharp(input, opts),
 });
 
 sharp.cache = () => {};

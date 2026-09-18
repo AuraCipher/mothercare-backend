@@ -1,4 +1,5 @@
 import env from './env';
+import logger from '../lib/logger';
 
 export type RedisConnectionConfig = {
   host: string;
@@ -53,7 +54,7 @@ export async function testTcpRedisConnection(): Promise<boolean> {
     return pong === 'PONG';
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'unknown';
-    console.warn('[Redis TCP] Connection test failed:', msg);
+    logger.warn('Redis TCP connection test failed', { error: msg });
     return false;
   } finally {
     await conn.quit().catch(() => {});

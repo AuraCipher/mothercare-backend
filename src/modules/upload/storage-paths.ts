@@ -47,5 +47,7 @@ export function buildStoragePath(input: StoragePathInput): string {
 }
 
 function sanitizeSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]/g, '_');
+  // R2-11a: Block path traversal sequences (..) before general sanitization.
+  // Without this, a segment like entityId=".." would pass through the regex.
+  return value.replace(/\.\./g, '__').replace(/[^a-zA-Z0-9._-]/g, '_');
 }
