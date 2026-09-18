@@ -11,6 +11,8 @@ tests/results/
 .next/
 # Uploaded files
 uploads/
+# Temporary M6-only load/soak/test harness; not part of app runtime.
+m6/
 cloudflared.deb
 graphify-out/
 .env.local

@@ -200,8 +200,7 @@ describe('processing gate', () => {
   });
 });
 
-describe('storage key safety', () => {
-  test('traversal keys rejected before any claim or I/O', () => {
+describe('storage key safety', () => {  test('traversal keys rejected before any claim or I/O', () => {
     expect(() => media.assertSafeStorageKey('../evil')).toThrow('Invalid storage key');
     expect(() => media.assertSafeStorageKey('/abs/path')).toThrow('Invalid storage key');
     expect(() => media.assertSafeStorageKey('')).toThrow('Invalid storage key');
@@ -237,5 +236,27 @@ describe('storage key safety', () => {
     try {
       fs.unlinkSync('/tmp/m5-pwned');
     } catch {}
+  });
+});
+
+describe('rejected meta visibility (410 owner vs 404 stranger)', () => {
+  test('owner learns terminal 410 with reason; stranger gets 404 mask', async () => {
+    const id = `${P}_sec_meta`;
+    const key = `${P}/m5x/meta.mp4`;
+    const data = mp4Seconds(601);
+    await writeLocalObject(key, data);
+    await makeFileRow({
+      id, purpose: 'video', mimeType: 'video/mp4', storageKey: key,
+      size: data.length, owner: uidA, status: 'PENDING', roomId,
+    });
+    await expect(media.processMediaFile(id)).rejects.toMatchObject({ status: 422 });
+
+    const ownerView = await authz.authorizeFileAccess({ id: uidA, role: 'teacher' }, id);
+    expect(ownerView.allowed).toBe(false);
+    expect(ownerView.reason).toBe('Gone');
+
+    const strangerView = await authz.authorizeFileAccess({ id: uidB, role: 'teacher' }, id);
+    expect(strangerView.allowed).toBe(false);
+    expect(strangerView.reason).not.toBe('Gone');
   });
 });

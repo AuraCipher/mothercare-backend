@@ -47,3 +47,4 @@ process.env.RATE_LIMIT_LOGIN_MAX = '9999';
 process.env.RATE_LIMIT_GLOBAL_MAX = '9999';
 process.env.RATE_LIMIT_UPLOAD_MAX = '9999';
 process.env.RATE_LIMIT_UPLOAD_CHUNK_MAX = '9999';
+process.env.RATE_LIMIT_UPLOAD_SESSION_MAX = '9999';

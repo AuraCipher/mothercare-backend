@@ -8,12 +8,18 @@ import logger from '../lib/logger';
 // ─────────────────────────────────────────────────────────────────
 
 let _upstash: UpstashRedis | null = null;
+let _upstashWarnedMissing = false;
 
 export function getUpstashRedis(): UpstashRedis | null {
   if (_upstash) return _upstash;
 
   if (!env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) {
-    logger.warn('Upstash credentials not configured — JWT blacklist disabled');
+    // M6: log once — this getter runs on EVERY authenticated request, and
+    // an unconfigured Upstash would otherwise spam one warning per request.
+    if (!_upstashWarnedMissing) {
+      _upstashWarnedMissing = true;
+      logger.warn('Upstash credentials not configured — JWT blacklist disabled');
+    }
     return null;
   }
 

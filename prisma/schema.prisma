@@ -1653,6 +1653,11 @@ model ChatMessage {
   mediaFileId     String?
   replyToId       String?
   metadata        Json?
+  // M6: nullable idempotency key scoped per room. NULLs never conflict in
+  // Postgres, so keyless messages are unaffected; keyed sends converge via
+  // the unique constraint instead of an interactive transaction (pool-safe).
+  // metadata.dedupeId is still written for backward compatibility.
+  dedupeKey       String?
   isDeleted       Boolean         @default(false)
   deletedAt       DateTime?
   createdAt       DateTime        @default(now())
@@ -1670,6 +1675,7 @@ model ChatMessage {
 
   @@index([roomId, createdAt])
   @@index([senderId, createdAt])
+  @@unique([roomId, dedupeKey])
   @@map("chat_messages")
 }
 

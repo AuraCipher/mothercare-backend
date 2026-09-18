@@ -258,3 +258,27 @@ describe('lifecycle guards', () => {
     });
   });
 });
+
+describe('M6: concurrent same-room sends do not starve the pool', () => {
+  test('25 parallel sends to one room all succeed with distinct ids', async () => {
+    const { runConcurrent } = require('../../integration/helpers');
+    const N = 25;
+    const { results, errors } = await runConcurrent(
+      Array.from({ length: N }, (_, i) => async () => {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const svc = require('../../../src/modules/chat/services/chat-message.service');
+        return svc.createRoomMessage({
+          roomId,
+          senderId: uidA,
+          type: 'text',
+          content: `burst ${i}`,
+          clientMessageId: `${P}-burst-${i}`,
+        });
+      }),
+    );
+    const failures = errors.filter(Boolean);
+    expect(failures).toEqual([]);
+    const ids = results.map((r: any) => r.message.id);
+    expect(new Set(ids).size).toBe(N);
+  }, 60000);
+});

@@ -9,6 +9,12 @@ const uploadChunkWindowMs = Number(process.env.RATE_LIMIT_UPLOAD_CHUNK_WINDOW_MS
 // budget would break legitimate resumes. Chunks stay bounded (5 MiB,
 // authenticated, owner-scoped, offset-checked) so a higher per-IP budget is safe.
 const uploadChunkMax = Number(process.env.RATE_LIMIT_UPLOAD_CHUNK_MAX ?? 600);
+const uploadSessionWindowMs = Number(process.env.RATE_LIMIT_UPLOAD_SESSION_WINDOW_MS ?? 60_000);
+// M6 evidence: a 100-file bulk selection needs 100 session creates; the
+// single-shot 20/min budget stalls legitimate batches for 5+ minutes.
+// Session creation allocates only a DB row (no bytes move), is authenticated
+// and idempotency-keyed, so 120/min/IP remains abuse-bounded.
+const uploadSessionMax = Number(process.env.RATE_LIMIT_UPLOAD_SESSION_MAX ?? 120);
 const loginWindowMs = Number(process.env.RATE_LIMIT_LOGIN_WINDOW_MS ?? 900_000); // 15 min
 const loginMax = Number(process.env.RATE_LIMIT_LOGIN_MAX ?? 10);
 const globalWindowMs = Number(process.env.RATE_LIMIT_GLOBAL_WINDOW_MS ?? 60_000);
@@ -57,6 +63,22 @@ export const uploadChunkLimiter = rateLimit({
   message: {
     success: false,
     message: 'Too many upload chunks. Please slow down.',
+  },
+});
+
+/**
+ * Rate limiter for resumable session creation (POST /api/upload-sessions).
+ * Separate budget from single-shot uploads: creating a session only writes
+ * one idempotent DB row, but bulk selection legitimately needs ~100/min.
+ */
+export const uploadSessionLimiter = rateLimit({
+  windowMs: uploadSessionWindowMs,
+  max: uploadSessionMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many upload sessions. Please slow down.',
   },
 });
 

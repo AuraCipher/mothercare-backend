@@ -7,7 +7,7 @@ import { pipeline } from 'stream/promises';
 import { Transform, Readable } from 'stream';
 import authMiddleware from '../../middleware/auth/auth.middleware';
 import { uploadDocumentPermissionMiddleware } from '../../middleware/auth/upload-document-permission.middleware';
-import { uploadLimiter, uploadChunkLimiter } from '../../middleware/security/rateLimiter';
+import { uploadLimiter, uploadChunkLimiter, uploadSessionLimiter } from '../../middleware/security/rateLimiter';
 import { uploadService, getMaxBytesForPurpose } from './upload.service';
 import { uploadSessionService } from './upload-session.service';
 import { uploadTransferService } from './upload-transfer.service';
@@ -342,7 +342,7 @@ router.post('/upload', uploadLimiter, asyncHandler(async (req: Request, res: Res
 // No bytes move here: allocates the durable session identity, reserves the
 // storage key, and returns the authoritative state the future transfer
 // layer (M2) will advance. Idempotent on [user, idempotencyKey].
-router.post('/upload-sessions', uploadLimiter, asyncHandler(async (req: Request, res: Response) => {
+router.post('/upload-sessions', uploadSessionLimiter, asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user?.id;
   const { session, created } = await uploadSessionService.createSession(userId, req.body ?? {});
   res.status(created ? 201 : 200).json({ success: true, created, data: session });
@@ -468,9 +468,30 @@ router.delete('/uploads/:id', asyncHandler(async (req: Request, res: Response) =
 router.get('/uploads/:id/meta', asyncHandler(async (req: Request, res: Response) => {
   // R2-04: Authorize BEFORE metadata access (prevents IDOR metadata leakage)
   const user = (req as any).user;
-  const { allowed } = await authorizeFileAccess(user, req.params.id);
+  const { allowed, reason, record } = await authorizeFileAccess(user, req.params.id);
   if (!allowed) {
+    // M5: the owner of a policy-rejected file gets precise 410 Gone (with
+    // reason) so READY-polling converges; non-owners keep the 404 mask.
+    if (reason === 'Gone') {
+      const detail = record?.processingError || 'File was rejected by media validation';
+      res.status(410).json({
+        success: false,
+        message: detail,
+        data: { processingStatus: 'REJECTED', processingError: detail },
+      });
+      return;
+    }
     res.status(404).json({ success: false, message: 'File not found' });
+    return;
+  }
+  // M5: defense in depth — a REJECTED row must never serialize as servable
+  // even if authorization logic changes above.
+  if (record?.processingStatus === 'REJECTED') {
+    res.status(410).json({
+      success: false,
+      message: 'File was rejected by media validation',
+      data: { processingStatus: 'REJECTED' },
+    });
     return;
   }
   const result = await uploadService.getMeta(req.params.id);

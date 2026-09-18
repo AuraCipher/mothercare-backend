@@ -1,4 +1,5 @@
 import { prisma } from '../../../lib/prisma';
+import logger from '../../../lib/logger';
 import type { ChatMessageType } from '@prisma/client';
 import { assertCanPost, assertRoomMember } from './chat-access.service';
 import { ensureChatRoomAccess } from './chat-room-access.service';
@@ -140,35 +141,40 @@ export async function createRoomMessage(input: {
     dedupeId = input.clientMessageId;
   }
 
-  return prisma.$transaction(async (tx) => {
-    // Idempotent replay: a retried send with the same key returns the original.
-    // A reused key with DIFFERENT content is rejected deterministically (409)
-    // instead of merging unrelated messages.
-    if (dedupeId) {
-      const existing = await tx.chatMessage.findFirst({
-        where: { roomId: input.roomId, metadata: { path: ['dedupeId'], equals: dedupeId } },
-        include: messageIncludeFull,
-      });
-      if (existing) {
-        if (!sameLogicalSend(existing, input.type ?? 'text', input.title, input.content, attachmentIds)) {
-          throw { status: 409, message: 'clientMessageId was already used for different content' };
-        }
-        return { message: existing, duplicate: true };
+  // M6: NO interactive transaction here by design. Flow: fast-path dedupe
+  // read → auth reads → single atomic nested create (message + attachments
+  // all-or-nothing) → P2002 race convergence. Every step uses at most one
+  // pooled connection at a time and never holds one across awaits that wait
+  // on other pool users — 25-way same-room bursts no longer starve the pool
+  // (measured: 5s tx timeouts before, clean pass after).
+  if (dedupeId) {
+    const existing = await prisma.chatMessage.findFirst({
+      where: { roomId: input.roomId, dedupeKey: dedupeId },
+      include: messageIncludeFull,
+    });
+    if (existing) {
+      if (!sameLogicalSend(existing, input.type ?? 'text', input.title, input.content, attachmentIds)) {
+        throw { status: 409, message: 'clientMessageId was already used for different content' };
       }
+      await touchRoomRecency(input.roomId);
+      return { message: existing, duplicate: true };
     }
+  }
 
-    await assertCanPost(input.roomId, input.senderId);
+  await assertCanPost(input.roomId, input.senderId);
 
-    // R2-04: every attachment authorized individually — one failure aborts
-    // the whole send (transaction rolls back; no partial message).
-    for (const fileId of attachmentIds) {
-      const { allowed } = await authorizeChatMedia(input.senderId, input.roomId, fileId);
-      if (!allowed) {
-        throw { status: 403, message: 'Not authorized to attach this file' };
-      }
+  // R2-04: every attachment authorized individually — one failure aborts
+  // the whole send (nothing is written yet).
+  for (const fileId of attachmentIds) {
+    const { allowed } = await authorizeChatMedia(input.senderId, input.roomId, fileId);
+    if (!allowed) {
+      throw { status: 403, message: 'Not authorized to attach this file' };
     }
+  }
 
-    const message = await tx.chatMessage.create({
+  let message: any;
+  try {
+    message = await prisma.chatMessage.create({
       data: {
         roomId: input.roomId,
         senderId: input.senderId,
@@ -177,41 +183,68 @@ export async function createRoomMessage(input: {
         content: input.content,
         mediaFileId: attachmentIds[0],
         replyToId: input.replyToId,
+        dedupeKey: dedupeId,
         metadata: {
           ...(input.metadata ?? {}),
           ...(dedupeId ? { dedupeId } : {}),
         } as object,
+        ...(attachmentIds.length > 0
+          ? {
+              attachments: {
+                createMany: {
+                  data: attachmentIds.map((fileRecordId, sortOrder) => ({
+                    fileRecordId,
+                    sortOrder,
+                  })),
+                },
+              },
+            }
+          : {}),
       },
-      include: {
-        sender: { select: { id: true, name: true, role: true } },
-        room: { select: { academicYearId: true, name: true, kind: true } },
-        mediaFile: { select: attachmentFileSelect },
-      },
-    });
-
-    if (attachmentIds.length > 0) {
-      await tx.chatMessageAttachment.createMany({
-        data: attachmentIds.map((fileRecordId, sortOrder) => ({
-          messageId: message.id,
-          fileRecordId,
-          sortOrder,
-        })),
-        skipDuplicates: true,
-      });
-    }
-
-    await tx.chatRoom.update({
-      where: { id: input.roomId },
-      data: { updatedAt: new Date() },
-    });
-
-    const full = await tx.chatMessage.findUniqueOrThrow({
-      where: { id: message.id },
       include: messageIncludeFull,
     });
-    return { message: full, duplicate: false };
-  });
+  } catch (err: any) {
+    // Lost the same-key race: resolve exactly like the fast path above.
+    if (err?.code === 'P2002' && dedupeId) {
+      const existing = await prisma.chatMessage.findFirst({
+        where: { roomId: input.roomId, dedupeKey: dedupeId },
+        include: messageIncludeFull,
+      });
+      if (existing) {
+        if (!sameLogicalSend(existing, input.type ?? 'text', input.title, input.content, attachmentIds)) {
+          throw { status: 409, message: 'clientMessageId was already used for different content' };
+        }
+        await touchRoomRecency(input.roomId);
+        return { message: existing, duplicate: true };
+      }
+    }
+    throw err;
+  }
+
+  await touchRoomRecency(input.roomId);
+  return { message, duplicate: false };
 }
+
+/**
+ * M6: room recency touch, deliberately OUTSIDE any transaction. Bumping
+ * updatedAt serializes same-room sends on one row lock; doing it without a
+ * pinned pool connection keeps bursts flowing. Best-effort: a failure only
+ * leaves room-list ordering slightly stale.
+ */
+async function touchRoomRecency(roomId: string): Promise<void> {
+  try {
+    await prisma.chatRoom.update({
+      where: { id: roomId },
+      data: { updatedAt: new Date() },
+    });
+  } catch (err: any) {
+    logger.error('chat:room-touch-failed', {
+      roomId,
+      error: err?.message || String(err),
+    });
+  }
+}
+
 
 /**
  * M5: send-intent reconciliation lookup. Returns the message previously
@@ -229,7 +262,7 @@ export async function findMessageByClientKey(
     throw { status: 400, message: 'clientMessageId must be 8-64 URL-safe characters' };
   }
   const message = await prisma.chatMessage.findFirst({
-    where: { roomId, metadata: { path: ['dedupeId'], equals: clientMessageId } },
+    where: { roomId, dedupeKey: clientMessageId },
     include: {
       sender: { select: { id: true, name: true, role: true, profilePhotoId: true } },
       mediaFile: { select: attachmentFileSelect },

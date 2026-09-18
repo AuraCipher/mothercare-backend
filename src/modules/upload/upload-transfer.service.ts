@@ -335,8 +335,26 @@ export class UploadTransferService {
     }
 
     // 2) Verify the assembled object exists at the expected size.
-    const stat = await this.storage.statObject(session.storageKey).catch(() => null);
-    if (!stat || stat.size !== session.expectedSize) {
+    // M6: a transient read failure must NOT park FAILED — the bytes are
+    // fine, only the check failed. Stay UPLOADING so completion retries.
+    let stat: { size: number } | null;
+    try {
+      stat = await this.storage.statObject(session.storageKey);
+    } catch (err: any) {
+      const classified = classifyProviderError(err);
+      logger.error('upload-transfer:verify-read-failed', {
+        uploadSessionId: session.id,
+        providerCode: classified.code,
+        retryable: classified.retryable,
+      });
+      throw { status: 502, message: 'Assembled object verification failed' };
+    }
+    if (!stat) {
+      // Object missing after provider completion: re-running complete is
+      // idempotent, so stay retryable instead of stranding the session.
+      throw { status: 502, message: 'Assembled object verification failed' };
+    }
+    if (stat.size !== session.expectedSize) {
       await this.failSession(session.id, 'assembled object verification failed');
       throw { status: 502, message: 'Assembled object verification failed' };
     }
@@ -369,7 +387,16 @@ export class UploadTransferService {
     let prefix: Buffer;
     try {
       prefix = await this.storage.sniffPrefix(session.storageKey, SNIFF_PREFIX_BYTES);
-    } catch {
+    } catch (err: any) {
+      // M6: transient prefix-read failure stays retryable (see step 2).
+      const classified = classifyProviderError(err);
+      if (classified.retryable) {
+        logger.error('upload-transfer:sniff-read-failed', {
+          uploadSessionId: session.id,
+          providerCode: classified.code,
+        });
+        throw { status: 502, message: 'Could not verify assembled file' };
+      }
       await this.failSession(session.id, 'could not read assembled object');
       throw { status: 502, message: 'Could not verify assembled file' };
     }

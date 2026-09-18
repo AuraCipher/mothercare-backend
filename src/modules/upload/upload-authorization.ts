@@ -33,6 +33,7 @@ type FileRef = {
   purpose: string | null;
   mimeType?: string;
   processingStatus?: string;
+  processingError?: string | null;
   metadata?: unknown;
 };
 
@@ -85,6 +86,7 @@ export async function authorizeFileAccess(
       purpose: true,
       metadata: true,
       processingStatus: true,
+      processingError: true,
     },
   });
 
@@ -93,7 +95,12 @@ export async function authorizeFileAccess(
   }
 
   // M5: policy-rejected media is unservable (bytes removed, row kept for audit).
+  // Owners (and admins) learn the terminal state via reason 'Gone' so status
+  // polling converges; everyone else gets the indistinguishable 404.
   if (record.processingStatus === 'REJECTED') {
+    if (isFullAdmin(user) || (record.uploadedById && record.uploadedById === user.id)) {
+      return { allowed: false, reason: 'Gone', record };
+    }
     return { allowed: false, reason: 'File not found' };
   }
 
