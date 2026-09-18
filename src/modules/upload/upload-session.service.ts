@@ -10,6 +10,11 @@ import {
 } from './storage-paths';
 import { buildFileServeUrl } from './file-url.util';
 import { getDefaultDocumentsBucket } from './storage';
+import {
+  classifyProviderError,
+  resolveMultipartStorage,
+  type MultipartStorage,
+} from './storage/multipart-storage';
 import { teacherAppChatAllowsAttachments } from '../chat/services/teacher-app-chat-permissions.service';
 
 /**
@@ -429,15 +434,79 @@ export class UploadSessionService {
     }
     const cancelled = await prisma.uploadSession.findUnique({ where: { id } });
     logger.info('upload-session:cancelled', { uploadSessionId: id, userId });
+    // M2: connect cancellation to storage — abort the provider multipart and
+    // drop the part ledger. Best-effort: the CANCELLED transition above is
+    // already committed and authoritative; abort failure is logged, never fatal.
+    await this.releaseStorage(cancelled!);
     return serializeUploadSession(cancelled!);
   }
 
   /**
-   * System lifecycle op for the future cleanup sweeper (M2): persist EXPIRED
-   * for sessions whose clock passed while active. Idempotent — terminal
-   * sessions are returned untouched.
+   * Release provider-side transfer state for a dead session (M2): delete the
+   * durable part ledger, then abort the provider multipart upload.
+   * Idempotent and never throws — the DB state machine is the authority on
+   * usability; the R2 bucket lifecycle rule is the backstop for crash windows.
    */
-  async expireSession(id: string) {
+  async releaseStorage(
+    session: { id: string; storageKey: string; providerUploadId: string | null },
+    storage: MultipartStorage = resolveMultipartStorage(),
+  ): Promise<void> {
+    // Promise.resolve: this is best-effort hygiene — a missing/broken client
+    // shape must never turn cleanup into a crash.
+    await Promise.resolve(
+      prisma.uploadSessionPart.deleteMany({ where: { sessionId: session.id } }),
+    ).catch(() => {});
+    if (!session.providerUploadId) return;
+    try {
+      await storage.abortUpload(session.storageKey, session.providerUploadId);
+      logger.info('upload-session:storage-released', { uploadSessionId: session.id });
+    } catch (err: any) {
+      const classified = classifyProviderError(err);
+      logger.error('upload-session:storage-release-failed', {
+        uploadSessionId: session.id,
+        providerCode: classified.code,
+        retryable: classified.retryable,
+      });
+    }
+  }
+
+  /**
+   * Bounded expiration sweep (M2): transition active past-expiry sessions to
+   * EXPIRED and release their provider state, one independent attempt each.
+   * Idempotent — re-running changes nothing. Correctness never depends on
+   * this (expiry is derived on every op); it is hygiene + R2 abort.
+   */
+  async cleanupExpiredSessions(limit = 100): Promise<{ expired: number; failed: number }> {
+    const storage = resolveMultipartStorage();
+    const candidates = await prisma.uploadSession.findMany({
+      where: { status: { in: ['INITIATED', 'UPLOADING'] }, expiresAt: { lt: new Date() } },
+      orderBy: { expiresAt: 'asc' },
+      take: Math.max(1, Math.min(limit, 1000)),
+      select: { id: true },
+    });
+    let expired = 0;
+    let failed = 0;
+    for (const { id } of candidates) {
+      try {
+        const done = await this.expireSession(id, storage);
+        if (done.status === 'EXPIRED') expired += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    if (candidates.length > 0) {
+      logger.info('upload-session:cleanup-sweep', { scanned: candidates.length, expired, failed });
+    }
+    return { expired, failed };
+  }
+
+  /**
+   * System lifecycle op: persist EXPIRED for a session whose clock passed
+   * while active, and release its provider state (M2). Idempotent — terminal
+   * sessions are returned untouched (and their storage is still released
+   * best-effort, covering crash windows between transition and release).
+   */
+  async expireSession(id: string, storage?: MultipartStorage) {
     const updated = await prisma.uploadSession.updateMany({
       where: { id, status: { in: ['INITIATED', 'UPLOADING'] } },
       data: { status: 'EXPIRED', lastActivityAt: new Date() },
@@ -447,6 +516,7 @@ export class UploadSessionService {
     if (updated.count > 0) {
       logger.info('upload-session:expired', { uploadSessionId: id, userId: session.userId });
     }
+    await this.releaseStorage(session, storage);
     return serializeUploadSession(session);
   }
 

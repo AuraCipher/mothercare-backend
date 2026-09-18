@@ -8,6 +8,7 @@ import { runStartupChecks, printStartupBanner, setupGracefulShutdown } from './s
 import logger from './src/lib/logger';
 import { startMessageWorker } from './src/queues/message.worker';
 import { startChatWorker } from './src/queues/chat.worker';
+import { startUploadSessionSweeper } from './src/modules/upload/upload-session-sweeper';
 import { initChatSocket } from './src/modules/chat/socket/chat.socket';
 import { markServerStarted, markReady } from './src/lib/componentStatus';
 
@@ -62,6 +63,7 @@ async function main() {
 
     startMessageWorker();
     startChatWorker();
+    startUploadSessionSweeper();
 
     // ─── 4. Process info ─────────────────────────────────────
     if (env.APP_MODE === 'development') {

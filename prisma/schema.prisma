@@ -442,11 +442,36 @@ model UploadSession {
 
   user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   fileRecord FileRecord? @relation(fields: [fileRecordId], references: [id], onDelete: SetNull)
+  parts      UploadSessionPart[]
 
   @@unique([userId, idempotencyKey])
   @@index([userId, status])
   @@index([status, expiresAt])
   @@map("upload_sessions")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                 UPLOAD SESSION PARTS                           ║
+// ║  M2 — durable ledger of persisted R2/S3 multipart parts (or    ║
+// ║  local staging parts). One row per (session, partNumber); the  ║
+// ║  partNumber derives deterministically from the byte offset     ║
+// ║  (offset / TRANSFER_PART_SIZE + 1), so a retry of the same     ║
+// ║  range overwrites the same part instead of duplicating bytes.  ║
+// ║  Completion reads these rows in order — never the JSON blob.   ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model UploadSessionPart {
+  id         String   @id @default(uuid())
+  sessionId  String
+  partNumber Int
+  etag       String // provider part ETag (opaque; md5 hex for local staging)
+  size       Int // accepted bytes for this part
+  createdAt  DateTime @default(now())
+
+  session UploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, partNumber])
+  @@map("upload_session_parts")
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗

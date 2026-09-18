@@ -6,6 +6,9 @@ import type { StorageOptions, StorageService } from './types';
 
 const UPLOAD_ROOT = path.resolve(__dirname, '..', '..', '..', '..', 'uploads');
 
+// Exported for the M2 local multipart staging backend (same root, isolated subdir).
+export { UPLOAD_ROOT };
+
 export class LocalStorageAdapter implements StorageService {
   isRemote(): boolean {
     return false;

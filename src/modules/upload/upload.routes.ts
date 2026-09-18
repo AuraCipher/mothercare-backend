@@ -7,9 +7,10 @@ import { pipeline } from 'stream/promises';
 import { Transform, Readable } from 'stream';
 import authMiddleware from '../../middleware/auth/auth.middleware';
 import { uploadDocumentPermissionMiddleware } from '../../middleware/auth/upload-document-permission.middleware';
-import { uploadLimiter } from '../../middleware/security/rateLimiter';
+import { uploadLimiter, uploadChunkLimiter } from '../../middleware/security/rateLimiter';
 import { uploadService, getMaxBytesForPurpose } from './upload.service';
 import { uploadSessionService } from './upload-session.service';
+import { uploadTransferService } from './upload-transfer.service';
 import { UPLOAD_ENTITY_TYPES } from './storage-paths';
 import { prisma } from '../../lib/prisma';
 import { teacherAppChatAllowsAttachments } from '../chat/services/teacher-app-chat-permissions.service';
@@ -363,6 +364,46 @@ router.delete('/upload-sessions/:id', asyncHandler(async (req: Request, res: Res
   const userId = (req as any).user?.id;
   const session = await uploadSessionService.cancelSession(req.params.id, userId);
   res.json({ success: true, data: session });
+}));
+
+// ─── PATCH /api/upload-sessions/:id — Transfer one chunk (M2) ─────
+// MCS-App resumable protocol (NOT tus): the client sends the next bytes with
+// `Upload-Offset` equal to the session's authoritative bytesUploaded and a
+// Content-Type of application/octet-stream. The body streams straight into
+// the provider multipart part — never buffered whole. Stale offsets get 409
+// with the authoritative offset and change nothing.
+router.patch('/upload-sessions/:id', uploadChunkLimiter, asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  try {
+    const result = await uploadTransferService.transferChunk({
+      sessionId: req.params.id,
+      userId,
+      offsetHeader: req.headers['upload-offset'] as string | undefined,
+      contentLengthHeader: req.headers['content-length'] as string | undefined,
+      body: req as any,
+    });
+    res.json({ success: true, data: result });
+  } catch (err) {
+    // The request body may still be in flight when validation rejects the
+    // chunk (e.g. stale offset): drain it so the socket stays reusable.
+    try {
+      if (!req.readableEnded) req.resume();
+    } catch {}
+    throw err;
+  }
+}));
+
+// ─── POST /api/upload-sessions/:id/complete — Complete upload (M2) ─
+// Provider multipart completion first, assembled-object verification
+// second, atomic single-winner FileRecord finalization last. Idempotent:
+// replays converge on the one FileRecord.
+router.post('/upload-sessions/:id/complete', asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  const { session, created, fileRecordId } = await uploadTransferService.completeUploadSession(
+    req.params.id,
+    userId,
+  );
+  res.json({ success: true, created, data: { ...session, fileRecordId } });
 }));
 
 // ─── GET /api/uploads — List files by entity (auth required) ─────────

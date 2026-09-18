@@ -13593,6 +13593,79 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      tags: [Uploads]
+      summary: PATCH /api/upload-sessions/{id}
+      operationId: patch_api_upload_sessions_id
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericDataResponse"
+        '400':
+          description: Validation or business rule error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        '401':
+          description: Missing or invalid JWT
+        '403':
+          description: Forbidden — role or module permission
+        '404':
+          description: Resource not found
+        '422':
+          description: Zod validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  '/api/upload-sessions/{id}/complete':
+    post:
+      tags: [Uploads]
+      summary: POST /api/upload-sessions/{id}/complete
+      operationId: post_api_upload_sessions_id_complete
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericDataResponse"
+        '400':
+          description: Validation or business rule error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        '401':
+          description: Missing or invalid JWT
+        '403':
+          description: Forbidden — role or module permission
+        '404':
+          description: Resource not found
+        '422':
+          description: Zod validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   '/api/uploads':
     get:
       tags: [Uploads]

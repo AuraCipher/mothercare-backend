@@ -10,6 +10,8 @@ function documentActionForRequest(req: Request): CrudAction | null {
   if (path === '/upload' && method === 'POST') return 'create';
   if (path === '/upload-sessions' && method === 'POST') return 'create';
   if (path.match(/^\/upload-sessions\/[^/]+$/) && method === 'GET') return 'read';
+  if (path.match(/^\/upload-sessions\/[^/]+$/) && method === 'PATCH') return 'update';
+  if (path.match(/^\/upload-sessions\/[^/]+\/complete$/) && method === 'POST') return 'create';
   if (path.match(/^\/upload-sessions\/[^/]+$/) && method === 'DELETE') return 'delete';
   if (path === '/uploads' && method === 'GET') return 'read';
   if (path.match(/^\/uploads\/[^/]+$/) && method === 'GET') return 'read';
