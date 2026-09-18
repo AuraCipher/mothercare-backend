@@ -12,13 +12,19 @@ import { createRoomMessage } from '../../../src/modules/chat/services/chat-messa
 
 // ─── Mock prisma ──────────────────────────────────────────
 jest.mock('../../../src/lib/prisma', () => {
-  const mockPrisma = {
+  const mockPrisma: any = {
     fileRecord: { findUnique: jest.fn() },
     chatRoomMember: { findFirst: jest.fn() },
-    chatMessage: { create: jest.fn() },
+    chatMessage: {
+      create: jest.fn(),
+      findFirst: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
+    },
+    chatMessageAttachment: { createMany: jest.fn(), count: jest.fn() },
     chatRoom: { update: jest.fn() },
     student: { findUnique: jest.fn() },
   };
+  mockPrisma.$transaction = jest.fn(async (cb: any) => cb(mockPrisma));
   return { prisma: mockPrisma };
 });
 
@@ -107,6 +113,21 @@ describe('Chat mediaFileId authorization — R2-04 follow-up', () => {
       room: { academicYearId: 'ay-1', name: 'Test Room', kind: 'class' },
       mediaFile: null,
     });
+    mockPrisma.chatMessage.findFirst.mockResolvedValue(null);
+    mockPrisma.chatMessage.findUniqueOrThrow.mockResolvedValue({
+      id: 'msg-new',
+      roomId: 'room-1',
+      senderId: 'sender-1',
+      type: 'text',
+      content: 'hello',
+      mediaFileId: null,
+      attachments: [],
+      sender: { id: 'sender-1', name: 'Test', role: 'teacher' },
+      room: { academicYearId: 'ay-1', name: 'Test Room', kind: 'class' },
+      mediaFile: null,
+    });
+    mockPrisma.chatMessageAttachment.createMany.mockResolvedValue({ count: 0 });
+    mockPrisma.chatMessageAttachment.count.mockResolvedValue(0);
     mockPrisma.chatRoom.update.mockResolvedValue({});
   });
 

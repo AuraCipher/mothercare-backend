@@ -6,7 +6,7 @@ import env from '../../../config/env';
 import { getRedisConnectionConfig } from '../../../config/redis-tcp';
 import logger from '../../../lib/logger';
 import { verifyToken, isBlacklisted } from '../../../lib/jwt';
-import { createRoomMessage, markRoomRead, listOfflineRecipientUserIds } from '../services/chat-message.service';
+import { createRoomMessage, markRoomRead, listOfflineRecipientUserIds, toEnvelopeAttachments, envelopeClientMessageId } from '../services/chat-message.service';
 import { ensureChatRoomAccess } from '../services/chat-room-access.service';
 import { assertRoomMember, listUserRoomIds } from '../services/chat-access.service';
 import { enqueueChatPushFanout } from '../../../queues/chat.queue';
@@ -91,17 +91,31 @@ export async function initChatSocket(server: HttpServer): Promise<Server | null>
       content?: string;
       title?: string;
       mediaFileId?: string;
+      /** M4: ordered attachment ids (wins over mediaFileId; first mirrors to it). */
+      mediaFileIds?: string[];
       replyToId?: string;
-    }) => {
+      /** M4: client-generated idempotency key for safe send retry. */
+      clientMessageId?: string;
+    }, callback?: (res: { ok: boolean; message?: unknown; duplicate?: boolean; error?: string }) => void) => {
+      const ack = (res: { ok: boolean; message?: unknown; duplicate?: boolean; error?: string }) => {
+        try {
+          callback?.(res);
+        } catch {}
+      };
       try {
-        const message = await createRoomMessage({
+        const mediaFileIds = Array.isArray(payload.mediaFileIds)
+          ? payload.mediaFileIds.filter((id) => typeof id === 'string')
+          : undefined;
+        const { message, duplicate } = await createRoomMessage({
           roomId: payload.roomId,
           senderId: user.id,
           type: (payload.type as any) ?? 'text',
           content: payload.content,
           title: payload.title,
           mediaFileId: payload.mediaFileId,
+          mediaFileIds,
           replyToId: payload.replyToId,
+          clientMessageId: payload.clientMessageId,
         });
 
         const envelope = {
@@ -119,11 +133,14 @@ export async function initChatSocket(server: HttpServer): Promise<Server | null>
                 purpose: message.mediaFile.purpose,
               }
             : null,
+          attachments: toEnvelopeAttachments(message),
+          clientMessageId: envelopeClientMessageId(message),
           sender: message.sender,
           createdAt: message.createdAt.toISOString(),
         };
 
         io?.to(`room:${payload.roomId}`).emit('chat:message:new', envelope);
+        ack({ ok: true, message: envelope, duplicate });
 
         const roomKind = message.room.kind;
         const pushKinds = new Set([
@@ -151,7 +168,9 @@ export async function initChatSocket(server: HttpServer): Promise<Server | null>
           keyVersion: keyRow?.keyVersion ?? 1,
         });
       } catch (err: any) {
-        socket.emit('chat:error', { message: err?.message || 'send failed' });
+        const error = err?.message || 'send failed';
+        socket.emit('chat:error', { message: error });
+        ack({ ok: false, error });
       }
     });
 

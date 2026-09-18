@@ -395,6 +395,7 @@ model FileRecord {
   profileUser    User?    @relation("UserProfilePhoto")
   profileStudent Student? @relation("StudentProfilePhoto")
   chatMessages   ChatMessage[] @relation("ChatMessageMedia")
+  chatAttachments ChatMessageAttachment[] @relation("ChatAttachmentFiles")
   uploadSession  UploadSession?
 
   updatedAt DateTime @updatedAt
@@ -1640,6 +1641,7 @@ model ChatMessage {
   room            ChatRoom       @relation(fields: [roomId], references: [id], onDelete: Cascade)
   sender          User?          @relation("ChatMessagesSent", fields: [senderId], references: [id], onDelete: SetNull)
   mediaFile       FileRecord?    @relation("ChatMessageMedia", fields: [mediaFileId], references: [id], onDelete: SetNull)
+  attachments     ChatMessageAttachment[]
   replyTo         ChatMessage?   @relation("ChatMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies         ChatMessage[]  @relation("ChatMessageReplies")
   announcement    Announcement?  @relation("AnnouncementChatMessage")
@@ -1649,6 +1651,30 @@ model ChatMessage {
   @@index([roomId, createdAt])
   @@index([senderId, createdAt])
   @@map("chat_messages")
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║                 CHAT MESSAGE ATTACHMENTS                       ║
+// ║  M4 — ordered multi-attachment collection per message.         ║
+// ║  mediaFileId on ChatMessage is preserved unchanged (first      ║
+// ║  attachment is mirrored there) so old messages, old clients,   ║
+// ║  and the edit/delete guards keep working. New clients prefer   ║
+// ║  attachments[] and fall back to mediaFile when it is empty.    ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+model ChatMessageAttachment {
+  id           String   @id @default(uuid())
+  messageId    String
+  fileRecordId String
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  message    ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  fileRecord FileRecord  @relation("ChatAttachmentFiles", fields: [fileRecordId], references: [id], onDelete: Restrict)
+
+  @@unique([messageId, fileRecordId])
+  @@index([messageId, sortOrder])
+  @@map("chat_message_attachments")
 }
 
 model ChatMessageReadState {

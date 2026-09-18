@@ -455,6 +455,13 @@ export class UploadService {
   async deleteFile(fileId: string) {
     const record = await prisma.fileRecord.findUnique({ where: { id: fileId } });
     if (!record) throw { status: 404, message: 'File not found' };
+    // M4: files referenced by chat attachment rows are protected (Restrict) —
+    // refuse with 409 BEFORE touching storage so no orphan object is created.
+    // Legacy mediaFileId references keep their existing SetNull behavior.
+    const attachmentRefs = await prisma.chatMessageAttachment.count({ where: { fileRecordId: fileId } });
+    if (attachmentRefs > 0) {
+      throw { status: 409, message: 'File is attached to chat messages and cannot be deleted' };
+    }
     let storageDeleteFailed = false;
     try {
       await storage.delete(record.storagePath, { bucket: record.storageBucket });

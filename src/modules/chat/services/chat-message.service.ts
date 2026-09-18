@@ -5,6 +5,23 @@ import { ensureChatRoomAccess } from './chat-room-access.service';
 import { ensureStudentSystemRoomAccess } from './chat-student-room-access.service';
 import { authorizeChatMedia } from '../../upload/upload-authorization';
 
+export const MAX_CHAT_ATTACHMENTS = 100;
+
+const attachmentFileSelect = {
+  id: true,
+  mimeType: true,
+  publicUrl: true,
+  purpose: true,
+} as const;
+
+/** Ordered attachment rows with the file payload new clients render. */
+export const chatMessageAttachmentsInclude = {
+  attachments: {
+    orderBy: { sortOrder: 'asc' },
+    include: { fileRecord: { select: attachmentFileSelect } },
+  },
+} as const;
+
 export async function listRoomMessages(
   roomId: string,
   userId: string,
@@ -21,10 +38,46 @@ export async function listRoomMessages(
     include: {
       sender: { select: { id: true, name: true, role: true, profilePhotoId: true } },
       mediaFile: { select: { id: true, mimeType: true, publicUrl: true, purpose: true } },
+      ...chatMessageAttachmentsInclude,
     },
   });
 
-  return messages.reverse();
+  // Wire shape contract: history attachments use the SAME flat envelope shape
+  // as chat:message:new ({id,mimeType,publicUrl,purpose} in sortOrder).
+  // Row ids/sortOrder are transport details — order is positional.
+  return messages.reverse().map((m) => ({ ...m, attachments: toEnvelopeAttachments(m) }));
+}
+
+// Shared include for single-message reads (update/delete paths).
+const messageInclude = {
+  sender: { select: { id: true, name: true, role: true } },
+  mediaFile: { select: { id: true, mimeType: true, publicUrl: true, purpose: true } },
+  ...chatMessageAttachmentsInclude,
+} as const;
+
+const messageIncludeFull = {
+  sender: { select: { id: true, name: true, role: true } },
+  room: { select: { academicYearId: true, name: true, kind: true } },
+  mediaFile: { select: attachmentFileSelect },
+  ...chatMessageAttachmentsInclude,
+} as const;
+
+/** Flattened envelope attachment shape shared by socket + history consumers. */
+export function toEnvelopeAttachments(
+  message: { attachments?: Array<{ fileRecord: { id: string; mimeType: string; publicUrl: string | null; purpose: string | null } }> },
+): Array<{ id: string; mimeType: string; publicUrl: string | null; purpose: string | null }> {
+  return (message.attachments ?? []).map((a) => ({
+    id: a.fileRecord.id,
+    mimeType: a.fileRecord.mimeType,
+    publicUrl: a.fileRecord.publicUrl,
+    purpose: a.fileRecord.purpose,
+  }));
+}
+
+export function envelopeClientMessageId(message: { metadata?: unknown }): string | null {
+  const meta = message.metadata as Record<string, unknown> | null | undefined;
+  const id = meta?.dedupeId;
+  return typeof id === 'string' ? id : null;
 }
 
 export async function createRoomMessage(input: {
@@ -34,43 +87,92 @@ export async function createRoomMessage(input: {
   title?: string;
   content?: string;
   mediaFileId?: string;
+  /** M4: ordered attachment ids. Wins over mediaFileId; first id mirrors to mediaFileId. */
+  mediaFileIds?: string[];
   replyToId?: string;
   metadata?: Record<string, unknown>;
-}) {
-  await assertCanPost(input.roomId, input.senderId);
-
-  // R2-04: Validate mediaFileId — sender must own the file or it must be a chat file in this room
-  if (input.mediaFileId) {
-    const { allowed } = await authorizeChatMedia(input.senderId, input.roomId, input.mediaFileId);
-    if (!allowed) {
-      throw { status: 403, message: 'Not authorized to attach this file' };
-    }
+  /** M4: client-generated send key for idempotent retry (stored as metadata.dedupeId). */
+  clientMessageId?: string;
+}): Promise<{ message: any; duplicate: boolean }> {
+  // Normalize: explicit array wins; legacy single folds in; order preserved, dupes dropped.
+  const rawIds = input.mediaFileIds ?? (input.mediaFileId ? [input.mediaFileId] : []);
+  const attachmentIds = [...new Set(rawIds.filter((id) => typeof id === 'string' && id.length > 0))];
+  if (attachmentIds.length > MAX_CHAT_ATTACHMENTS) {
+    throw { status: 400, message: `Too many attachments (max ${MAX_CHAT_ATTACHMENTS})` };
   }
 
-  const message = await prisma.chatMessage.create({
-    data: {
-      roomId: input.roomId,
-      senderId: input.senderId,
-      type: input.type ?? 'text',
-      title: input.title,
-      content: input.content,
-      mediaFileId: input.mediaFileId,
-      replyToId: input.replyToId,
-      metadata: input.metadata as object | undefined,
-    },
-    include: {
-      sender: { select: { id: true, name: true, role: true } },
-      room: { select: { academicYearId: true, name: true, kind: true } },
-      mediaFile: { select: { id: true, mimeType: true, publicUrl: true, purpose: true } },
-    },
-  });
+  let dedupeId: string | undefined;
+  if (input.clientMessageId != null && input.clientMessageId !== '') {
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(input.clientMessageId)) {
+      throw { status: 400, message: 'clientMessageId must be 8-64 URL-safe characters' };
+    }
+    dedupeId = input.clientMessageId;
+  }
 
-  await prisma.chatRoom.update({
-    where: { id: input.roomId },
-    data: { updatedAt: new Date() },
-  });
+  return prisma.$transaction(async (tx) => {
+    // Idempotent replay: a retried send with the same key returns the original.
+    if (dedupeId) {
+      const existing = await tx.chatMessage.findFirst({
+        where: { roomId: input.roomId, metadata: { path: ['dedupeId'], equals: dedupeId } },
+        include: messageIncludeFull,
+      });
+      if (existing) return { message: existing, duplicate: true };
+    }
 
-  return message;
+    await assertCanPost(input.roomId, input.senderId);
+
+    // R2-04: every attachment authorized individually — one failure aborts
+    // the whole send (transaction rolls back; no partial message).
+    for (const fileId of attachmentIds) {
+      const { allowed } = await authorizeChatMedia(input.senderId, input.roomId, fileId);
+      if (!allowed) {
+        throw { status: 403, message: 'Not authorized to attach this file' };
+      }
+    }
+
+    const message = await tx.chatMessage.create({
+      data: {
+        roomId: input.roomId,
+        senderId: input.senderId,
+        type: input.type ?? 'text',
+        title: input.title,
+        content: input.content,
+        mediaFileId: attachmentIds[0],
+        replyToId: input.replyToId,
+        metadata: {
+          ...(input.metadata ?? {}),
+          ...(dedupeId ? { dedupeId } : {}),
+        } as object,
+      },
+      include: {
+        sender: { select: { id: true, name: true, role: true } },
+        room: { select: { academicYearId: true, name: true, kind: true } },
+        mediaFile: { select: attachmentFileSelect },
+      },
+    });
+
+    if (attachmentIds.length > 0) {
+      await tx.chatMessageAttachment.createMany({
+        data: attachmentIds.map((fileRecordId, sortOrder) => ({
+          messageId: message.id,
+          fileRecordId,
+          sortOrder,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    await tx.chatRoom.update({
+      where: { id: input.roomId },
+      data: { updatedAt: new Date() },
+    });
+
+    const full = await tx.chatMessage.findUniqueOrThrow({
+      where: { id: message.id },
+      include: messageIncludeFull,
+    });
+    return { message: full, duplicate: false };
+  });
 }
 
 export async function markRoomRead(roomId: string, userId: string, messageId?: string) {
@@ -94,11 +196,6 @@ export async function markRoomRead(roomId: string, userId: string, messageId?: s
     },
   });
 }
-
-const messageInclude = {
-  sender: { select: { id: true, name: true, role: true } },
-  mediaFile: { select: { id: true, mimeType: true, publicUrl: true, purpose: true } },
-} as const;
 
 export async function deleteRoomMessage(messageId: string, userId: string) {
   const message = await prisma.chatMessage.findUnique({ where: { id: messageId } });
@@ -129,6 +226,11 @@ export async function updateRoomMessage(messageId: string, userId: string, conte
     throw { status: 404, message: 'Message not found' };
   }
   if (message.type !== 'text' || message.mediaFileId) {
+    throw { status: 400, message: 'Only text messages can be edited' };
+  }
+  // M4: messages carrying attachment rows are not editable either.
+  const attachmentCount = await prisma.chatMessageAttachment.count({ where: { messageId } });
+  if (attachmentCount > 0) {
     throw { status: 400, message: 'Only text messages can be edited' };
   }
   await ensureStudentSystemRoomAccess(message.roomId, userId);

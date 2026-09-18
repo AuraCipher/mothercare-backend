@@ -7,6 +7,9 @@ jest.mock('../../../src/lib/prisma', () => ({
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    chatMessageAttachment: {
+      count: jest.fn().mockResolvedValue(0),
+    },
   },
 }));
 
