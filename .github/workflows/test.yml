@@ -1,0 +1,200 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  backend-unit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run test:unit -- --coverage
+
+  backend-integration-security:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run test:integration -- --testPathPatterns='(auth\\.(e2e-flow|security)|cross-tenant|privilege-escalation)'
+
+  web-vitest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:unit
+
+  web-playwright-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mcs_e2e
+          POSTGRES_PASSWORD: mcs_e2e_pass
+          POSTGRES_DB: mcs_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mcs_e2e -d mcs_e2e"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://mcs_e2e:mcs_e2e_pass@localhost:5432/mcs_e2e
+      JWT_SECRET: e2e-jwt-secret-at-least-32-characters-long
+      NODE_ENV: production
+      APP_MODE: development
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:5000
+      NEXT_PUBLIC_PUBLISHABLE_KEY: pk_mcs_global_dev_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6
+      NEXT_PUBLIC_APP_MODE: development
+      E2E_ADMIN_USER: admin
+      E2E_ADMIN_PASS: admin123
+      E2E_SUPERADMIN_USER: ceo@mothercareschool.com
+      E2E_SUPERADMIN_PASS: Ceo@098765
+      E2E_TEACHER_USER: fatima_teacher
+      E2E_TEACHER_PASS: Fatima@123
+      E2E_STUDENT_USER: student_ahmed
+      E2E_STUDENT_PASS: Student@123
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node (backend)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Prepare database and build API
+        working-directory: backend
+        run: |
+          npm ci
+          npx prisma generate
+          npx prisma migrate deploy
+          npx prisma db seed
+          npm run build
+
+      - name: Start backend API
+        working-directory: backend
+        env:
+          HOST: 127.0.0.1
+          PORT: '5000'
+        run: |
+          node dist/server.js &
+          echo $! > "${{ github.workspace }}/backend.pid"
+          bash "${{ github.workspace }}/scripts/e2e/wait-for-health.sh" http://127.0.0.1:5000/health 180
+
+      - name: Setup Node (web)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web and run Playwright E2E
+        working-directory: web
+        env:
+          CI: true
+          PORT: '3000'
+        run: |
+          npm ci
+          npm run build
+          npx playwright install --with-deps chromium
+          npm run test:e2e -- e2e/proxy-route-guard.spec.ts e2e/auth-role-landing.spec.ts e2e/portal-navigation-smoke.spec.ts e2e/admin/
+
+      - name: Stop backend API
+        if: always()
+        run: kill "$(cat backend.pid)" 2>/dev/null || true
+
+  mobile-flutter:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  mobile-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATABASE_URL: postgresql://mcs:mcs@localhost:5432/mcs?schema=public
+      JWT_SECRET: ci_mobile_integration_jwt_secret_32c
+      PORT: '5000'
+      HOST: 0.0.0.0
+      API_BASE_URL: http://10.0.2.2:5000
+      E2E_LIVE: 'true'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: mcs
+          POSTGRES_PASSWORD: mcs
+          POSTGRES_DB: mcs
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Bootstrap API (migrate, demo seed, start server)
+        run: bash scripts/ci/bootstrap-mobile-integration-api.sh
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Run integration tests on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect
+          script: bash scripts/ci/run-mobile-integration-tests.sh
