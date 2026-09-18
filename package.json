@@ -5,7 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "prisma generate && nodemon --watch src --watch server.ts --ext ts --exec \"npx ts-node server.ts\"",
-    "build": "tsc",
+    "build": "tsc --project tsconfig.build.json",
     "start": "node dist/server.js",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",

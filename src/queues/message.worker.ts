@@ -10,6 +10,7 @@ import {
 } from './message.queue';
 
 let worker: Worker | null = null;
+let consecutiveWorkerErrors = 0;
 
 export function startMessageWorker(): Worker | null {
   const connection = getRedisConnectionConfig();
@@ -49,7 +50,21 @@ export function startMessageWorker(): Worker | null {
   });
 
   worker.on('error', (err) => {
-    logger.error('Message worker error', { error: err.message });
+    consecutiveWorkerErrors++;
+    // Throttle: log first error, then every 10th, then when errors stop
+    if (consecutiveWorkerErrors === 1 || consecutiveWorkerErrors % 10 === 0) {
+      logger.error('Message worker error (repeated)', {
+        error: err.message,
+        consecutiveErrors: consecutiveWorkerErrors,
+      });
+    }
+  });
+
+  worker.on('ready', () => {
+    if (consecutiveWorkerErrors > 0) {
+      logger.info('Message worker reconnected', { afterErrors: consecutiveWorkerErrors });
+    }
+    consecutiveWorkerErrors = 0;
   });
 
   logger.info('Message worker started', { concurrency });

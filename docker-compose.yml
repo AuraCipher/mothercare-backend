@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mcs
+      POSTGRES_PASSWORD: mcs_dev_password
+      POSTGRES_DB: mothercare
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcs -d mothercare"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6381:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5002:5000"
+    environment:
+      NODE_ENV: production
+      APP_MODE: production
+      PORT: 5000
+      HOST: "0.0.0.0"
+      DATABASE_URL: "postgresql://mcs:mcs_dev_password@postgres:5432/mothercare?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      JWT_SECRET: "local-dev-jwt-secret-minimum-32-characters-long"
+      FRONTEND_URL: "http://localhost:3000"
+      APP_URL: "http://localhost:5000"
+      ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:8080"
+      SCHOOL_NAME: "Mother Care School"
+      DEFAULT_BRANCH_NAME: "Mother Care Sohan"
+      MESSAGE_QUEUE_CONCURRENCY: "3"
+      CHAT_QUEUE_CONCURRENCY: "5"
+      FCM_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:

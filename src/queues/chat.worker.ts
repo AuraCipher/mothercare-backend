@@ -10,6 +10,7 @@ import {
 } from './chat.queue';
 
 let worker: Worker | null = null;
+let consecutiveWorkerErrors = 0;
 
 async function handlePushFanout(data: ChatPushFanoutJob) {
   await sendEncryptedPushToUsers(data.recipientUserIds, data.keyVersion, {
@@ -50,7 +51,20 @@ export function startChatWorker(): Worker | null {
   });
 
   worker.on('error', (err) => {
-    logger.error('Chat worker error', { error: err.message });
+    consecutiveWorkerErrors++;
+    if (consecutiveWorkerErrors === 1 || consecutiveWorkerErrors % 10 === 0) {
+      logger.error('Chat worker error (repeated)', {
+        error: err.message,
+        consecutiveErrors: consecutiveWorkerErrors,
+      });
+    }
+  });
+
+  worker.on('ready', () => {
+    if (consecutiveWorkerErrors > 0) {
+      logger.info('Chat worker reconnected', { afterErrors: consecutiveWorkerErrors });
+    }
+    consecutiveWorkerErrors = 0;
   });
 
   logger.info('Chat worker started', { concurrency });

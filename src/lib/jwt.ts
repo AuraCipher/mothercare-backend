@@ -49,13 +49,21 @@ export async function blacklistToken(token: string): Promise<void> {
   }
 }
 
+/** Maximum time (ms) to wait for a blacklist check before failing closed. */
+const BLACKLIST_TIMEOUT_MS = 3_000;
+
 /** Check if a token has been revoked */
 export async function isBlacklisted(token: string): Promise<boolean> {
   try {
     const client = getUpstashRedis();
     if (!client) return false; // Upstash not configured, allow all
 
-    const result = await client.get(`blacklist:${token}`);
+    const result = await Promise.race([
+      client.get(`blacklist:${token}`),
+      new Promise<null>((_, reject) =>
+        setTimeout(() => reject(new Error('blacklist timeout')), BLACKLIST_TIMEOUT_MS),
+      ),
+    ]);
     return result !== null;
   } catch (e: any) {
     console.warn('[JWT] blacklist check failed:', e.message);
