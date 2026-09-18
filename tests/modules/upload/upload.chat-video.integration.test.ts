@@ -57,7 +57,7 @@ describe('Upload — chat video duration', () => {
     prismaMock.fileRecord.update.mockResolvedValue(mockFileRecord as any);
   });
 
-  test('POST /api/upload rejects video longer than 120 seconds', async () => {
+  test('POST /api/upload rejects video longer than 10 minutes', async () => {
     const res = await request(app)
       .post('/api/upload')
       .set(adminToken)
@@ -65,11 +65,11 @@ describe('Upload — chat video duration', () => {
       .field('entityType', 'chat')
       .field('roomId', 'room-1')
       .field('academicYearId', 'ay-1')
-      .field('durationSeconds', '121')
+      .field('durationSeconds', '601')
       .attach('file', Buffer.from('fake-video-bytes'), 'long.mp4');
 
     expect(res.status).toBe(400);
-    expect(res.body.message).toMatch(/2 minutes/i);
+    expect(res.body.message).toMatch(/10 minutes/i);
     expect(prismaMock.fileRecord.create).not.toHaveBeenCalled();
   });
 
@@ -87,7 +87,7 @@ describe('Upload — chat video duration', () => {
     expect(res.body.message).toMatch(/duration is required/i);
   });
 
-  test('POST /api/upload accepts video at 120 seconds', async () => {
+  test('POST /api/upload accepts video at 600 seconds', async () => {
     const res = await request(app)
       .post('/api/upload')
       .set(adminToken)
@@ -95,7 +95,7 @@ describe('Upload — chat video duration', () => {
       .field('entityType', 'chat')
       .field('roomId', 'room-1')
       .field('academicYearId', 'ay-1')
-      .field('durationSeconds', '120')
+      .field('durationSeconds', '600')
       .attach('file', Buffer.from('fake-video-bytes'), 'clip.mp4');
 
     expect(res.status).toBe(201);

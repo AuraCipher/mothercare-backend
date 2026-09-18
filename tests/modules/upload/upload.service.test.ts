@@ -46,21 +46,21 @@ describe('UploadService — chat video duration', () => {
     expect(mockProcessUpload).not.toHaveBeenCalled();
   });
 
-  test('rejects video longer than 120 seconds', async () => {
+  test('rejects video longer than 10 minutes', async () => {
     await expect(
       service.uploadFile(videoBuffer, 'clip.mp4', {
         purpose: 'video',
-        durationSeconds: 120.1,
+        durationSeconds: 600.1,
       }),
-    ).rejects.toMatchObject({ status: 400, message: 'Videos must be 2 minutes or shorter' });
+    ).rejects.toMatchObject({ status: 400, message: 'Videos must be 10 minutes or shorter' });
 
     expect(mockProcessUpload).not.toHaveBeenCalled();
   });
 
-  test('accepts video at exactly 120 seconds', async () => {
+  test('accepts video at exactly 10 minutes', async () => {
     const result = await service.uploadFile(videoBuffer, 'clip.mp4', {
       purpose: 'video',
-      durationSeconds: 120,
+      durationSeconds: 600,
       roomId: 'room-1',
       academicYearId: 'ay-1',
     });
@@ -73,13 +73,13 @@ describe('UploadService — chat video duration', () => {
     expect(prismaMock.fileRecord.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          metadata: expect.objectContaining({ durationSeconds: 120 }),
+          metadata: expect.objectContaining({ durationSeconds: 600 }),
         }),
       }),
     );
   });
 
-  test('accepts short video under 120 seconds', async () => {
+  test('accepts short video under 10 minutes', async () => {
     const result = await service.uploadFile(videoBuffer, 'clip.mp4', {
       purpose: 'video',
       durationSeconds: 45.5,

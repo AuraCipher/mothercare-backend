@@ -21,8 +21,9 @@ const config: Config = {
     '^.+\\.ts$': ['ts-jest', { tsconfig: 'tests/tsconfig.json' }],
   },
 
-  // Ignore node_modules and dist
-  testPathIgnorePatterns: ['/node_modules/', '/dist/'],
+  // Ignore node_modules and dist. Real-sharp media tests run under
+  // jest.media.config.js (they need the unmocked native modules).
+  testPathIgnorePatterns: ['/node_modules/', '/dist/', 'realsharp\\.test'],
 
   // Coverage configuration
   collectCoverageFrom: [

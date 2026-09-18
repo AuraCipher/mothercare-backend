@@ -3,6 +3,7 @@ import auth from '../../../middleware/auth/auth.middleware';
 import { listRoomsForUser } from '../services/chat-access.service';
 import {
   deleteRoomMessage,
+  findMessageByClientKey,
   listRoomMessages,
   updateRoomMessage,
 } from '../services/chat-message.service';
@@ -35,6 +36,22 @@ router.get('/rooms/:roomId/messages', asyncHandler(async (req, res) => {
     limit: limit ? parseInt(limit as string, 10) : undefined,
   });
   res.json({ success: true, data: messages });
+}));
+
+// M5: send-intent reconciliation — did (roomId, clientMessageId) already land?
+router.get('/rooms/:roomId/messages/by-client-key', asyncHandler(async (req, res) => {
+  const userId = (req as any).user.id;
+  const clientMessageId = req.query.clientMessageId as string;
+  if (!clientMessageId) {
+    res.status(400).json({ success: false, message: 'clientMessageId is required' });
+    return;
+  }
+  const message = await findMessageByClientKey(req.params.roomId, userId, clientMessageId);
+  if (!message) {
+    res.status(404).json({ success: false, message: 'Message not found' });
+    return;
+  }
+  res.json({ success: true, data: message });
 }));
 
 router.delete('/messages/:messageId', asyncHandler(async (req, res) => {

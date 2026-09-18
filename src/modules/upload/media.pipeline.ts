@@ -48,6 +48,19 @@ export const MAX_IMAGE_DIM = 8192;
 /** Bound Sharp concurrency to prevent memory exhaustion on the 4GB VPS. */
 const sharpConcurrency = pLimit(3);
 
+/**
+ * M5: translate Sharp's generic Errors into structured HTTP errors.
+ * Exported for unit testing — the pixel-limit path cannot be reached
+ * end-to-end without decoding tens of millions of pixels (by design: the
+ * 8192² cap exists precisely so no test or request ever pays that cost).
+ */
+export function translateSharpError(err: unknown): { status: number; message: string } | null {
+  if (err instanceof Error && err.message?.includes('pixel limit')) {
+    return { status: 413, message: `Image dimensions too large (max ${MAX_IMAGE_DIM}×${MAX_IMAGE_DIM})` };
+  }
+  return null;
+}
+
 export interface ProcessedMedia {
   buffer: Buffer;
   mimeType: string;
@@ -108,10 +121,8 @@ export async function processUploadBuffer(input: ProcessMediaInput): Promise<Pro
     }
 
     return sharpConcurrency(() => processImage(buffer, purpose, mime, type?.ext).catch((err) => {
-      // Sharp throws a generic Error for pixel-limit violations — translate to structured 413.
-      if (err instanceof Error && err.message?.includes('pixel limit')) {
-        throw { status: 413, message: `Image dimensions too large (max ${MAX_IMAGE_DIM}×${MAX_IMAGE_DIM})` };
-      }
+      const translated = translateSharpError(err);
+      if (translated) throw translated;
       throw err;
     }));
   }

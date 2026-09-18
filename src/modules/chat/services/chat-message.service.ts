@@ -80,6 +80,37 @@ export function envelopeClientMessageId(message: { metadata?: unknown }): string
   return typeof id === 'string' ? id : null;
 }
 
+/**
+ * M5: same-key conflict rule. A retry must carry the identical logical
+ * payload (type, title, content, ordered attachment ids); anything else is a
+ * key collision across unrelated messages and is rejected, never merged.
+ */
+export function sameLogicalSend(
+  existing: {
+    type: string;
+    title?: string | null;
+    content?: string | null;
+    attachments?: Array<{ fileRecordId?: string; fileRecord?: { id: string } }>;
+    mediaFileId?: string | null;
+  },
+  type: string,
+  title: string | undefined,
+  content: string | undefined,
+  attachmentIds: string[],
+): boolean {
+  if (existing.type !== type) return false;
+  if ((existing.title ?? undefined) !== title) return false;
+  if ((existing.content ?? undefined) !== content) return false;
+  const existingIds =
+    existing.attachments && existing.attachments.length > 0
+      ? existing.attachments.map((a) => a.fileRecordId ?? a.fileRecord?.id ?? '')
+      : existing.mediaFileId
+        ? [existing.mediaFileId]
+        : [];
+  if (existingIds.length !== attachmentIds.length) return false;
+  return existingIds.every((id, i) => id === attachmentIds[i]);
+}
+
 export async function createRoomMessage(input: {
   roomId: string;
   senderId: string;
@@ -111,12 +142,19 @@ export async function createRoomMessage(input: {
 
   return prisma.$transaction(async (tx) => {
     // Idempotent replay: a retried send with the same key returns the original.
+    // A reused key with DIFFERENT content is rejected deterministically (409)
+    // instead of merging unrelated messages.
     if (dedupeId) {
       const existing = await tx.chatMessage.findFirst({
         where: { roomId: input.roomId, metadata: { path: ['dedupeId'], equals: dedupeId } },
         include: messageIncludeFull,
       });
-      if (existing) return { message: existing, duplicate: true };
+      if (existing) {
+        if (!sameLogicalSend(existing, input.type ?? 'text', input.title, input.content, attachmentIds)) {
+          throw { status: 409, message: 'clientMessageId was already used for different content' };
+        }
+        return { message: existing, duplicate: true };
+      }
     }
 
     await assertCanPost(input.roomId, input.senderId);
@@ -175,8 +213,34 @@ export async function createRoomMessage(input: {
   });
 }
 
-export async function markRoomRead(roomId: string, userId: string, messageId?: string) {
+/**
+ * M5: send-intent reconciliation lookup. Returns the message previously
+ * created under (roomId, clientMessageId), or null. Membership-gated like
+ * history reads; wire shape matches listRoomMessages (flat attachments).
+ */
+export async function findMessageByClientKey(
+  roomId: string,
+  userId: string,
+  clientMessageId: string,
+) {
   await ensureChatRoomAccess(roomId, userId);
+  await assertRoomMember(roomId, userId);
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(clientMessageId)) {
+    throw { status: 400, message: 'clientMessageId must be 8-64 URL-safe characters' };
+  }
+  const message = await prisma.chatMessage.findFirst({
+    where: { roomId, metadata: { path: ['dedupeId'], equals: clientMessageId } },
+    include: {
+      sender: { select: { id: true, name: true, role: true, profilePhotoId: true } },
+      mediaFile: { select: attachmentFileSelect },
+      ...chatMessageAttachmentsInclude,
+    },
+  });
+  if (!message) return null;
+  return { ...message, attachments: toEnvelopeAttachments(message) };
+}
+
+export async function markRoomRead(roomId: string, userId: string, messageId?: string) {  await ensureChatRoomAccess(roomId, userId);
   await assertRoomMember(roomId, userId);
   const lastMessage = messageId
     ? await prisma.chatMessage.findUnique({ where: { id: messageId } })

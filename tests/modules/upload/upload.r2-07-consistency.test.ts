@@ -320,8 +320,8 @@ describe('R2-07 — Upload Service Consistency', () => {
   });
 
   describe('getMaxBytesForPurpose — existing behavior preserved', () => {
-    test('returns 5MB for voice_note', () => {
-      expect(getMaxBytesForPurpose('voice_note')).toBe(5 * 1024 * 1024);
+    test('returns 1GB infrastructure ceiling for voice_note (M5: no MB product cap)', () => {
+      expect(getMaxBytesForPurpose('voice_note')).toBe(1024 * 1024 * 1024);
     });
 
     test('returns 1GB for video', () => {

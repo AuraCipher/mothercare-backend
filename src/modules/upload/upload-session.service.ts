@@ -1,7 +1,7 @@
 import type { UploadSession, UploadSessionStatus } from '@prisma/client';
 import { basePrisma, prisma } from '../../lib/prisma';
 import logger from '../../lib/logger';
-import { getMaxBytesForPurpose } from './upload.service';
+import { getMaxBytesForPurpose, MAX_VIDEO_DURATION_SECONDS } from './upload.service';
 import {
   buildStoragePath,
   UPLOAD_ENTITY_TYPES,
@@ -277,7 +277,7 @@ function validateCreateInput(input: CreateUploadSessionInput): {
     if (parsed == null || !Number.isFinite(parsed) || parsed <= 0) {
       fail('Video duration is required');
     }
-    if (parsed > 120) fail('Videos must be 2 minutes or shorter');
+    if (parsed > MAX_VIDEO_DURATION_SECONDS) fail('Videos must be 10 minutes or shorter');
   }
 
   return {

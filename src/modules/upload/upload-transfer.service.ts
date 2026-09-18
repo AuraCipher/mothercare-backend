@@ -348,6 +348,12 @@ export class UploadTransferService {
     const { session: done, created } = await uploadSessionService.finalizeSession(session.id, userId);
     // Parts served their purpose — drop the ledger rows.
     await prisma.uploadSessionPart.deleteMany({ where: { sessionId: session.id } }).catch(() => {});
+    // M5: deterministically mark PENDING before responding (closes the
+    // attach-gate race), then trigger processing without blocking.
+    const { markPendingForProcessing, triggerMediaProcessing } =
+      await import('../media/media-processor');
+    await markPendingForProcessing(done.fileRecordId!);
+    triggerMediaProcessing(done.fileRecordId!).catch(() => {});
     logger.info('upload-transfer:completed', {
       uploadSessionId: session.id,
       userId,

@@ -714,16 +714,17 @@ describe('R2-12B — F. Health / Readiness', () => {
     componentStatus.markReady('chatWorker');
   });
 
-  test('getReadinessReport includes all 6 components', async () => {
+  test('getReadinessReport includes all 7 components', async () => {
     const componentStatus = await import('../../src/lib/componentStatus');
     const report = componentStatus.getReadinessReport();
     expect(report.ready).toBe(true);
-    expect(Object.keys(report.components)).toHaveLength(6);
+    expect(Object.keys(report.components)).toHaveLength(7);
     expect(report.components).toHaveProperty('database');
     expect(report.components).toHaveProperty('tcpRedis');
     expect(report.components).toHaveProperty('upstashRedis');
     expect(report.components).toHaveProperty('messageWorker');
     expect(report.components).toHaveProperty('chatWorker');
+    expect(report.components).toHaveProperty('mediaWorker');
     expect(report.components).toHaveProperty('socketIo');
   });
 

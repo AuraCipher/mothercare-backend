@@ -33,6 +33,16 @@ export function startUploadSessionSweeper(): void {
         error: err?.message || String(err),
       });
     }
+    // M5: re-drive media rows stuck PENDING/FAILED (missed triggers, worker
+    // outages). Bounded + idempotent; never throws out of the tick.
+    try {
+      const { reconcilePendingMedia } = await import('../media/media-processor');
+      await reconcilePendingMedia(20);
+    } catch (err: any) {
+      logger.error('media:reconcile-sweep-failed', {
+        error: err?.message || String(err),
+      });
+    }
   }, ms);
   // Never hold the process open for hygiene work.
   (timer as any).unref?.();

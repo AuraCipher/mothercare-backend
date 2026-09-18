@@ -14435,6 +14435,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  '/chat/rooms/{roomId}/messages/by-client-key':
+    get:
+      tags: [Chat]
+      summary: GET /chat/rooms/{roomId}/messages/by-client-key
+      operationId: get_chat_rooms_roomId_messages_by_client_key
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericDataResponse"
+        '400':
+          description: Validation or business rule error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        '401':
+          description: Missing or invalid JWT
+        '403':
+          description: Forbidden — role or module permission
+        '404':
+          description: Resource not found
+        '422':
+          description: Zod validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   '/health':
     get:
       tags: [System]

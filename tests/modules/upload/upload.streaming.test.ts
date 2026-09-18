@@ -98,16 +98,15 @@ describe('Upload streaming — passthrough does not buffer whole file', () => {
     expect(res.body.message).toMatch(/max 20MB/i);
   });
 
-  test('voice 5 MiB limit enforced', async () => {
-    const big = Buffer.alloc(6 * 1024 * 1024, 'a');
+  test('voice has no 5 MiB product cap (M5: duration is the control)', async () => {
+    const sixMb = Buffer.alloc(6 * 1024 * 1024, 'a');
     fileTypeMock.__setFileTypeResult({ ext: 'm4a', mime: 'audio/mp4' });
     const res = await request(app)
       .post('/api/upload')
       .set(adminToken)
       .field('purpose', 'voice_note')
-      .attach('file', big, 'voice.m4a');
-    expect(res.status).toBe(413);
-    expect(res.body.message).toMatch(/max 5MB/i);
+      .attach('file', sixMb, 'voice.m4a');
+    expect(res.status).toBe(201);
   });
 
   test('video 1 GiB limit allows 6 MiB', async () => {

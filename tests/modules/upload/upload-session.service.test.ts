@@ -186,8 +186,8 @@ describe('UploadSession — creation validation', () => {
     [{ ...BASE_INPUT, metadata: [1, 2] }, 'must be a JSON object'],
     [{ ...BASE_INPUT, purpose: 'video' }, 'Video duration is required'],
     [
-      { ...BASE_INPUT, purpose: 'video', metadata: { durationSeconds: 121 } },
-      '2 minutes or shorter',
+      { ...BASE_INPUT, purpose: 'video', metadata: { durationSeconds: 601 } },
+      '10 minutes or shorter',
     ],
   ])('rejects invalid input: %p', async (input, message) => {
     await expect(uploadSessionService.createSession('user-owner', input as any)).rejects.toMatchObject({

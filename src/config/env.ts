@@ -52,6 +52,14 @@ const envSchema = z.object({
   SOCKET_PATH: z.string().default('/socket.io'),
   CHAT_QUEUE_CONCURRENCY: z.string().default('5'),
   SENTRY_DSN: z.string().url().optional(),
+
+  // Media processing (M5) — bounded worker for validation/probing/Sharp.
+  // Sized for the 3 vCPU / 4 GB VPS: 2 concurrent jobs max by default.
+  MEDIA_WORKER_CONCURRENCY: z.string().default('2'),
+  // ffprobe wall-clock bound per file (malformed media must not pin a worker).
+  MEDIA_PROBE_TIMEOUT_MS: z.string().default('60000'),
+  // Sharp step bound per image (Promise.race around the pipeline).
+  MEDIA_SHARP_TIMEOUT_MS: z.string().default('120000'),
 });
 
 const parsed = envSchema.safeParse(process.env);

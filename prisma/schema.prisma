@@ -354,6 +354,18 @@ model User {
   @@map("users")
 }
 
+// M5 — media processing lifecycle for FileRecord. PENDING rows are claimed
+// to PROCESSING by exactly one worker; READY is the only attachable state
+// for processed media; REJECTED = policy violation (bytes removed, row kept
+// for audit); FAILED = infrastructure failure (object kept, re-drivable).
+enum MediaProcessingStatus {
+  PENDING
+  PROCESSING
+  READY
+  REJECTED
+  FAILED
+}
+
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║                    FILE RECORD                                 ║
 // ║  Universal file reference for profile photos, documents, etc.  ║
@@ -397,6 +409,14 @@ model FileRecord {
   chatMessages   ChatMessage[] @relation("ChatMessageMedia")
   chatAttachments ChatMessageAttachment[] @relation("ChatAttachmentFiles")
   uploadSession  UploadSession?
+
+  // M5 — post-upload media processing state. uploaded ≠ safe/ready:
+  // images/video/voice become attachable only at READY. Pre-M5 rows
+  // default READY (they passed the legacy in-request validation).
+  processingStatus  MediaProcessingStatus @default(READY)
+  processingError   String?
+  processingVersion Int                 @default(0)
+  processedAt       DateTime?
 
   updatedAt DateTime @updatedAt
 

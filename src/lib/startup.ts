@@ -6,6 +6,8 @@ import { closeMessageQueue } from '../queues/message.queue';
 import { closeChatQueue } from '../queues/chat.queue';
 import { stopMessageWorker } from '../queues/message.worker';
 import { stopChatWorker } from '../queues/chat.worker';
+import { closeMediaQueue } from '../queues/media.queue';
+import { stopMediaWorker } from '../queues/media.worker';
 import { closeChatSocket } from '../modules/chat/socket/chat.socket';
 import { prisma } from './prisma';
 import { markReady, markDegraded, markDown, markServerStarted } from './componentStatus';
@@ -150,6 +152,8 @@ export function setupGracefulShutdown(prisma: { $disconnect: () => Promise<void>
 
       await step('stopMessageWorker', stopMessageWorker);
       await step('stopChatWorker', stopChatWorker);
+      await step('stopMediaWorker', stopMediaWorker);
+      await step('closeMediaQueue', closeMediaQueue);
       await step('closeMessageQueue', closeMessageQueue);
       await step('closeChatQueue', closeChatQueue);
       await step('closeChatSocket', closeChatSocket);

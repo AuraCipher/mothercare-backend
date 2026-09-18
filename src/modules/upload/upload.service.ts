@@ -11,13 +11,19 @@ import { buildStoragePath, type UploadPurpose } from './storage-paths';
 import { buildFileServeUrl } from './file-url.util';
 import { ALLOWED_MIMES, EXT_MAP, normalizePurpose, processUploadBuffer } from './media.pipeline';
 
-const MAX_FILE_SIZE = 20 * 1024 * 1024;
-const MAX_VOICE_SIZE = 5 * 1024 * 1024;
-const MAX_VIDEO_BYTES = 1024 * 1024 * 1024; // 1GB — duration capped at 2 min instead of file size
-const MAX_VIDEO_DURATION_SECONDS = 120;
+export const MAX_FILE_SIZE = 20 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024; // 1 GiB (1024^3 bytes — single explicit constant)
+// M5: the approved voice policy removes the old artificial 5 MB product cap.
+// Duration (10 min, server-probed) is the product control. The byte ceiling
+// below is purely the shared infrastructure object ceiling (same value as
+// video), NOT a voice product policy — pathological sizes are still bounded
+// by chunking, expiry, and streaming probe/processing.
+export const MAX_VOICE_BYTES = 1024 * 1024 * 1024;
+export const MAX_VIDEO_DURATION_SECONDS = 600; // 10 minutes (authoritative probe enforces)
+export const MAX_VOICE_DURATION_SECONDS = 600; // 10 minutes (authoritative probe enforces)
 
 export function getMaxBytesForPurpose(purpose?: string): number {
-  if (purpose === 'voice_note') return MAX_VOICE_SIZE;
+  if (purpose === 'voice_note') return MAX_VOICE_BYTES;
   if (purpose === 'video') return MAX_VIDEO_BYTES;
   return MAX_FILE_SIZE;
 }
@@ -71,7 +77,7 @@ export class UploadService {
     const requestedPurpose = options.purpose || 'document';
     const isVideo = requestedPurpose === 'video';
     const maxBytes = requestedPurpose === 'voice_note'
-      ? MAX_VOICE_SIZE
+      ? MAX_VOICE_BYTES
       : isVideo
         ? MAX_VIDEO_BYTES
         : MAX_FILE_SIZE;
@@ -82,7 +88,7 @@ export class UploadService {
         throw { status: 400, message: 'Video duration is required' };
       }
       if (duration > MAX_VIDEO_DURATION_SECONDS) {
-        throw { status: 400, message: 'Videos must be 2 minutes or shorter' };
+        throw { status: 400, message: 'Videos must be 10 minutes or shorter' };
       }
     }
 
@@ -154,6 +160,12 @@ export class UploadService {
       throw dbErr;
     }
 
+    // M5: video/voice enter post-upload processing; images were already
+    // Sharp-processed in-request (except GIF passthrough).
+    this.fireMediaProcessing(record.id, {
+      alreadyProcessed: processed.mimeType.startsWith('image/') && processed.ext !== 'gif',
+    });
+
     return {
       id: record.id,
       url: publicUrl,
@@ -163,6 +175,23 @@ export class UploadService {
       size: processed.buffer.length,
       purpose: resolvedPurpose,
     };
+  }
+
+  /**
+   * M5 hook shared by all completion paths: mark PENDING + trigger the media
+   * worker (or inline fallback) for files needing post-upload processing.
+   * Never throws; never delays the response on trigger failure.
+   */
+  private fireMediaProcessing(
+    recordId: string,
+    opts: { alreadyProcessed?: boolean } = {},
+  ): void {
+    // Fire-and-forget by design (requestMediaProcessing is internally
+    // best-effort); the reconciler covers anything missed.
+    import('../media/media-processor').then(
+      ({ requestMediaProcessing }) => requestMediaProcessing(recordId, opts),
+      () => {},
+    ).catch(() => {});
   }
 
   /**
@@ -199,7 +228,7 @@ export class UploadService {
         throw { status: 400, message: 'Video duration is required' };
       }
       if (duration > MAX_VIDEO_DURATION_SECONDS) {
-        throw { status: 400, message: 'Videos must be 2 minutes or shorter' };
+        throw { status: 400, message: 'Videos must be 10 minutes or shorter' };
       }
     }
 
@@ -299,6 +328,8 @@ export class UploadService {
         });
         throw dbErr;
       }
+      // M5: streamed images were Sharp-processed in-request already.
+      this.fireMediaProcessing(record.id, { alreadyProcessed: true });
       return {
         id: record.id,
         url: publicUrl,
@@ -384,6 +415,9 @@ export class UploadService {
       });
       throw dbErr;
     }
+    // M5: passthrough files (video/voice/GIF/docs) skip in-request Sharp —
+    // video/voice enter post-upload processing; documents stay READY.
+    this.fireMediaProcessing(record.id);
     return {
       id: record.id,
       url: publicUrl,

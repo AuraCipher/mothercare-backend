@@ -19,6 +19,7 @@ export type ComponentName =
   | 'upstashRedis'
   | 'messageWorker'
   | 'chatWorker'
+  | 'mediaWorker'
   | 'socketIo';
 
 export type ComponentState = 'starting' | 'ready' | 'degraded' | 'down';
@@ -35,6 +36,7 @@ const components: Record<ComponentName, ComponentEntry> = {
   upstashRedis:  { state: 'starting', since: Date.now() },
   messageWorker: { state: 'starting', since: Date.now() },
   chatWorker:    { state: 'starting', since: Date.now() },
+  mediaWorker:   { state: 'starting', since: Date.now() },
   socketIo:      { state: 'starting', since: Date.now() },
 };
 

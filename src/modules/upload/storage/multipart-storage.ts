@@ -71,6 +71,14 @@ export function classifyProviderError(err: any): ClassifiedProviderError {
   if (name === 'NoSuchUpload' || name === 'NoSuchKey' || name === 'NotFound' || status === 404) {
     return { code: String(name || 'NotFound'), retryable: false, notFound: true };
   }
+  // M5: multipart integrity errors are deterministic — retrying identical
+  // bytes against a completed/aborted upload cannot heal them.
+  if (name === 'InvalidPart' || name === 'InvalidPartOrder' || name === 'EntityTooSmall') {
+    return { code: String(name), retryable: false, notFound: false };
+  }
+  if (name === 'TooManyRequestsException' || status === 429) {
+    return { code: String(name || 'HTTP_429'), retryable: true, notFound: false };
+  }
   if (
     name === 'TimeoutError' ||
     name === 'NetworkingError' ||

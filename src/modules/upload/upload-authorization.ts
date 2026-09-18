@@ -17,6 +17,7 @@
  * FileRecord model, containing only authorization-relevant fields.
  */
 import { prisma } from '../../lib/prisma';
+import { requiresReadyForAttach } from '../media/media-processor';
 
 type UserContext = {
   id: string;
@@ -30,6 +31,8 @@ type FileRef = {
   entityType: string | null;
   entityId: string | null;
   purpose: string | null;
+  mimeType?: string;
+  processingStatus?: string;
   metadata?: unknown;
 };
 
@@ -81,10 +84,16 @@ export async function authorizeFileAccess(
       entityId: true,
       purpose: true,
       metadata: true,
+      processingStatus: true,
     },
   });
 
   if (!record) {
+    return { allowed: false, reason: 'File not found' };
+  }
+
+  // M5: policy-rejected media is unservable (bytes removed, row kept for audit).
+  if (record.processingStatus === 'REJECTED') {
     return { allowed: false, reason: 'File not found' };
   }
 
@@ -191,14 +200,21 @@ export async function authorizeChatMedia(
       id: true,
       uploadedById: true,
       purpose: true,
+      mimeType: true,
       entityType: true,
       entityId: true,
       metadata: true,
+      processingStatus: true,
     },
   });
 
   if (!record) {
     return { allowed: false, reason: 'File not found' };
+  }
+
+  // M5: processed media must be READY — never attach an unvalidated upload.
+  if (requiresReadyForAttach(record.purpose, record.mimeType) && record.processingStatus !== 'READY') {
+    return { allowed: false, reason: 'Media is still processing' };
   }
 
   // Sender must own the file OR the file must be a chat-purpose file in the same room
