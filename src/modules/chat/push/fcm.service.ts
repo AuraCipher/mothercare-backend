@@ -86,7 +86,7 @@ export async function sendEncryptedPushToUsers(
       });
 
       const res = await Promise.race([sendPromise, timeoutPromise]);
-      sent += res.successCount;
+      sent += res?.successCount ?? 0;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('timed out') || msg.includes('timeout') || msg.includes('Timeout')) {
