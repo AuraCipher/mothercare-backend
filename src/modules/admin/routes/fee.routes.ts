@@ -3201,6 +3201,7 @@ router.post('/family-payments/allocate', asyncHandler(async (req: Request, res: 
       receiptNumber: cp.receiptNumber ?? receiptNumber,
       paymentMethod: cp.paymentMethod,
       familyName: familyNameAllocate,
+      familyTotalPaise: amountPaidPaise,
     }).catch(() => undefined);
   }
 
@@ -3395,6 +3396,7 @@ router.post('/family-payments', asyncHandler(async (req: Request, res: Response)
       receiptNumber: cp.receiptNumber ?? receiptNumber,
       paymentMethod: cp.paymentMethod,
       familyName,
+      familyTotalPaise: familyPayment.totalAmount,
     }).catch(() => undefined);
   }
 

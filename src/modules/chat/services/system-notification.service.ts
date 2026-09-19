@@ -206,9 +206,13 @@ export async function notifyFamilyPaymentReceived(input: {
   receiptNumber: string;
   paymentMethod?: string | null;
   familyName: string;
+  // M9: combined-transaction total so the message communicates BOTH the
+  // family context/total AND this student's own share (product contract).
+  familyTotalPaise: number;
 }) {
   const { title, body } = renderSystemNotificationTemplate('payment.family_received', {
     familyName: input.familyName,
+    familyTotal: formatMoneyPaise(input.familyTotalPaise),
     amount: formatMoneyPaise(input.amountPaise),
     receiptNumber: input.receiptNumber,
     methodSuffix: methodSuffix(input.paymentMethod),
@@ -222,7 +226,12 @@ export async function notifyFamilyPaymentReceived(input: {
     roomKind: 'system_payment',
     category: 'payment',
     dedupeId: `family_payment:${input.paymentId}`,
-    metadata: { paymentId: input.paymentId, familyName: input.familyName },
+    metadata: {
+      paymentId: input.paymentId,
+      familyName: input.familyName,
+      familyTotalPaise: input.familyTotalPaise,
+      sharePaise: input.amountPaise,
+    },
   });
 }
 

@@ -110,8 +110,8 @@ export const SYSTEM_NOTIFICATION_TEMPLATES: Record<string, SystemNotificationTem
     category: 'payment',
     roomKind: 'system_payment',
     title: 'Family payment received',
-    body: '{familyName} family payment of {amount} recorded. Your share: {amount}. Receipt {receiptNumber}.{methodSuffix}',
-    example: 'Khan Family family payment of Rs 12,000 recorded. Your share: Rs 4,000. Receipt FMP-88. Method: bank transfer.',
+    body: '{familyName} family payment of {familyTotal} recorded. Your share paid: {amount}. Receipt {receiptNumber}.{methodSuffix}',
+    example: 'Khan Family family payment of Rs 30,000 recorded. Your share paid: Rs 10,000. Receipt FMP-88. Method: bank transfer.',
     trigger: 'Admin records a family/sibling payment — one message per included student.',
   },
   'fee.generated': {
