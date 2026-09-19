@@ -11,11 +11,16 @@ import {
   teacherAttendanceTemplateKey,
 } from '../templates/system-notification-templates';
 import {
+  attendanceEventKey,
+  deliverAttendanceRow,
+  deliverPaymentRow,
   deliverPendingAttendanceNotifications,
   deliverPendingPaymentNotifications,
   deliverStudentSystemNotification,
   deliverTeacherAttendanceNotification,
   deliverTeacherPayrollNotification,
+  paymentEventKey,
+  withEventLock,
   type StudentSystemRoomKind,
 } from './system-room-message.service';
 
@@ -47,26 +52,30 @@ export async function queueAttendanceStatusNotification(input: {
     noteSuffix: noteSuffix(input.note),
   });
 
-  const exists = await prisma.attendanceNotification.findFirst({
-    where: { studentId: input.studentId, date: dateObj, status: input.status },
-  });
-  if (exists) {
-    if (!exists.sent) {
-      await deliverPendingAttendanceNotifications(1);
-    }
-    return exists;
-  }
-
-  const row = await prisma.attendanceNotification.create({
-    data: {
-      studentId: input.studentId,
-      date: dateObj,
-      status: input.status,
-      message: body,
+  // M7: serialize identical concurrent events so one logical event yields one
+  // outbox row (the previous findFirst-then-create raced under concurrency).
+  // Delivery runs under the same event key, so the whole row→message path is
+  // atomic per logical event.
+  const row = await withEventLock(
+    attendanceEventKey(input.studentId, dateObj, input.status),
+    async (tx) => {
+      const exists = await tx.attendanceNotification.findFirst({
+        where: { studentId: input.studentId, date: dateObj, status: input.status },
+      });
+      if (exists) return exists;
+      return tx.attendanceNotification.create({
+        data: {
+          studentId: input.studentId,
+          date: dateObj,
+          status: input.status,
+          message: body,
+        },
+      });
     },
-  });
+  );
+  if (row.sent) return row;
 
-  await deliverPendingAttendanceNotifications(1);
+  await deliverAttendanceRow(row.id);
   return row;
 }
 
@@ -164,18 +173,29 @@ export async function notifyPaymentRecorded(input: {
     methodSuffix: methodSuffix(input.paymentMethod),
   });
 
-  const row = await prisma.paymentNotification.create({
-    data: {
-      studentId: input.studentId,
-      paymentId: input.paymentId,
-      title,
-      message: body,
-      amountPaise: input.amountPaise,
-      receiptNumber: input.receiptNumber,
-    },
+  // M7: replay/ retry of the same logical payment converges to the existing
+  // outbox row instead of duplicating the student feed (previously every call
+  // inserted a row and every row produced a message).
+  const row = await withEventLock(paymentEventKey('recorded', input.paymentId, ''), async (tx) => {
+    const exists = await tx.paymentNotification.findFirst({
+      where: { paymentId: input.paymentId, kind: 'recorded' },
+    });
+    if (exists) return exists;
+    return tx.paymentNotification.create({
+      data: {
+        studentId: input.studentId,
+        paymentId: input.paymentId,
+        kind: 'recorded',
+        title,
+        message: body,
+        amountPaise: input.amountPaise,
+        receiptNumber: input.receiptNumber,
+      },
+    });
   });
+  if (row.sent) return row;
 
-  await deliverPendingPaymentNotifications(1);
+  await deliverPaymentRow(row.id);
   return row;
 }
 
@@ -219,18 +239,29 @@ export async function notifyPaymentReverted(input: {
     balanceDue: formatMoneyPaise(input.balanceDuePaise),
   });
 
-  await prisma.paymentNotification.create({
-    data: {
-      studentId: input.studentId,
-      paymentId: input.paymentId,
-      title,
-      message: body,
-      amountPaise: input.amountPaise,
-      receiptNumber: input.receiptNumber,
-    },
+  // M7: reverts live in their own dedupe namespace (`payment_reverted:`) so a
+  // revert is never swallowed as a duplicate of the recorded event, while
+  // replays of the same revert still converge.
+  const row = await withEventLock(paymentEventKey('reverted', input.paymentId, ''), async (tx) => {
+    const exists = await tx.paymentNotification.findFirst({
+      where: { paymentId: input.paymentId, kind: 'reverted' },
+    });
+    if (exists) return exists;
+    return tx.paymentNotification.create({
+      data: {
+        studentId: input.studentId,
+        paymentId: input.paymentId,
+        kind: 'reverted',
+        title,
+        message: body,
+        amountPaise: input.amountPaise,
+        receiptNumber: input.receiptNumber,
+      },
+    });
   });
+  if ((row as { sent: boolean }).sent) return row;
 
-  await deliverPendingPaymentNotifications(1);
+  await deliverPaymentRow(row.id);
 }
 
 export async function notifyFeeGenerated(input: {

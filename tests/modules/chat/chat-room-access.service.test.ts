@@ -39,7 +39,12 @@ const AY_ID = 'ay-1';
 describe('ensureChatRoomAccess', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    (prismaMock.chatRoomMember.findFirst as jest.Mock).mockResolvedValue(null);
+    // Initial hasActiveMembership check finds nothing; the post-heal final
+    // deny check finds the healed membership (M7 contract: heal then verify).
+    (prismaMock.chatRoomMember.findFirst as jest.Mock).mockReset();
+    (prismaMock.chatRoomMember.findFirst as jest.Mock)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ room: { isActive: true } });
     (prismaMock.chatRoom.findUnique as jest.Mock).mockResolvedValue({
       id: ROOM_ID,
       kind: 'school_announcement',
@@ -58,6 +63,7 @@ describe('ensureChatRoomAccess', () => {
   });
 
   test('skips healing when active membership already exists', async () => {
+    (prismaMock.chatRoomMember.findFirst as jest.Mock).mockReset();
     (prismaMock.chatRoomMember.findFirst as jest.Mock).mockResolvedValue({
       room: { isActive: true },
     });
@@ -97,7 +103,7 @@ describe('ensureChatRoomAccess', () => {
       teacherAssignmentId: null,
       isActive: true,
     });
-    (prismaMock.teacherAssignment.findFirst as jest.Mock).mockResolvedValue({ id: 'asgn-1' });
+    (prismaMock.teacherAssignment.findFirst as jest.Mock).mockResolvedValue({ id: 'asgn-1', isClassTeacher: true });
 
     await ensureChatRoomAccess('room-class', TEACHER_ID);
 
@@ -146,6 +152,8 @@ describe('ensureChatRoomAccess', () => {
 
   test('heals teacher announcement room for teachers via sync', async () => {
     (isBranchChatAdmin as jest.Mock).mockResolvedValue(false);
+    // M7: teacher heal requires a branch tie.
+    (prismaMock.branchMember.findFirst as jest.Mock).mockResolvedValue({ id: 'bm-1' });
     (prismaMock.user.findUnique as jest.Mock).mockResolvedValue({
       id: TEACHER_ID,
       role: 'teacher',
@@ -165,5 +173,22 @@ describe('ensureChatRoomAccess', () => {
     await ensureChatRoomAccess('room-teachers', TEACHER_ID);
 
     expect(syncTeacherAnnouncementMembers).toHaveBeenCalledWith(BRANCH_ID, AY_ID);
+  });
+
+  test('denies cross-branch teacher with no branch tie (no heal, deterministic 403)', async () => {
+    (isBranchChatAdmin as jest.Mock).mockResolvedValue(false);
+    (prismaMock.user.findUnique as jest.Mock).mockResolvedValue({
+      id: TEACHER_ID,
+      role: 'teacher',
+      status: 'active',
+    });
+    (prismaMock.branchMember.findFirst as jest.Mock).mockResolvedValue(null);
+    (prismaMock.teacherAssignment.findFirst as jest.Mock).mockResolvedValue(null);
+    // No membership before or after: final deny must throw.
+    (prismaMock.chatRoomMember.findFirst as jest.Mock).mockReset();
+    (prismaMock.chatRoomMember.findFirst as jest.Mock).mockResolvedValue(null);
+
+    await expect(ensureChatRoomAccess(ROOM_ID, TEACHER_ID)).rejects.toMatchObject({ status: 403 });
+    expect(ensureRoomMembership).not.toHaveBeenCalled();
   });
 });

@@ -8,11 +8,21 @@ const PORTAL_ADMIN_USER_ROLES = new Set(['super_admin', 'management']);
 const STAFF_ROLES = new Set(['teacher', 'management', 'branch_admin', 'sub_admin', 'super_admin', 'staff']);
 
 export async function getOrCreateBranchChatSettings(branchId: string) {
-  return prisma.branchChatSettings.upsert({
-    where: { branchId },
-    create: { branchId },
-    update: {},
-  });
+  // M7: concurrent first-landings raced past the implicit lookup inside
+  // upsert and collided on the create branch — converge onto the winner.
+  try {
+    return await prisma.branchChatSettings.upsert({
+      where: { branchId },
+      create: { branchId },
+      update: {},
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2002') {
+      const winner = await prisma.branchChatSettings.findUnique({ where: { branchId } });
+      if (winner) return winner;
+    }
+    throw err;
+  }
 }
 
 /** Branch admin / sub_admin membership, or super_admin with active branch membership. */

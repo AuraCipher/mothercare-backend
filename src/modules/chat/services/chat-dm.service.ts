@@ -97,14 +97,39 @@ export async function ensureDirectMessageRoom(input: {
     },
   });
 
-  await prisma.chatDmThread.create({
-    data: {
-      academicYearId: input.academicYearId,
-      roomId: room.id,
-      participantAId,
-      participantBId,
-    },
-  });
+  try {
+    await prisma.chatDmThread.create({
+      data: {
+        academicYearId: input.academicYearId,
+        roomId: room.id,
+        participantAId,
+        participantBId,
+      },
+    });
+  } catch (err: any) {
+    // M7: simultaneous initiation from both sides raced past the lookup above.
+    // Converge onto the winner's room instead of 500ing with an orphan room:
+    // remove our room (it has no members/messages yet) and return the thread
+    // that won the unique (AY, A, B) race.
+    if (err?.code === 'P2002') {
+      await prisma.chatRoom.deleteMany({ where: { id: room.id } }).catch(() => undefined);
+      const winner = await prisma.chatDmThread.findUnique({
+        where: {
+          academicYearId_participantAId_participantBId: {
+            academicYearId: input.academicYearId,
+            participantAId,
+            participantBId,
+          },
+        },
+        include: { room: true },
+      });
+      if (winner?.room) {
+        await syncDmMembershipCanPost(winner.room.id, input);
+        return winner.room;
+      }
+    }
+    throw err;
+  }
 
   await syncDmMembershipCanPost(room.id, input);
 

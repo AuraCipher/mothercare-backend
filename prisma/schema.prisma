@@ -1816,6 +1816,7 @@ model PaymentNotification {
   message       String
   amountPaise   Int?
   receiptNumber String?
+  kind          String    @default("recorded")
   sent          Boolean   @default(false)
   sentAt        DateTime?
   createdAt     DateTime  @default(now())

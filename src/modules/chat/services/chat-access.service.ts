@@ -7,7 +7,9 @@ import type { TeacherPortalPermissionsStored } from '../../teacher/permissions/t
 
 export async function assertRoomMember(roomId: string, userId: string) {
   const member = await prisma.chatRoomMember.findFirst({
-    where: { roomId, userId, leftAt: null, canRead: true },
+    // M7: deactivated/suspended users lose chat access even with rows left
+    // from when they were active (history is preserved, access is not).
+    where: { roomId, userId, leftAt: null, canRead: true, user: { status: 'active' } },
     include: { room: { select: { isActive: true, academicYearId: true } } },
   });
   if (!member || !member.room.isActive) {
@@ -57,20 +59,27 @@ export async function ensureRoomMembership(
     update.isPostingRestricted = opts.isPostingRestricted;
   }
 
-  await prisma.chatRoomMember.upsert({
-    where: { roomId_userId: { roomId, userId } },
-    create: {
-      roomId,
-      userId,
-      access: opts.access ?? 'member',
-      canPost: opts.canPost ?? false,
-      canRead: true,
-      displayTitle: opts.displayTitle ?? undefined,
-      classRoleAssignmentId: opts.classRoleAssignmentId ?? undefined,
-      isPostingRestricted: opts.isPostingRestricted ?? false,
-    },
-    update,
-  });
+  // M7: the upsert's internal lookup can race under concurrent bootstraps
+  // (observed P2002 on branchChatSettings); converge instead of failing.
+  try {
+    await prisma.chatRoomMember.upsert({
+      where: { roomId_userId: { roomId, userId } },
+      create: {
+        roomId,
+        userId,
+        access: opts.access ?? 'member',
+        canPost: opts.canPost ?? false,
+        canRead: true,
+        displayTitle: opts.displayTitle ?? undefined,
+        classRoleAssignmentId: opts.classRoleAssignmentId ?? undefined,
+        isPostingRestricted: opts.isPostingRestricted ?? false,
+      },
+      update,
+    });
+  } catch (err: any) {
+    if (err?.code !== 'P2002') throw err;
+    await prisma.chatRoomMember.updateMany({ where: { roomId, userId }, data: update });
+  }
 }
 
 export async function listUserRoomIds(userId: string, academicYearId: string): Promise<string[]> {

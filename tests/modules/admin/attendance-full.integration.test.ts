@@ -306,6 +306,12 @@ function setupAttendanceMocks() {
   (prismaMock.attendanceNotification.findFirst as jest.Mock).mockResolvedValue(null);
   (prismaMock.attendanceNotification.findMany as jest.Mock).mockResolvedValue([]);
   (prismaMock.attendanceNotification.create as jest.Mock).mockResolvedValue({ id: 'n1' });
+  // M7: outbox writes run inside an advisory-locked transaction — in the mock
+  // world the transaction passes the mock itself through as the tx client.
+  (prismaMock.$transaction as jest.Mock).mockImplementation((fn: unknown) =>
+    typeof fn === 'function' ? (fn as (tx: unknown) => unknown)(prismaMock) : fn,
+  );
+  (prismaMock.$executeRaw as jest.Mock).mockResolvedValue(1);
 
   mockTenuredBranchMember(TEACHER_ID);
 }

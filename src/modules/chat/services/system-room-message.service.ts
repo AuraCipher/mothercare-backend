@@ -49,6 +49,36 @@ export type TeacherSystemRoomKind = Extract<
   'system_teacher_attendance' | 'system_teacher_payroll'
 >;
 
+/**
+ * Serialize check+insert+mark of notification outbox rows per logical event.
+ * Postgres advisory locks are transaction-scoped (released on commit/
+ * rollback) and work across concurrent requests/workers on the same
+ * database — unlike app-level mutexes. Every path that turns an outbox row
+ * into a ChatMessage MUST go through these per-row functions so concurrent
+ * identical events converge to one message.
+ */
+export async function withEventLock<T>(key: string, fn: (tx: typeof prisma) => Promise<T>): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+    return fn(tx as typeof prisma);
+  });
+}
+
+export function attendanceEventKey(studentId: string, date: Date, status: string): string {
+  return `attendance:${studentId}:${date.toISOString().slice(0, 10)}:${status}`;
+}
+
+export function paymentEventKey(kind: string, paymentId: string | null, rowId: string): string {
+  return paymentId != null ? `payment:${kind}:${paymentId}` : `payment_notification:${rowId}`;
+}
+
+export function paymentDedupeId(kind: string, paymentId: string | null, rowId: string): string {
+  // M7: recorded and reverted events live in separate dedupe namespaces so a
+  // revert is never swallowed as a duplicate of the recorded event.
+  if (paymentId == null) return `payment_notification:${rowId}`;
+  return kind === 'reverted' ? `payment_reverted:${paymentId}` : `payment:${paymentId}`;
+}
+
 async function ensureStudentSystemRoom(studentId: string, kind: StudentSystemRoomKind) {
   const student = await prisma.student.findUnique({
     where: { id: studentId },
@@ -136,30 +166,43 @@ export async function deliverStudentSystemNotification(input: {
 }) {
   const { room } = await ensureStudentSystemRoom(input.studentId, input.roomKind);
 
-  if (input.dedupeId) {
-    const existing = await prisma.chatMessage.findFirst({
-      where: {
+  const dedupeWhere = input.dedupeId
+    ? {
         roomId: room.id,
         metadata: { path: ['dedupeId'], equals: input.dedupeId },
-      },
-    });
+      }
+    : null;
+  if (dedupeWhere) {
+    const existing = await prisma.chatMessage.findFirst({ where: dedupeWhere });
     if (existing) return { message: existing, skipped: true as const };
   }
 
-  const message = await createSystemRoomMessage({
-    roomId: room.id,
-    title: input.title,
-    content: input.body,
-    metadata: {
+  // M7: the unique index (roomId, dedupeId, content-hash) turns a concurrent
+  // identical-insert race into a P2002 — adopt the winner instead of 500ing.
+  try {
+    const message = await createSystemRoomMessage({
+      roomId: room.id,
+      title: input.title,
+      content: input.body,
+      metadata: {
       templateKey: input.templateKey,
       category: input.category,
       audience: 'student',
-      dedupeId: input.dedupeId,
-      ...input.metadata,
-    },
-  });
+        dedupeId: input.dedupeId,
+        ...input.metadata,
+      },
+    });
 
-  return { message, skipped: false as const };
+    return { message, skipped: false as const };
+  } catch (err: any) {
+    if (!input.dedupeId || err?.code !== 'P2002') throw err;
+    const winner = await prisma.chatMessage.findFirst({
+      where: dedupeWhere as never,
+      orderBy: { createdAt: 'asc' },
+    });
+    if (winner) return { message: winner, skipped: true as const };
+    throw err;
+  }
 }
 
 export async function deliverTeacherAttendanceNotification(input: {
@@ -179,30 +222,43 @@ export async function deliverTeacherAttendanceNotification(input: {
     'system_teacher_attendance',
   );
 
-  if (input.dedupeId) {
-    const existing = await prisma.chatMessage.findFirst({
-      where: {
+  const dedupeWhere = input.dedupeId
+    ? {
         roomId: room.id,
         metadata: { path: ['dedupeId'], equals: input.dedupeId },
-      },
-    });
+      }
+    : null;
+  if (dedupeWhere) {
+    const existing = await prisma.chatMessage.findFirst({ where: dedupeWhere });
     if (existing) return { message: existing, skipped: true as const };
   }
 
-  const message = await createSystemRoomMessage({
-    roomId: room.id,
-    title: input.title,
-    content: input.body,
-    metadata: {
+  // M7: the unique index (roomId, dedupeId, content-hash) turns a concurrent
+  // identical-insert race into a P2002 — adopt the winner instead of 500ing.
+  try {
+    const message = await createSystemRoomMessage({
+      roomId: room.id,
+      title: input.title,
+      content: input.body,
+      metadata: {
       templateKey: input.templateKey,
       category: 'attendance',
       audience: 'teacher',
-      dedupeId: input.dedupeId,
-      ...input.metadata,
-    },
-  });
+        dedupeId: input.dedupeId,
+        ...input.metadata,
+      },
+    });
 
-  return { message, skipped: false as const };
+    return { message, skipped: false as const };
+  } catch (err: any) {
+    if (!input.dedupeId || err?.code !== 'P2002') throw err;
+    const winner = await prisma.chatMessage.findFirst({
+      where: dedupeWhere as never,
+      orderBy: { createdAt: 'asc' },
+    });
+    if (winner) return { message: winner, skipped: true as const };
+    throw err;
+  }
 }
 
 export async function deliverTeacherPayrollNotification(input: {
@@ -222,30 +278,43 @@ export async function deliverTeacherPayrollNotification(input: {
     'system_teacher_payroll',
   );
 
-  if (input.dedupeId) {
-    const existing = await prisma.chatMessage.findFirst({
-      where: {
+  const dedupeWhere = input.dedupeId
+    ? {
         roomId: room.id,
         metadata: { path: ['dedupeId'], equals: input.dedupeId },
-      },
-    });
+      }
+    : null;
+  if (dedupeWhere) {
+    const existing = await prisma.chatMessage.findFirst({ where: dedupeWhere });
     if (existing) return { message: existing, skipped: true as const };
   }
 
-  const message = await createSystemRoomMessage({
-    roomId: room.id,
-    title: input.title,
-    content: input.body,
-    metadata: {
+  // M7: the unique index (roomId, dedupeId, content-hash) turns a concurrent
+  // identical-insert race into a P2002 — adopt the winner instead of 500ing.
+  try {
+    const message = await createSystemRoomMessage({
+      roomId: room.id,
+      title: input.title,
+      content: input.body,
+      metadata: {
       templateKey: input.templateKey,
       category: 'payroll',
       audience: 'teacher',
-      dedupeId: input.dedupeId,
-      ...input.metadata,
-    },
-  });
+        dedupeId: input.dedupeId,
+        ...input.metadata,
+      },
+    });
 
-  return { message, skipped: false as const };
+    return { message, skipped: false as const };
+  } catch (err: any) {
+    if (!input.dedupeId || err?.code !== 'P2002') throw err;
+    const winner = await prisma.chatMessage.findFirst({
+      where: dedupeWhere as never,
+      orderBy: { createdAt: 'asc' },
+    });
+    if (winner) return { message: winner, skipped: true as const };
+    throw err;
+  }
 }
 
 export async function deliverPendingAttendanceNotifications(limit = 100) {
@@ -258,35 +327,70 @@ export async function deliverPendingAttendanceNotifications(limit = 100) {
   let delivered = 0;
   for (const row of pending) {
     try {
-      const { room } = await ensureStudentSystemRoom(row.studentId, 'system_attendance');
-      const message = await createSystemRoomMessage({
-        roomId: room.id,
-        title: 'Attendance update',
-        content: row.message,
-        metadata: {
-          templateKey: `attendance.${row.status}`,
-          category: 'attendance',
-          audience: 'student',
-          dedupeId: `attendance:${row.studentId}:${row.date.toISOString().slice(0, 10)}:${row.status}`,
-          attendanceNotificationId: row.id,
-        },
-      });
-      await prisma.attendanceNotification.update({
-        where: { id: row.id },
-        data: {
-          sent: true,
-          sentAt: new Date(),
-          roomId: room.id,
-          chatMessageId: message.id,
-        },
-      });
-      delivered++;
+      if (await deliverAttendanceRow(row.id)) delivered++;
     } catch (err) {
       console.error('Failed to deliver attendance notification', row.id, err);
     }
   }
 
   return { delivered, pending: pending.length };
+}
+
+/** Deliver ONE attendance outbox row under its event lock. Returns true if a message was inserted. */
+export async function deliverAttendanceRow(rowId: string): Promise<boolean> {
+  const row = await prisma.attendanceNotification.findUnique({ where: { id: rowId } });
+  if (!row || row.sent) return false;
+  // M7: heavy bootstrap runs outside any lock (idempotent + P2002-convergent).
+  const { room } = await ensureStudentSystemRoom(row.studentId, 'system_attendance');
+  const dedupeId = `attendance:${row.studentId}:${row.date.toISOString().slice(0, 10)}:${row.status}`;
+  const where = {
+    roomId: room.id,
+    title: 'Attendance update',
+    content: row.message,
+    metadata: { path: ['dedupeId'], equals: dedupeId },
+  };
+  // M7: an identical message already covering this event (replay, retry, or
+  // a concurrent winner) converges instead of duplicating. Content must
+  // match: a re-mark with different content is new information and delivers.
+  const covered = await prisma.chatMessage.findFirst({ where, select: { id: true } });
+  if (covered) {
+    await prisma.attendanceNotification.update({
+      where: { id: row.id },
+      data: { sent: true, sentAt: new Date(), roomId: room.id, chatMessageId: covered.id },
+    });
+    return false;
+  }
+  // M7: lock-free convergence — the unique index (roomId, dedupeId,
+  // content-hash) makes concurrent identical inserts collide at the
+  // database; the loser adopts the winner. (Holding pooled transactions
+  // while serialized on advisory locks starved the pool under bursts.)
+  try {
+    const message = await createSystemRoomMessage({
+      roomId: room.id,
+      title: 'Attendance update',
+      content: row.message,
+      metadata: {
+        templateKey: `attendance.${row.status}`,
+        category: 'attendance',
+        audience: 'student',
+        dedupeId,
+        attendanceNotificationId: row.id,
+      },
+    });
+    await prisma.attendanceNotification.update({
+      where: { id: row.id },
+      data: { sent: true, sentAt: new Date(), roomId: room.id, chatMessageId: message.id },
+    });
+    return true;
+  } catch (err: any) {
+    if (err?.code !== 'P2002') throw err;
+    const winner = await prisma.chatMessage.findFirst({ where, select: { id: true }, orderBy: { createdAt: 'asc' } });
+    await prisma.attendanceNotification.update({
+      where: { id: row.id },
+      data: { sent: true, sentAt: new Date(), roomId: room.id, chatMessageId: winner?.id ?? null },
+    });
+    return false;
+  }
 }
 
 export async function deliverPendingPaymentNotifications(limit = 100) {
@@ -299,32 +403,63 @@ export async function deliverPendingPaymentNotifications(limit = 100) {
   let delivered = 0;
   for (const row of pending) {
     try {
-      const { room } = await ensureStudentSystemRoom(row.studentId, 'system_payment');
-      const message = await createSystemRoomMessage({
-        roomId: room.id,
-        title: row.title,
-        content: row.message,
-        metadata: {
-          category: 'payment',
-          audience: 'student',
-          dedupeId: row.paymentId ? `payment:${row.paymentId}` : `payment_notification:${row.id}`,
-          paymentNotificationId: row.id,
-        },
-      });
-      await prisma.paymentNotification.update({
-        where: { id: row.id },
-        data: {
-          sent: true,
-          sentAt: new Date(),
-          roomId: room.id,
-          chatMessageId: message.id,
-        },
-      });
-      delivered++;
+      if (await deliverPaymentRow(row.id)) delivered++;
     } catch (err) {
       console.error('Failed to deliver payment notification', row.id, err);
     }
   }
 
   return { delivered, pending: pending.length };
+}
+
+/** Deliver ONE payment outbox row. Lock-free P2002-converge (see deliverAttendanceRow). */
+export async function deliverPaymentRow(rowId: string): Promise<boolean> {
+  const row = await prisma.paymentNotification.findUnique({ where: { id: rowId } });
+  if (!row || row.sent) return false;
+  // M7: heavy bootstrap runs outside any lock (see deliverAttendanceRow).
+  const { room } = await ensureStudentSystemRoom(row.studentId, 'system_payment');
+  const kind = (row as { kind?: string }).kind ?? 'recorded';
+  const dedupeId = paymentDedupeId(kind, row.paymentId, row.id);
+  const where = {
+    roomId: room.id,
+    title: row.title,
+    content: row.message,
+    metadata: { path: ['dedupeId'], equals: dedupeId },
+  };
+  // M7: identical replay converges (same namespace + same content);
+  // differing content still delivers.
+  const covered = await prisma.chatMessage.findFirst({ where, select: { id: true } });
+  if (covered) {
+    await prisma.paymentNotification.update({
+      where: { id: row.id },
+      data: { sent: true, sentAt: new Date(), roomId: room.id, chatMessageId: covered.id },
+    });
+    return false;
+  }
+  try {
+    const message = await createSystemRoomMessage({
+      roomId: room.id,
+      title: row.title,
+      content: row.message,
+      metadata: {
+        category: 'payment',
+        audience: 'student',
+        dedupeId,
+        paymentNotificationId: row.id,
+      },
+    });
+    await prisma.paymentNotification.update({
+      where: { id: row.id },
+      data: { sent: true, sentAt: new Date(), roomId: room.id, chatMessageId: message.id },
+    });
+    return true;
+  } catch (err: any) {
+    if (err?.code !== 'P2002') throw err;
+    const winner = await prisma.chatMessage.findFirst({ where, select: { id: true }, orderBy: { createdAt: 'asc' } });
+    await prisma.paymentNotification.update({
+      where: { id: row.id },
+      data: { sent: true, sentAt: new Date(), roomId: room.id, chatMessageId: winner?.id ?? null },
+    });
+    return false;
+  }
 }

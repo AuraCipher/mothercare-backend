@@ -1877,6 +1877,24 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
     console.error('Receipt snapshot creation failed (waterfall):', (snapErr as Error).message);
   }
 
+  // M7: waterfall payments notify exactly like single payments — one message
+  // per created Payment row. Post-commit fire-and-forget, same as /payments.
+  for (const a of allocations) {
+    const fee = feeById.get(a.studentFeeId) as any;
+    if (!fee) continue;
+    void notifyPaymentRecorded({
+      studentId,
+      paymentId: a.id,
+      amountPaise: a.amount,
+      receiptNumber: a.receiptNumber,
+      paymentMethod: paymentMethod || 'CASH',
+      month: fee.month,
+      year: fee.year,
+      balanceDuePaise: Math.max(0, balanceAfter),
+      feeStatus: fee.status ?? 'PARTIAL',
+    }).catch(() => undefined);
+  }
+
   res.status(201).json({
     success: true,
     data: {
@@ -2206,6 +2224,25 @@ router.post('/payments/allocate', asyncHandler(async (req: Request, res: Respons
     );
   } catch (snapErr) {
     console.error('Receipt snapshot creation failed (allocate):', (snapErr as Error).message);
+  }
+
+  // M7: allocated payments notify exactly like single payments — one message
+  // per created Payment row. Post-commit fire-and-forget, same as /payments.
+  const touchedById = new Map(touchedFees.map((f: any) => [f.id, f]));
+  for (const p of payments) {
+    const fee = touchedById.get((p as any).studentFeeId) as any;
+    if (!fee) continue;
+    void notifyPaymentRecorded({
+      studentId,
+      paymentId: (p as any).id,
+      amountPaise: (p as any).amount,
+      receiptNumber: (p as any).receiptNumber,
+      paymentMethod: paymentMethod || 'CASH',
+      month: fee.month,
+      year: fee.year,
+      balanceDuePaise: Math.max(0, balanceAfter),
+      feeStatus: fee.status ?? 'PARTIAL',
+    }).catch(() => undefined);
   }
 
   res.status(201).json({

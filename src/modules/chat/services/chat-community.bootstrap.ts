@@ -30,22 +30,32 @@ async function ensureRoom(input: EnsureRoomInput) {
     return existing;
   }
 
-  return prisma.chatRoom.create({
-    data: {
-      academicYearId: input.academicYearId,
-      branchId: input.branchId,
-      kind: input.kind,
-      name: input.name,
-      singletonKey: input.singletonKey,
-      source: input.source ?? 'system_bootstrap',
-      communityId: input.communityId,
-      classGroupId: input.classGroupId,
-      studentId: input.studentId,
-      onlyStaffCanPost: input.onlyStaffCanPost ?? false,
-      studentsCanPost: input.studentsCanPost ?? false,
-      description: input.description,
-    },
-  });
+  try {
+    return await prisma.chatRoom.create({
+      data: {
+        academicYearId: input.academicYearId,
+        branchId: input.branchId,
+        kind: input.kind,
+        name: input.name,
+        singletonKey: input.singletonKey,
+        source: input.source ?? 'system_bootstrap',
+        communityId: input.communityId,
+        classGroupId: input.classGroupId,
+        studentId: input.studentId,
+        onlyStaffCanPost: input.onlyStaffCanPost ?? false,
+        studentsCanPost: input.studentsCanPost ?? false,
+        description: input.description,
+      },
+    });
+  } catch (err: any) {
+    // M7: concurrent bootstraps raced past the lookup above. Converge onto
+    // the winner's room instead of failing the whole operation.
+    if (err?.code === 'P2002') {
+      const winner = await prisma.chatRoom.findUnique({ where: { singletonKey: input.singletonKey } });
+      if (winner) return winner;
+    }
+    throw err;
+  }
 }
 
 /** Ensure the singleton school announcement room for a branch + academic year. */
@@ -82,12 +92,20 @@ export async function ensureStudentChatBootstrap(input: StudentChatBootstrapInpu
 
   let community = await prisma.chatCommunity.findUnique({ where: { groupId: input.groupId } });
   if (!community) {
-    community = await prisma.chatCommunity.create({
-      data: {
-        academicYearId: input.academicYearId,
-        groupId: input.groupId,
-      },
-    });
+    try {
+      community = await prisma.chatCommunity.create({
+        data: {
+          academicYearId: input.academicYearId,
+          groupId: input.groupId,
+        },
+      });
+    } catch (err: any) {
+      // M7: concurrent bootstraps raced past the lookup — converge.
+      if (err?.code === 'P2002') {
+        community = await prisma.chatCommunity.findUnique({ where: { groupId: input.groupId } });
+      }
+      if (!community) throw err;
+    }
   }
 
   const schoolRoom = await ensureSchoolAnnouncementRoom(input.branchId, input.academicYearId);
