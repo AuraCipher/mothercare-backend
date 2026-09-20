@@ -16,6 +16,19 @@ let io: Server | null = null;
 let redisPub: Redis | null = null;
 let redisSub: Redis | null = null;
 
+/** M11: push-fanout allowlist as a pure, unit-testable predicate.
+ *  Subject group_chats intentionally emit socket only (no push). */
+const CHAT_PUSH_FANOUT_KINDS = new Set([
+  'school_announcement',
+  'class_announcement',
+  'teacher_announcement',
+  'direct_message',
+]);
+
+export function shouldEnqueueChatPush(roomKind: string): boolean {
+  return CHAT_PUSH_FANOUT_KINDS.has(roomKind);
+}
+
 async function authenticateSocket(socket: Socket): Promise<{ id: string; role: string; name: string } | null> {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.toString().replace(/^Bearer\s+/i, '');
   if (!token) return null;
@@ -143,13 +156,7 @@ export async function initChatSocket(server: HttpServer): Promise<Server | null>
         ack({ ok: true, message: envelope, duplicate });
 
         const roomKind = message.room.kind;
-        const pushKinds = new Set([
-          'school_announcement',
-          'class_announcement',
-          'teacher_announcement',
-          'direct_message',
-        ]);
-        if (!pushKinds.has(roomKind)) {
+        if (!shouldEnqueueChatPush(roomKind)) {
           return;
         }
 
