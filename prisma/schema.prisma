@@ -2579,6 +2579,9 @@ model FamilyPayment {
   recordedById  String
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  // M14: request-scoped idempotency for lost-response retries. Nullable so
+  // legacy rows are unaffected (Postgres treats NULLs as distinct).
+  idempotencyKey String?  @unique
 
   family     Family    @relation(fields: [familyId], references: [id])
   payments   Payment[]
@@ -2591,6 +2594,23 @@ model FamilyPayment {
 }
 
 // Combined family receipt snapshot — one per FamilyPayment (FMP-…)
+// M14.1: request-scoped idempotency ledger for batch payment operations
+// (waterfall / allocate-single) that create N Payment rows and therefore
+// cannot reuse Payment.idempotencyKey per request. Written atomically inside
+// the financial transaction: commit == effect + identity together.
+model PaymentOperation {
+  id             String   @id @default(uuid())
+  idempotencyKey String   @unique
+  route          String
+  studentId      String?
+  familyId       String?
+  result         Json
+  createdAt      DateTime @default(now())
+
+  @@index([studentId])
+  @@map("payment_operations")
+}
+
 model FamilyPaymentReceipt {
   id                String   @id @default(uuid())
   familyPaymentId   String   @unique

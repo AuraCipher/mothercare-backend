@@ -108,30 +108,24 @@ export class UploadTransferService {
   async transferChunk(req: ChunkRequest): Promise<ChunkResult> {
     const { clientOffset, contentLength } = parseChunkHeaders(req.offsetHeader, req.contentLengthHeader);
     if (!req.userId) {
-      destroyBody(req.body);
       throw { status: 401, message: 'Authentication required' };
     }
 
     const session = await prisma.uploadSession.findUnique({ where: { id: req.sessionId } });
     if (!session || session.userId !== req.userId) {
-      destroyBody(req.body);
       throw { status: 404, message: 'Upload session not found' };
     }
     if (isSessionExpired(session)) {
-      destroyBody(req.body);
       throw { status: 410, message: 'Upload session expired' };
     }
     if (isTerminalStatus(session.status) || session.status === 'COMPLETING') {
-      destroyBody(req.body);
       throw { status: 409, message: `Upload session is already ${session.status}` };
     }
     if (session.status !== 'INITIATED' && session.status !== 'UPLOADING') {
-      destroyBody(req.body);
       throw { status: 409, message: `Upload session is already ${session.status}` };
     }
     // Authoritative offset check FIRST — stale/future offsets never touch R2.
     if (clientOffset !== session.bytesUploaded) {
-      destroyBody(req.body);
       throw {
         status: 409,
         message: `Stale offset (server is at ${session.bytesUploaded})`,
@@ -139,24 +133,20 @@ export class UploadTransferService {
       };
     }
     if (clientOffset > session.expectedSize) {
-      destroyBody(req.body);
       throw { status: 413, message: 'Offset exceeds expected size' };
     }
     const remaining = session.expectedSize - clientOffset;
     if (contentLength > remaining) {
-      destroyBody(req.body);
       throw { status: 413, message: `Chunk exceeds remaining bytes (${remaining})` };
     }
     const isFinal = contentLength === remaining;
     if (!isFinal && contentLength !== TRANSFER_PART_SIZE) {
-      destroyBody(req.body);
       throw {
         status: 400,
         message: `Non-final chunks must be exactly ${TRANSFER_PART_SIZE / 1024 / 1024}MB`,
       };
     }
     if (clientOffset % TRANSFER_PART_SIZE !== 0) {
-      destroyBody(req.body);
       throw { status: 409, message: 'Session offset is not part-aligned' };
     }
     const partNumber = Math.floor(clientOffset / TRANSFER_PART_SIZE) + 1;

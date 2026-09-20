@@ -34,6 +34,93 @@ function branchDenied(res: Response, what = 'Target') {
   res.status(403).json({ success: false, message: `${what} does not belong to the requested branch` });
 }
 
+/** M14: request-scoped idempotency for family payments (lost-response
+ *  retries must not duplicate the financial effect). Clients mint a fresh
+ *  key per logical operation; replays converge onto the existing header. */
+async function findFamilyPaymentReplay(familyId: string, key: string) {
+  return prisma.familyPayment.findFirst({
+    where: { idempotencyKey: key, familyId },
+    include: {
+      payments: { select: { id: true, studentId: true, studentFeeId: true, amount: true, receiptNumber: true } },
+    },
+  });
+}
+
+/** M14.1: same post-winner fallback as replayIfCompleted, but for the
+ *  FamilyPayment header ledger. */
+async function replayFamilyIfCompleted(
+  res: Response,
+  familyId: string,
+  key: string | undefined,
+): Promise<boolean> {
+  if (!key) return false;
+  const replay = await prisma.familyPayment.findFirst({
+    where: { idempotencyKey: key, familyId },
+    include: {
+      payments: { select: { id: true, studentId: true, studentFeeId: true, amount: true, receiptNumber: true } },
+    },
+  }).catch(() => null);
+  if (!replay) return false;
+  res.json({ success: true, data: familyReplayData(replay as never), idempotent: true });
+  return true;
+}
+
+function familyReplayData(fp: {
+  receiptNumber: string; totalAmount: number;
+  payments: Array<{ id: string; studentId: string; studentFeeId: string; amount: number; receiptNumber: string }>;
+}) {
+  return {
+    familyPayment: fp,
+    receiptNumber: fp.receiptNumber,
+    totalAmount: fp.totalAmount,
+    paymentCount: fp.payments.length,
+    payments: fp.payments.map(p => ({ id: p.id, studentId: p.studentId, studentFeeId: p.studentFeeId, amount: p.amount, receiptNumber: p.receiptNumber })),
+  };
+}
+
+/** M14.1: keys are opaque client-minted request identities (UUIDv4
+ * recommended). Malformed keys are rejected before any financial effect. */
+function assertValidIdempotencyKey(key: unknown): asserts key is string {
+  if (key === undefined || key === null) return;
+  if (typeof key !== 'string' || key.trim().length === 0 || key.length > 128) {
+    throw { status: 400, message: 'idempotencyKey must be a non-empty string up to 128 characters' };
+  }
+}
+
+function isIdempotencyConflict(err: any): boolean {
+  const t = err?.meta?.target;
+  return err?.code === 'P2002' && (Array.isArray(t) ? t.includes('idempotencyKey') : t === 'idempotencyKey');
+}
+
+/** M14.1: replay lookup for batch-operation keys. Scope is part of the
+ *  identity: a key reused for a different route/student is a client bug,
+ *  answered 409 — never the wrong student's result, never a new effect. */
+/** M14.1: when a keyed request fails AFTER the winner may have committed
+ *  (e.g. a loser that waited on row locks finds nothing left to do), a
+ *  same-key op row proves the operation already happened — converge onto it
+ *  instead of reporting a confusing error for a successful payment. */
+async function replayIfCompleted(
+  res: Response,
+  route: string,
+  studentId: string,
+  key: string | undefined,
+): Promise<boolean> {
+  if (!key) return false;
+  const replay = await findOperationReplay(route, studentId, key).catch(() => null);
+  if (!replay) return false;
+  res.json({ success: true, data: replay.result, idempotent: true });
+  return true;
+}
+
+async function findOperationReplay(route: string, studentId: string, key: string) {
+  const op = await prisma.paymentOperation.findUnique({ where: { idempotencyKey: key } });
+  if (!op) return null;
+  if (op.route !== route || op.studentId !== studentId) {
+    throw { status: 409, message: 'Idempotency key was already used for a different operation' };
+  }
+  return op;
+}
+
 const router = Router();
 
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
@@ -1738,7 +1825,15 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
 
 // POST /admin/payments/waterfall — Waterfall payment across unpaid months (oldest first)
 router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Response) => {
-  const { studentId, amount, paymentMethod, reference, note } = req.body;
+  const { studentId, amount, paymentMethod, reference, note, idempotencyKey } = req.body;
+  assertValidIdempotencyKey(idempotencyKey);
+  if (idempotencyKey) {
+    const replay = await findOperationReplay('waterfall', studentId, idempotencyKey);
+    if (replay) {
+      res.json({ success: true, data: replay.result, idempotent: true });
+      return;
+    }
+  }
   if (!studentId || !amount || amount <= 0) {
     res.status(400).json({ success: false, message: 'studentId and amount (>0) required' });
     return;
@@ -1833,14 +1928,42 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
           });
         }
 
+        if (idempotencyKey) {
+          await tx.paymentOperation.create({
+            data: {
+              idempotencyKey,
+              route: 'waterfall',
+              studentId,
+              result: {
+                receiptNumber: receiptBase,
+                totalAmount: amount,
+                allocations: allocs.map((a: any) => ({ id: a.id, studentFeeId: a.studentFeeId, amount: a.amount, receiptNumber: a.receiptNumber })),
+                monthsCovered: allocs.length,
+              },
+            },
+          });
+        }
+
         return allocs;
       });
     }, 'RCP');
     allocations = result.result;
     receiptNumber = result.receiptNumber;
   } catch (waterfallErr: any) {
+    if (idempotencyKey && isIdempotencyConflict(waterfallErr)) {
+      const replay = await findOperationReplay('waterfall', studentId, idempotencyKey);
+      if (replay) {
+        res.json({ success: true, data: replay.result, idempotent: true });
+        return;
+      }
+    }
+    if (idempotencyKey && (await replayIfCompleted(res, 'waterfall', studentId, idempotencyKey))) return;
     if (waterfallErr.status === 400 || waterfallErr.statusCode === 400) {
       res.status(400).json({ success: false, message: waterfallErr.message });
+      return;
+    }
+    if (waterfallErr.status === 409) {
+      res.status(409).json({ success: false, message: waterfallErr.message });
       return;
     }
     throw waterfallErr;
@@ -1965,7 +2088,8 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
 // transaction — it never trusts client-sent due amounts, only client-sent
 // *selection* (which studentFeeId/feeHeadId/feeExtraItemId got how much).
 router.post('/payments/allocate', asyncHandler(async (req: Request, res: Response) => {
-  const { studentId, amountPaidPaise, paymentMethod, reference, note, previousMonths, currentMonth } = req.body;
+  const { studentId, amountPaidPaise, paymentMethod, reference, note, previousMonths, currentMonth, idempotencyKey } = req.body;
+  assertValidIdempotencyKey(idempotencyKey);
   const userId = (req as any).user?.id;
 
   if (!studentId || !amountPaidPaise || amountPaidPaise <= 0) {
@@ -1978,6 +2102,14 @@ router.post('/payments/allocate', asyncHandler(async (req: Request, res: Respons
       select: { academicYear: { select: { branchId: true } } },
     });
     if (targetBranchMismatch(req, st?.academicYear?.branchId)) { branchDenied(res, 'Student'); return; }
+  }
+  // M14.1: same-key replay converges (scope-checked inside the lookup).
+  if (idempotencyKey) {
+    const replay = await findOperationReplay('allocate', studentId, idempotencyKey);
+    if (replay) {
+      res.json({ success: true, data: replay.result, idempotent: true });
+      return;
+    }
   }
   const prevList: { studentFeeId: string; amountPaise: number }[] = Array.isArray(previousMonths) ? previousMonths : [];
   const curHeads: { feeHeadId?: string; headName?: string; amountPaise: number }[] =
@@ -2147,14 +2279,41 @@ router.post('/payments/allocate', asyncHandler(async (req: Request, res: Respons
           });
         }
 
+        if (idempotencyKey) {
+          await tx.paymentOperation.create({
+            data: {
+              idempotencyKey,
+              route: 'allocate',
+              studentId,
+              result: {
+                receiptNumber: receiptBase,
+                totalAmount: amountPaidPaise,
+                payments: createdPayments.map((x: any) => ({ id: x.id, studentFeeId: x.studentFeeId, amount: x.amount, receiptNumber: x.receiptNumber })),
+              },
+            },
+          });
+        }
+
         return createdPayments;
       });
     }, 'RCP');
     payments = result.result;
     receiptNumber = result.receiptNumber;
   } catch (allocErr: any) {
+    if (idempotencyKey && isIdempotencyConflict(allocErr)) {
+      const replay = await findOperationReplay('allocate', studentId, idempotencyKey);
+      if (replay) {
+        res.json({ success: true, data: replay.result, idempotent: true });
+        return;
+      }
+    }
+    if (idempotencyKey && (await replayIfCompleted(res, 'allocate', studentId, idempotencyKey))) return;
     if (allocErr.status === 400 || allocErr.statusCode === 400) {
       res.status(400).json({ success: false, message: allocErr.message });
+      return;
+    }
+    if (allocErr.status === 409) {
+      res.status(409).json({ success: false, message: allocErr.message });
       return;
     }
     throw allocErr;
@@ -3111,7 +3270,8 @@ async function executeStudentAllocInTx(
 
 // POST /admin/family-payments/allocate — Family payment with per-student head allocation
 router.post('/family-payments/allocate', asyncHandler(async (req: Request, res: Response) => {
-  const { familyId, academicYearId, amountPaidPaise, paymentMethod, reference, note, students } = req.body;
+  const { familyId, academicYearId, amountPaidPaise, paymentMethod, reference, note, students, idempotencyKey } = req.body;
+  assertValidIdempotencyKey(idempotencyKey);
   const userId = (req as any).user?.id;
 
   if (!familyId || !amountPaidPaise || amountPaidPaise <= 0) {
@@ -3179,6 +3339,14 @@ router.post('/family-payments/allocate', asyncHandler(async (req: Request, res: 
     return;
   }
 
+  if (idempotencyKey) {
+    const replay = await findFamilyPaymentReplay(familyId, idempotencyKey);
+    if (replay) {
+      res.json({ success: true, data: familyReplayData(replay as never), idempotent: true });
+      return;
+    }
+  }
+
   let familyPayment: any;
   let allPayments: any[] = [];
   let receiptNumber = '';
@@ -3194,6 +3362,7 @@ router.post('/family-payments/allocate', asyncHandler(async (req: Request, res: 
             academicYearId: ayId,
             receiptNumber: fmpBase,
             totalAmount: amountPaidPaise,
+            idempotencyKey: idempotencyKey || undefined,
             paymentMethod: paymentMethod || 'CASH',
             reference: reference || null,
             recordedById: userId,
@@ -3256,6 +3425,14 @@ router.post('/family-payments/allocate', asyncHandler(async (req: Request, res: 
     allPayments = result.result.payments;
     receiptNumber = result.receiptNumber;
   } catch (err: any) {
+    if (idempotencyKey && isIdempotencyConflict(err)) {
+      const replay = await findFamilyPaymentReplay(familyId, idempotencyKey);
+      if (replay) {
+        res.json({ success: true, data: familyReplayData(replay as never), idempotent: true });
+        return;
+      }
+    }
+    if ((req.body as any)?.idempotencyKey && (await replayFamilyIfCompleted(res, familyId, (req.body as any).idempotencyKey))) return;
     const status = err.status || err.statusCode || 500;
     res.status(status).json({ success: false, message: err.message || 'Family allocation payment failed' });
     return;
@@ -3361,7 +3538,15 @@ router.post('/family-payments/allocate', asyncHandler(async (req: Request, res: 
 
 // POST /admin/family-payments — Record combined sibling payment
 router.post('/family-payments', asyncHandler(async (req: Request, res: Response) => {
-  const { familyId, payments, academicYearId } = req.body;
+  const { familyId, payments, academicYearId, idempotencyKey } = req.body;
+  assertValidIdempotencyKey(idempotencyKey);
+  if (idempotencyKey) {
+    const replay = await findFamilyPaymentReplay(familyId, idempotencyKey);
+    if (replay) {
+      res.json({ success: true, data: familyReplayData(replay as never), idempotent: true });
+      return;
+    }
+  }
   if (!familyId || !payments || !Array.isArray(payments) || payments.length === 0) {
     res.status(400).json({ success: false, message: 'familyId and payments[] required' });
     return;
@@ -3471,6 +3656,7 @@ router.post('/family-payments', asyncHandler(async (req: Request, res: Response)
             academicYearId: ayId,
             receiptNumber: rn,
             totalAmount: batchTotal,
+            idempotencyKey: (req.body as any)?.idempotencyKey || undefined,
             recordedById: userId,
             payments: { connect: batchPayments.map(p => ({ id: p.id })) },
           },
@@ -3486,6 +3672,15 @@ router.post('/family-payments', asyncHandler(async (req: Request, res: Response)
     totalAmount = result.result.totalAmount;
     receiptNumber = result.receiptNumber;
   } catch (err: any) {
+    const key = (req.body as any)?.idempotencyKey;
+    if (key && isIdempotencyConflict(err)) {
+      const replay = await findFamilyPaymentReplay(familyId, key);
+      if (replay) {
+        res.json({ success: true, data: familyReplayData(replay as never), idempotent: true });
+        return;
+      }
+    }
+    if ((req.body as any)?.idempotencyKey && (await replayFamilyIfCompleted(res, familyId, (req.body as any).idempotencyKey))) return;
     const status = err.status || err.statusCode || 500;
     res.status(status).json({ success: false, message: err.message || 'Family payment failed' });
     return;
