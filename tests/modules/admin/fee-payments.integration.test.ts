@@ -437,6 +437,8 @@ describe('POST /admin/family-payments — sticker receipt uses merged heads', ()
         findMany: jest.fn().mockResolvedValue([{ ...fee, academicYearId: 'ay1' }]),
         update: jest.fn().mockResolvedValue({}),
       },
+      // M12: membership check inside the txn (student s1 is a member here).
+      family: { findUnique: jest.fn().mockResolvedValue({ students: [{ id: 's1' }] }) },
       payment: {
         create: jest.fn().mockResolvedValue({
           id: 'p1', studentFeeId: 'sf-jul', studentId: 's1', amount: 100000,

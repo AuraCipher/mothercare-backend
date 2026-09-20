@@ -122,14 +122,15 @@ describe('M12 individual lifecycle + partials + invariants', () => {
       pay(ids.feeA2, 25000, { idempotencyKey: key }),
       pay(ids.feeA2, 25000, { idempotencyKey: key }),
     ]);
-    console.log('IDEMSTAT:', r1.status, r2.status);
-    console.log('IDEMBODIES:', JSON.stringify(r1.body).slice(0, 250), '|', JSON.stringify(r2.body).slice(0, 250));
     const statuses = [r1.status, r2.status].sort();
     expect(statuses).toEqual([200, 201]);
+    console.log('DB2:', JSON.stringify(r2.body).slice(0, 200));
     const winner = r1.status === 201 ? r1 : r2;
     const replay = r1.status === 200 ? r1 : r2;
     expect(replay.body?.idempotent).toBe(true);
-    expect(replay.body?.data?.id).toBe(winner.body?.data?.id);
+    // Winner nests under data.payment; replay returns the row directly.
+    const winnerId = winner.body?.data?.payment?.id ?? winner.body?.data?.id;
+    expect(replay.body?.data?.id).toBe(winnerId);
     expect(await prisma.payment.count({ where: { studentFeeId: ids.feeA2, revertedAt: null } })).toBe(1);
     const fee = await prisma.studentFee.findUnique({ where: { id: ids.feeA2 } });
     expect(fee?.paidAmount).toBe(25000);

@@ -19,6 +19,21 @@ import {
   notifyFamilyPaymentReceived,
 } from '../../chat/services/system-notification.service';
 
+/** M12 cross-branch guard: the target academic year's branch must match
+ * the request's explicit branch (web scope always sends it; branchScope +
+ * staff-permission middleware already scoped THAT branch to the caller).
+ * Skips when either side is unresolvable (mocked unit tests return undefined).
+ * Without this, any branch admin could operate on any branch's finances by
+ * passing their own branchId. */
+function targetBranchMismatch(req: Request, targetBranchId?: string | null): boolean {
+  const explicit = (req.query.branchId as string) || (req.body as any)?.branchId;
+  return !!explicit && !!targetBranchId && explicit !== targetBranchId;
+}
+
+function branchDenied(res: Response, what = 'Target') {
+  res.status(403).json({ success: false, message: `${what} does not belong to the requested branch` });
+}
+
 const router = Router();
 
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
@@ -811,6 +826,10 @@ router.post('/student-fees/generate', asyncHandler(async (req: Request, res: Res
 
   const ayId = await resolveAcademicYearId(academicYearId);
   if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
+  {
+    const ay = await prisma.academicYear.findUnique({ where: { id: ayId }, select: { branchId: true } });
+    if (targetBranchMismatch(req, ay?.branchId)) { branchDenied(res, 'Academic year'); return; }
+  }
 
   const studentWhere: any = { academicYearId: ayId, isActive: true, status: 'ACTIVE' };
   if (hasGroupFilter) studentWhere.groupId = { in: groupIds };
@@ -1564,17 +1583,25 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
   // Get the student fee (with student info for snapshot)
   const studentFee = await prisma.studentFee.findUnique({
     where: { id: studentFeeId },
-    include: { student: { select: { id: true, name: true } } },
+    include: { student: { select: { id: true, name: true } }, academicYear: { select: { branchId: true } } },
   });
   if (!studentFee) { res.status(404).json({ success: false, message: 'Student fee not found' }); return; }
+  if (targetBranchMismatch(req, studentFee.academicYear?.branchId)) { branchDenied(res, 'Fee'); return; }
 
   // Fetch extras once (needed for both payment status AND snapshot)
   const extraItems = await prisma.feeExtraItem.findMany({ where: { studentFeeId } });
   const extraSum = extraItems.reduce((s: number, e: any) => s + e.amount, 0);
 
   // Atomic receipt number generation + payment creation + fee update
-  const { result: payment, receiptNumber } = await generateReceiptNumber(async (rn) => {
-    return prisma.$transaction(async (tx) => {
+  // M12: concurrent same-key submits both pass the pre-txn guard above; the
+  // loser's insert collides on the idempotencyKey unique constraint. Converge
+  // onto the winner (same shape as the guard path) instead of 500ing and
+  // leaking a Prisma stack trace to the client.
+  let payment: any;
+  let receiptNumber: string;
+  try {
+    ({ result: payment, receiptNumber } = await generateReceiptNumber(async (rn) => {
+      return prisma.$transaction(async (tx) => {
       // Lock the row for the duration of the transaction (SELECT ... FOR UPDATE).
       // Without this, two concurrent payments against the same fee can both
       // read paidAmount=0 before either commits, and the second UPDATE
@@ -1612,8 +1639,24 @@ router.post('/payments', asyncHandler(async (req: Request, res: Response) => {
       });
 
       return p;
+      });
+    }));
+  } catch (err: unknown) {
+    const e = err as { code?: string; meta?: { target?: string | string[] } };
+    const target = e?.meta?.target;
+    const isKeyConflict =
+      e?.code === 'P2002' &&
+      idempotencyKey &&
+      (Array.isArray(target) ? target.includes('idempotencyKey') : target === 'idempotencyKey');
+    if (!isKeyConflict) throw err;
+    const winner = await prisma.payment.findFirst({
+      where: { idempotencyKey, studentFeeId, revertedAt: null },
+      orderBy: { createdAt: 'desc' },
     });
-  });
+    if (!winner) throw err;
+    res.json({ success: true, data: winner, idempotent: true });
+    return;
+  }
 
   // Compute receipt snapshot
   const today = new Date();
@@ -1701,6 +1744,13 @@ router.post('/payments/waterfall', asyncHandler(async (req: Request, res: Respon
     return;
   }
   const userId = (req as any).user?.id;
+  {
+    const st = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { academicYear: { select: { branchId: true } } },
+    });
+    if (targetBranchMismatch(req, st?.academicYear?.branchId)) { branchDenied(res, 'Student'); return; }
+  }
 
   // ─── Concurrency-safe waterfall: read+validate+allocate inside one transaction ───
   const getTotalDueFn = (f: any) => {
@@ -1921,6 +1971,13 @@ router.post('/payments/allocate', asyncHandler(async (req: Request, res: Respons
   if (!studentId || !amountPaidPaise || amountPaidPaise <= 0) {
     res.status(400).json({ success: false, message: 'studentId and amountPaidPaise (>0) required' });
     return;
+  }
+  {
+    const st = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { academicYear: { select: { branchId: true } } },
+    });
+    if (targetBranchMismatch(req, st?.academicYear?.branchId)) { branchDenied(res, 'Student'); return; }
   }
   const prevList: { studentFeeId: string; amountPaise: number }[] = Array.isArray(previousMonths) ? previousMonths : [];
   const curHeads: { feeHeadId?: string; headName?: string; amountPaise: number }[] =
@@ -2264,6 +2321,13 @@ router.post('/payments/:id/revert', asyncHandler(async (req: Request, res: Respo
   const payment = await prisma.payment.findUnique({ where: { id: req.params.id } });
   if (!payment) { res.status(404).json({ success: false, message: 'Payment not found' }); return; }
   if (payment.revertedAt) { res.status(400).json({ success: false, message: 'Payment already reverted' }); return; }
+  {
+    const fee = await prisma.studentFee.findUnique({
+      where: { id: payment.studentFeeId },
+      select: { academicYear: { select: { branchId: true } } },
+    });
+    if (targetBranchMismatch(req, fee?.academicYear?.branchId)) { branchDenied(res, 'Payment'); return; }
+  }
 
   // Wrap in transaction with FOR UPDATE on the student fee row to prevent
   // concurrent payments/reverts from corrupting the fee balance.
@@ -2273,10 +2337,31 @@ router.post('/payments/:id/revert', asyncHandler(async (req: Request, res: Respo
       SELECT id FROM "student_fees" WHERE id = ${payment.studentFeeId} FOR UPDATE
     `;
 
+    // M12: re-check inside the lock — two concurrent reverts both pass the
+    // pre-txn guard; only the first may reverse (second gets a clean 400,
+    // not a duplicate REVERTED audit row).
+    const fresh = await tx.payment.findUnique({
+      where: { id: req.params.id },
+      select: { revertedAt: true },
+    });
+    if (fresh?.revertedAt) {
+      throw Object.assign(new Error('Payment already reverted'), { statusCode: 400 });
+    }
+
     // Soft-delete the payment
+    const now = new Date();
     await tx.payment.update({
       where: { id: req.params.id },
-      data: { revertedAt: new Date(), revertedById: userId, revertReason: reason },
+      data: { revertedAt: now, revertedById: userId, revertReason: reason },
+    });
+
+    // M12: void this payment's head allocations as well. Without this, the
+    // allocate validator (which counts non-reverted allocations) keeps
+    // counting reverted money as paid and wrongly rejects legitimate
+    // re-allocation of the same heads.
+    await tx.paymentHeadAllocation.updateMany({
+      where: { paymentId: req.params.id, revertedAt: null },
+      data: { revertedAt: now },
     });
 
     // Re-aggregate from source of truth (non-reverted payments)
@@ -2337,6 +2422,13 @@ router.get('/payments/:id/receipt', asyncHandler(async (req: Request, res: Respo
     // No snapshot yet — frontend will fall back to live computation
     res.status(404).json({ success: false, message: 'No receipt snapshot found' });
     return;
+  }
+  {
+    const pay = await prisma.payment.findUnique({
+      where: { id: req.params.id },
+      select: { studentFee: { select: { academicYear: { select: { branchId: true } } } } },
+    });
+    if (targetBranchMismatch(req, pay?.studentFee?.academicYear?.branchId)) { branchDenied(res, 'Receipt'); return; }
   }
   res.json({ success: true, data: receipt });
 }));
@@ -2998,6 +3090,10 @@ router.post('/family-payments/allocate', asyncHandler(async (req: Request, res: 
 
   const ayId = await resolveAcademicYearId(academicYearId);
   if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
+  {
+    const ay = await prisma.academicYear.findUnique({ where: { id: ayId }, select: { branchId: true } });
+    if (targetBranchMismatch(req, ay?.branchId)) { branchDenied(res, 'Academic year'); return; }
+  }
 
   const family = await prisma.family.findUnique({
     where: { id: familyId },
@@ -3227,6 +3323,10 @@ router.post('/family-payments', asyncHandler(async (req: Request, res: Response)
   const userId = (req as any).user?.id;
   const ayId = await resolveAcademicYearId(academicYearId);
   if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
+  {
+    const ay = await prisma.academicYear.findUnique({ where: { id: ayId }, select: { branchId: true } });
+    if (targetBranchMismatch(req, ay?.branchId)) { branchDenied(res, 'Academic year'); return; }
+  }
 
   let totalAmount = 0;
   let createdPayments: any[] = [];
@@ -3247,6 +3347,33 @@ router.post('/family-payments', asyncHandler(async (req: Request, res: Response)
           throw Object.assign(new Error('One or more fees do not belong to the selected academic year'), { statusCode: 400 });
         }
         const feeById = new Map(freshFees.map(f => [f.id, f]));
+
+        // M12: every allocated payment must belong to a member of THIS family.
+        // Without this, any fee (other family, no family, other branch) could
+        // be recorded as a family payment with a family receipt + notifies.
+        // Checked inside the txn so membership changes mid-flight converge.
+        const fam = await tx.family.findUnique({
+          where: { id: familyId },
+          select: { students: { select: { id: true } } },
+        });
+        if (!fam) throw Object.assign(new Error('Family not found'), { statusCode: 404 });
+        const memberIds = new Set(fam.students.map(s => s.id));
+        for (const p of payments) {
+          const fee = feeById.get(p.studentFeeId);
+          const effectiveStudentId = p.studentId || fee?.studentId;
+          if (!effectiveStudentId || !memberIds.has(effectiveStudentId)) {
+            throw Object.assign(new Error(`Student ${effectiveStudentId ?? p.studentFeeId} is not in this family`), { statusCode: 400 });
+          }
+          // The fee itself must belong to a member: otherwise a non-member's
+          // ledger would move inside a family transaction (and an explicit
+          // studentId override must match the fee owner, never redirect it).
+          if (!fee || !memberIds.has(fee.studentId)) {
+            throw Object.assign(new Error(`Fee ${p.studentFeeId} does not belong to this family`), { statusCode: 400 });
+          }
+          if (p.studentId && p.studentId !== fee.studentId) {
+            throw Object.assign(new Error(`Student ${p.studentId} does not own fee ${p.studentFeeId}`), { statusCode: 400 });
+          }
+        }
 
         const batchPayments: any[] = [];
         let batchTotal = 0;
@@ -3411,6 +3538,16 @@ router.get('/family-payments/:id/receipt', asyncHandler(async (req: Request, res
   if (!receipt) {
     res.status(404).json({ success: false, message: 'No family receipt snapshot found' });
     return;
+  }
+  {
+    const fp = await prisma.familyPayment.findUnique({
+      where: { id: req.params.id },
+      select: { academicYearId: true },
+    });
+    const ay = fp?.academicYearId
+      ? await prisma.academicYear.findUnique({ where: { id: fp.academicYearId }, select: { branchId: true } })
+      : null;
+    if (targetBranchMismatch(req, ay?.branchId)) { branchDenied(res, 'Receipt'); return; }
   }
   res.json({ success: true, data: receipt });
 }));

@@ -1415,6 +1415,8 @@ describe('POST /admin/family-payments — AY integrity', () => {
         findMany: jest.fn().mockResolvedValue([fee]),
         update: jest.fn().mockResolvedValue({}),
       },
+      // M12: family membership check inside the txn.
+      family: { findUnique: jest.fn().mockResolvedValue({ students: [{ id: 's1' }] }) },
       payment: {
         create: jest.fn().mockResolvedValue({ id: 'p1', studentFeeId: 'sf1', studentId: 's1', amount: 450000, paymentMethod: 'CASH', receiptNumber: 'FMP-202607-0001-1', reference: null }),
         aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 450000 } }),
