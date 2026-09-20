@@ -19,7 +19,7 @@ const request = require('supertest');
 const app = require('../../../src/app').default || require('../../../src/app');
 
 let prisma: PrismaClient;
-const P = uniquePrefix();
+const P = uniquePrefix() + '_m9mx';
 const branchId = `${P}_br`;
 const ayId = `${P}_ay`;
 const U = {

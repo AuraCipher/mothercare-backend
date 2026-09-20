@@ -173,7 +173,12 @@ export async function deliverStudentSystemNotification(input: {
       }
     : null;
   if (dedupeWhere) {
-    const existing = await prisma.chatMessage.findFirst({ where: dedupeWhere });
+    // M10: skip only identical replays (same dedupeId AND same rendered
+    // title/content). A re-mark/re-publish with NEW content is new
+    // information and must deliver, not collapse into the old message.
+    const existing = await prisma.chatMessage.findFirst({
+      where: { ...dedupeWhere, title: input.title, content: input.body },
+    });
     if (existing) return { message: existing, skipped: true as const };
   }
 
@@ -229,7 +234,12 @@ export async function deliverTeacherAttendanceNotification(input: {
       }
     : null;
   if (dedupeWhere) {
-    const existing = await prisma.chatMessage.findFirst({ where: dedupeWhere });
+    // M10: skip only identical replays (same dedupeId AND same rendered
+    // title/content). A re-mark/re-publish with NEW content is new
+    // information and must deliver, not collapse into the old message.
+    const existing = await prisma.chatMessage.findFirst({
+      where: { ...dedupeWhere, title: input.title, content: input.body },
+    });
     if (existing) return { message: existing, skipped: true as const };
   }
 
@@ -285,7 +295,12 @@ export async function deliverTeacherPayrollNotification(input: {
       }
     : null;
   if (dedupeWhere) {
-    const existing = await prisma.chatMessage.findFirst({ where: dedupeWhere });
+    // M10: skip only identical replays (same dedupeId AND same rendered
+    // title/content). A re-mark/re-publish with NEW content is new
+    // information and must deliver, not collapse into the old message.
+    const existing = await prisma.chatMessage.findFirst({
+      where: { ...dedupeWhere, title: input.title, content: input.body },
+    });
     if (existing) return { message: existing, skipped: true as const };
   }
 

@@ -1,7 +1,7 @@
 /**
- * M9 §11 — family payment notification carries BOTH the combined family
- * total AND the student's own share, per affected student, without
- * changing accounting (real PG + real HTTP).
+ * M10 §6 — family allocation contention (real PG, concurrent HTTP).
+ * Two simultaneous full-balance family-allocates: exactly one must win;
+ * balances must never double-spend; notifications converge.
  */
 process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL || 'postgresql://mcs:mcs_dev_password@localhost:5434/mcs_test';
@@ -16,7 +16,7 @@ const request = require('supertest');
 const app = require('../../../src/app').default || require('../../../src/app');
 
 let prisma: PrismaClient;
-const P = uniquePrefix() + '_m9ft';
+const P = uniquePrefix() + '_m10fc';
 const ids = {
   cal: `${P}_cal`,
   br: `${P}_br`,
@@ -25,21 +25,18 @@ const ids = {
   admin: `${P}_admin`,
   uA: `${P}_uA`,
   uB: `${P}_uB`,
-  uC: `${P}_uC`,
   stA: `${P}_stA`,
   stB: `${P}_stB`,
-  stC: `${P}_stC`,
   fam: `${P}_fam`,
   feeA: `${P}_feeA`,
   feeB: `${P}_feeB`,
-  feeC: `${P}_feeC`,
 };
 
 async function user(id: string, role: string) {
   await prisma.user.create({ data: { id, name: id, passwordHash: 'x', role: role as never } });
 }
 
-async function waitFor(fn: () => Promise<number>, want: number, timeoutMs = 15000): Promise<number> {
+async function waitFor(fn: () => Promise<number>, want: number, timeoutMs = 20000): Promise<number> {
   const start = Date.now();
   let last = 0;
   while (Date.now() - start < timeoutMs) {
@@ -60,36 +57,32 @@ beforeAll(async () => {
   await prisma.group.create({ data: { id: ids.g, academicYearId: ids.ay, name: 'Class 1', section: 'A', displayOrder: 1 } });
   await user(ids.admin, 'super_admin');
   await prisma.branchMember.create({ data: { branchId: ids.br, userId: ids.admin, role: 'branch_admin', isActive: true } });
-  for (const [u, s] of [[ids.uA, ids.stA], [ids.uB, ids.stB], [ids.uC, ids.stC]] as const) {
+  for (const [u, s] of [[ids.uA, ids.stA], [ids.uB, ids.stB]] as const) {
     await user(u, 'student');
     await prisma.student.create({
       data: { id: s, academicYearId: ids.ay, groupId: ids.g, name: s, userId: u, status: 'ACTIVE', isActive: true },
     });
   }
-  await prisma.family.create({ data: { id: ids.fam, name: `${P} Family`, fatherName: 'M9Father' } });
+  await prisma.family.create({ data: { id: ids.fam, name: `${P} Family`, fatherName: 'M10Father' } });
   await prisma.student.updateMany({ where: { id: { in: [ids.stA, ids.stB] } }, data: { familyId: ids.fam } });
-  await prisma.studentFee.create({
-    data: { id: ids.feeA, academicYearId: ids.ay, studentId: ids.stA, month: 9, year: 2026, totalAmount: 100000, netAmount: 100000, status: 'UNPAID' },
-  });
-  await prisma.studentFee.create({
-    data: { id: ids.feeB, academicYearId: ids.ay, studentId: ids.stB, month: 9, year: 2026, totalAmount: 100000, netAmount: 100000, status: 'UNPAID' },
-  });
-  await prisma.studentFee.create({
-    data: { id: ids.feeC, academicYearId: ids.ay, studentId: ids.stC, month: 9, year: 2026, totalAmount: 100000, netAmount: 100000, status: 'UNPAID' },
-  });
+  for (const [f, s] of [[ids.feeA, ids.stA], [ids.feeB, ids.stB]] as const) {
+    await prisma.studentFee.create({
+      data: { id: f, academicYearId: ids.ay, studentId: s, month: 9, year: 2026, totalAmount: 100000, netAmount: 100000, status: 'UNPAID' },
+    });
+  }
 }, 120000);
 
 afterAll(async () => {
   await prisma.chatMessage.deleteMany({ where: { room: { academicYearId: ids.ay } } }).catch(() => undefined);
-  await prisma.payment.deleteMany({ where: { studentId: { in: [ids.stA, ids.stB, ids.stC] } } }).catch(() => undefined);
+  await prisma.payment.deleteMany({ where: { studentId: { in: [ids.stA, ids.stB] } } }).catch(() => undefined);
   await prisma.familyPayment.deleteMany({ where: { familyId: ids.fam } }).catch(() => undefined);
-  await prisma.studentFee.deleteMany({ where: { id: { in: [ids.feeA, ids.feeB, ids.feeC] } } }).catch(() => undefined);
+  await prisma.studentFee.deleteMany({ where: { id: { in: [ids.feeA, ids.feeB] } } }).catch(() => undefined);
   await prisma.chatRoomMember.deleteMany({ where: { room: { academicYearId: ids.ay } } }).catch(() => undefined);
   await prisma.chatRoom.deleteMany({ where: { academicYearId: ids.ay } }).catch(() => undefined);
   await prisma.student.updateMany({ where: { id: { in: [ids.stA, ids.stB] } }, data: { familyId: null } }).catch(() => undefined);
-  await prisma.student.deleteMany({ where: { id: { in: [ids.stA, ids.stB, ids.stC] } } }).catch(() => undefined);
+  await prisma.student.deleteMany({ where: { id: { in: [ids.stA, ids.stB] } } }).catch(() => undefined);
   await prisma.family.deleteMany({ where: { id: ids.fam } }).catch(() => undefined);
-  await prisma.user.deleteMany({ where: { id: { in: [ids.admin, ids.uA, ids.uB, ids.uC] } } }).catch(() => undefined);
+  await prisma.user.deleteMany({ where: { id: { in: [ids.admin, ids.uA, ids.uB] } } }).catch(() => undefined);
   await prisma.branchMember.deleteMany({ where: { branchId: ids.br } }).catch(() => undefined);
   await prisma.group.deleteMany({ where: { id: ids.g } }).catch(() => undefined);
   await prisma.academicYear.deleteMany({ where: { id: ids.ay } }).catch(() => undefined);
@@ -98,52 +91,51 @@ afterAll(async () => {
   await disconnect(prisma);
 });
 
-describe('M9 family total + own share per student', () => {
-  test('unequal combined payment: each student message has family total and own share; outsider silent', async () => {
+describe('M10 family allocation contention', () => {
+  test('two simultaneous full-balance allocates: one wins, no double-spend, notifies converge', async () => {
     const token = getAuthHeader(generateTestToken(ids.admin, 'super_admin'));
-    const res = await request(app)
-      .post('/admin/family-payments')
-      .query({ branchId: ids.br })
-      .set(token)
-      .send({
-        familyId: ids.fam,
-        academicYearId: ids.ay,
-        payments: [
-          { studentFeeId: ids.feeA, amount: 60000, paymentMethod: 'CASH' },
-          { studentFeeId: ids.feeB, amount: 40000, paymentMethod: 'CASH' },
-        ],
-      });
-    expect(res.status).toBe(201);
-
-    // Family total 100000 paise = Rs 1,000; shares Rs 600 / Rs 400.
-    const total = 'Rs 1,000';
-    for (const [st, share] of [[ids.stA, 'Rs 600'], [ids.stB, 'Rs 400']] as const) {
-      const n = await waitFor(async () =>
-        prisma.chatMessage.count({
-          where: {
-            room: { studentId: st, kind: 'system_payment' as never },
-            content: { contains: total },
-          },
-        }), 1);
-      expect(n).toBeGreaterThanOrEqual(1);
-      const msgs = await prisma.chatMessage.findMany({
-        where: { room: { studentId: st, kind: 'system_payment' as never }, content: { contains: total } },
-        orderBy: { createdAt: 'asc' },
-      });
-      expect(msgs[0].content).toContain(share);
-      expect(msgs[0].content).toContain('M9Father Family');
+    const body = {
+      familyId: ids.fam,
+      academicYearId: ids.ay,
+      amountPaidPaise: 200000,
+      paymentMethod: 'CASH',
+      students: [
+        { studentId: ids.stA, amountPaidPaise: 100000, previousMonths: [{ studentFeeId: ids.feeA, amountPaise: 100000 }] },
+        { studentId: ids.stB, amountPaidPaise: 100000, previousMonths: [{ studentFeeId: ids.feeB, amountPaise: 100000 }] },
+      ],
+    };
+    const url = '/admin/family-payments/allocate';
+    const q = { branchId: ids.br };
+    const [r1, r2] = await Promise.all([
+      request(app).post(url).query(q).set(token).send(body),
+      request(app).post(url).query(q).set(token).send(body),
+    ]);
+    for (const f of [ids.feeA, ids.feeB]) {
+      const fee = await prisma.studentFee.findUnique({ where: { id: f } });
+      console.log('FEE', f, fee?.paidAmount, fee?.status);
     }
+    console.log('FPS:', await prisma.familyPayment.count({ where: { familyId: ids.fam } }));
+    console.log('PAYS:', JSON.stringify(await prisma.payment.findMany({ where: { studentId: { in: [ids.stA, ids.stB] } }, select: { receiptNumber: true, amount: true } })));
+    // Exactly one winner (201); loser fails cleanly (400), never 500.
+    // Note: Array.sort() is lexicographic; [201, 400] is the sorted order.
+    expect([r1.status, r2.status].sort()).toEqual([201, 400]);
 
-    // Accounting untouched in shape: per-student paid amounts updated separately.
+    // No double-spend: paid amounts equal sticker exactly once.
     const feeA = await prisma.studentFee.findUnique({ where: { id: ids.feeA } });
     const feeB = await prisma.studentFee.findUnique({ where: { id: ids.feeB } });
-    expect(feeA?.paidAmount).toBe(60000);
-    expect(feeB?.paidAmount).toBe(40000);
+    expect(feeA?.paidAmount).toBe(100000);
+    expect(feeB?.paidAmount).toBe(100000);
+    expect(feeA?.status).toBe('PAID');
+    expect(feeB?.status).toBe('PAID');
+    expect(await prisma.familyPayment.count({ where: { familyId: ids.fam } })).toBe(1);
 
-    // Non-member student C: no payment, no message.
-    expect(await prisma.payment.count({ where: { studentId: ids.stC } })).toBe(0);
-    expect(
-      await prisma.chatMessage.count({ where: { room: { studentId: ids.stC, kind: 'system_payment' as never } } }),
-    ).toBe(0);
-  });
+    // Notifications converge: one family message per student (winner only).
+    for (const st of [ids.stA, ids.stB]) {
+      const n = await waitFor(async () =>
+        prisma.chatMessage.count({
+          where: { room: { studentId: st, kind: 'system_payment' as never }, content: { contains: 'M10Father Family' } },
+        }), 1);
+      expect(n).toBe(1);
+    }
+  }, 60000);
 });
