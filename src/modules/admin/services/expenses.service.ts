@@ -243,6 +243,8 @@ class ExpensesService {
       note?: string;
       academicYearId: string;
       payments: Array<{ payeeUserId: string; amount: number }>;
+      // M15: request-scoped idempotency (lost-response retries converge).
+      idempotencyKey?: string;
     },
   ) {
     if (!input.salaryMonth || !input.payments?.length) {
@@ -268,6 +270,7 @@ class ExpensesService {
         failCount: 0,
         note: input.note?.trim() || null,
         recordedById,
+        idempotencyKey: input.idempotencyKey || undefined,
       },
     });
 
@@ -431,6 +434,8 @@ class ExpensesService {
       amount: number;
       paymentMethod: OutgoingPaymentMethod;
       paymentKind?: PayrollPaymentKind;
+      // M15: request-scoped idempotency (lost-response retries converge).
+      idempotencyKey?: string;
       reference?: string;
       note?: string;
       paidAt?: string;
@@ -469,6 +474,7 @@ class ExpensesService {
           note: input.note?.trim() || null,
           voucherNumber,
           recordedById,
+          idempotencyKey: input.idempotencyKey || undefined,
         },
       });
       await tx.payrollPaymentDetail.create({

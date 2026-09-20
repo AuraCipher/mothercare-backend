@@ -1,10 +1,39 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { ExpenseCategoryKind } from '@prisma/client';
 import { expensesService } from '../services/expenses.service';
-import { computePayrollMonth, listPayrollPayees } from '../services/payroll-calculation.service';
+import { computePayrollMonth, listPayrollPayees, refreshPayrollMonthBalance } from '../services/payroll-calculation.service';
 import { requireScope } from '../utils/scope-context';
 import { notifyTeacherPayrollPayment } from '../../chat/services/system-notification.service';
 import { prisma } from '../../../lib/prisma';
+
+/** M15: request-scoped idempotency for payroll (same proven pattern as fee
+ *  payments). Keys are per logical operation; replays converge, scope
+ *  mismatches 409, malformed keys 400. */
+function assertValidPayrollKey(key: unknown): asserts key is string {
+  if (key === undefined || key === null) return;
+  if (typeof key !== 'string' || key.trim().length === 0 || key.length > 128) {
+    throw { status: 400, message: 'idempotencyKey must be a non-empty string up to 128 characters' };
+  }
+}
+
+async function findPayrollReplay(branchId: string, key: string) {
+  const pay = await prisma.branchOutgoingPayment.findFirst({
+    where: { idempotencyKey: key, branchId },
+    include: { payrollDetail: { select: { payeeUserId: true, salaryMonth: true } } },
+  });
+  return pay;
+}
+
+async function findBulkReplay(branchId: string, key: string) {
+  return prisma.payrollBulkRun.findFirst({
+    where: { idempotencyKey: key, branchId },
+    include: {
+      payments: {
+        select: { id: true, amount: true, voucherNumber: true, payrollDetail: { select: { payeeUserId: true } } },
+      },
+    },
+  });
+}
 
 const router = Router();
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) =>
@@ -73,10 +102,47 @@ router.post('/expenses/payroll/bulk', asyncHandler(async (req, res) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
   const userId = (req as any).user?.id;
-  const data = await expensesService.recordPayrollBulk(scope.branchId, userId, {
-    ...req.body,
-    academicYearId: scope.academicYearId,
+  const bulkKey = (req.body as any)?.idempotencyKey as string | undefined;
+  assertValidPayrollKey(bulkKey);
+  const bulkReplayShape = (run: {
+    id: string; receiptNumber?: string; totalAmount: unknown; successCount: number; failCount: number;
+    payments: Array<{ payeeUserId: string | null; amount: unknown; voucherNumber: string }>;
+  }) => ({
+    bulkRunId: run.id,
+    totalAmount: Number(run.totalAmount),
+    successCount: run.payments.length,
+    failCount: Math.max(0, run.successCount - run.payments.length),
+    results: run.payments.map((x) => ({ payeeUserId: x.payeeUserId, success: true, voucherNumber: x.voucherNumber })),
   });
+  if (bulkKey) {
+    const existing = await findBulkReplay(scope.branchId, bulkKey);
+    if (existing) {
+      res.json({ success: true, data: bulkReplayShape(existing as never), idempotent: true });
+      return;
+    }
+  }
+  let data;
+  try {
+    data = await expensesService.recordPayrollBulk(scope.branchId, userId, {
+      ...req.body,
+      academicYearId: scope.academicYearId,
+    });
+  } catch (err: any) {
+    // M15: converge ANY unique collision under a key (bulk-run key or a
+    // voucher raced by a concurrent same-key submit). Polls briefly; never
+    // creates an effect.
+    if (bulkKey && err?.code === 'P2002') {
+      for (let i = 0; i < 10; i++) {
+        const existing = await findBulkReplay(scope.branchId, bulkKey).catch(() => null);
+        if (existing) {
+          res.json({ success: true, data: bulkReplayShape(existing as never), idempotent: true });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+    throw err;
+  }
   for (const item of data.results ?? []) {
     if (!item.success || !item.payeeUserId) continue;
     const outgoing = await prisma.branchOutgoingPayment.findFirst({
@@ -145,10 +211,51 @@ router.post('/expenses/payroll', asyncHandler(async (req, res) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
   const userId = (req as any).user?.id;
-  const data = await expensesService.recordPayrollPayment(scope.branchId, userId, {
-    ...req.body,
-    academicYearId: scope.academicYearId,
-  });
+  const opKey = (req.body as any)?.idempotencyKey as string | undefined;
+  assertValidPayrollKey(opKey);
+  if (opKey) {
+    const existing = await findPayrollReplay(scope.branchId, opKey);
+    if (existing?.payrollDetail) {
+      const refreshed = await refreshPayrollMonthBalance(
+        scope.branchId, existing.payrollDetail.payeeUserId, existing.payrollDetail.salaryMonth,
+      );
+      res.json({
+        success: true,
+        data: { payment: existing, summary: refreshed.summary, voucherNumber: existing.voucherNumber },
+        idempotent: true,
+      });
+      return;
+    }
+  }
+  let data;
+  try {
+    data = await expensesService.recordPayrollPayment(scope.branchId, userId, {
+      ...req.body,
+      academicYearId: scope.academicYearId,
+    });
+  } catch (err: any) {
+    // M15: converge ANY unique collision under a key (idempotencyKey or a
+    // voucher number raced by a concurrent same-key submit). Polls briefly
+    // because the winner may still be committing; never creates an effect.
+    if (opKey && err?.code === 'P2002') {
+      for (let i = 0; i < 10; i++) {
+        const existing = await findPayrollReplay(scope.branchId, opKey).catch(() => null);
+        if (existing?.payrollDetail) {
+          const refreshed = await refreshPayrollMonthBalance(
+            scope.branchId, existing.payrollDetail.payeeUserId, existing.payrollDetail.salaryMonth,
+          );
+          res.json({
+            success: true,
+            data: { payment: existing, summary: refreshed.summary, voucherNumber: existing.voucherNumber },
+            idempotent: true,
+          });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+    throw err;
+  }
   void notifyTeacherPayrollPayment({
     teacherUserId: req.body.payeeUserId,
     academicYearId: scope.academicYearId,

@@ -3247,6 +3247,8 @@ model BranchOutgoingPayment {
   bulkRunId     String?
   createdAt     DateTime               @default(now())
   updatedAt     DateTime               @updatedAt
+  // M15: request-scoped idempotency for lost-response retries (single payroll).
+  idempotencyKey String?
 
   branch         Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
   recordedBy     User?                 @relation("OutgoingPaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
@@ -3274,7 +3276,9 @@ model PayrollBulkRun {
   failCount     Int
   note          String?
   recordedById  String?
-  createdAt     DateTime               @default(now())
+  createdAt     DateTime @default(now())
+  // M15: request-scoped idempotency for lost-response retries (bulk runs).
+  idempotencyKey String?
 
   branch     Branch                  @relation(fields: [branchId], references: [id], onDelete: Cascade)
   recordedBy User?                   @relation("PayrollBulkRunRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
