@@ -230,8 +230,7 @@ describe('M12 fee generation (§18)', () => {  const token = () => getAuthHeader
   });
 });
 
-describe('M12 receipt authorization (§15/§22)', () => {
-  const adminTok = () => getAuthHeader(generateTestToken(ids.admin, 'super_admin'));
+describe('M12 receipt authorization (§15/§22)', () => {  const adminTok = () => getAuthHeader(generateTestToken(ids.admin, 'super_admin'));
   const teacherTok = () => getAuthHeader(generateTestToken(ids.teacher, 'teacher'));
 
   test('teacher denied on payment receipt; admin allowed; unauthenticated rejected', async () => {
@@ -250,5 +249,34 @@ describe('M12 receipt authorization (§15/§22)', () => {
     const rAdmin = await request(app).get(`/admin/payments/${pid}/receipt`).query({ branchId: ids.br }).set(adminTok());
     expect(rAdmin.status).toBe(200);
     expect(rAdmin.body?.data?.receiptNumber ?? rAdmin.body?.receiptNumber).toBeTruthy();
+  });
+});
+
+describe('M13 family read paths cross-branch (list/picker/detail/audit/print)', () => {
+  const adminTok = () => getAuthHeader(generateTestToken(ids.admin, 'super_admin'));
+
+  test('cross-branch AY scope on family list/picker/detail/audit/print denied with zero mutation', async () => {
+    // Attacker presents their own branchId with the victim academic year.
+    const q = { branchId: 'other-branch', academicYearId: ids.ay };
+    const list = await request(app).get('/admin/families').query(q).set(adminTok());
+    expect([400, 403, 404]).toContain(list.status);
+    const picker = await request(app).get('/admin/families/students-picker').query(q).set(adminTok());
+    expect([400, 403, 404]).toContain(picker.status);
+    const detail = await request(app).get(`/admin/families/${ids.fam}`).query(q).set(adminTok());
+    expect([400, 403, 404]).toContain(detail.status);
+
+    // Payment-scoped reads need a real payment: create one first (own branch).
+    const pay = await request(app).post('/admin/payments').query({ branchId: ids.br }).set(adminTok()).send({
+      studentFeeId: `${P}_feeR`, amount: 5000, paymentMethod: 'CASH',
+    });
+    expect(pay.status).toBe(201);
+    const pid = pay.body?.data?.payment?.id as string;
+    const audit = await request(app).get(`/admin/payments/${pid}/audit-log`).query(q).set(adminTok());
+    expect([400, 403, 404]).toContain(audit.status);
+    const print = await request(app).post(`/admin/payments/${pid}/print-receipt`).query(q).set(adminTok());
+    expect([400, 403, 404]).toContain(print.status);
+    // Zero mutation from denied attempts: printCount untouched by the denied call.
+    const receipt = await prisma.paymentReceipt.findUnique({ where: { paymentId: pid } });
+    expect(receipt?.printCount ?? 0).toBeLessThanOrEqual(1);
   });
 });

@@ -1557,7 +1557,13 @@ describe('POST /admin/payments/:id/print-receipt', () => {
 });
 
 describe('POST /admin/payments/:id/audit-log', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // M13: branch check via payment -> fee -> AY (same branch b1 here).
+    prismaMock.payment.findUnique.mockResolvedValue({
+      studentFee: { academicYear: { branchId: 'b1' } },
+    } as any);
+  });
 
   test('records a REPRINTED event', async () => {
     prismaMock.paymentAuditLog.create.mockResolvedValue({
@@ -1579,6 +1585,13 @@ describe('POST /admin/payments/:id/audit-log', () => {
 });
 
 describe('GET /admin/payments/:id/audit-log', () => {
+  beforeEach(() => {
+    // M13: branch check via payment -> fee -> AY (same branch b1 here).
+    prismaMock.payment.findUnique.mockResolvedValue({
+      studentFee: { academicYear: { branchId: 'b1' } },
+    } as any);
+  });
+
   test('returns audit trail', async () => {
     prismaMock.paymentAuditLog.findMany.mockResolvedValue([
       { id: 'al1', paymentId: 'p1', action: 'CREATED', createdAt: new Date() },

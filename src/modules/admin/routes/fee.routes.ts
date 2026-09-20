@@ -2439,6 +2439,13 @@ router.post('/payments/:id/print-receipt', asyncHandler(async (req: Request, res
     where: { paymentId: req.params.id },
   });
   if (!receipt) { res.status(404).json({ success: false, message: 'No receipt snapshot' }); return; }
+  {
+    const pay = await prisma.payment.findUnique({
+      where: { id: req.params.id },
+      select: { studentFee: { select: { academicYear: { select: { branchId: true } } } } },
+    });
+    if (targetBranchMismatch(req, pay?.studentFee?.academicYear?.branchId)) { branchDenied(res, 'Receipt'); return; }
+  }
   const updated = await prisma.paymentReceipt.update({
     where: { id: receipt.id },
     data: {
@@ -2458,6 +2465,17 @@ router.post('/payments/:id/audit-log', asyncHandler(async (req: Request, res: Re
     return;
   }
   const userId = (req as any).user?.id;
+  {
+    const pay = await prisma.payment.findUnique({
+      where: { id: req.params.id },
+      select: { studentFee: { select: { academicYear: { select: { branchId: true } } } } },
+    });
+    if (!pay) {
+      res.status(404).json({ success: false, message: 'Payment not found' });
+      return;
+    }
+    if (targetBranchMismatch(req, pay.studentFee?.academicYear?.branchId)) { branchDenied(res, 'Audit log'); return; }
+  }
   // Use server-derived values to prevent spoofing
   const ipAddress = (req as any).auditContext?.ipAddress || req.ip || req.socket.remoteAddress || null;
   const userAgent = (req as any).auditContext?.userAgent || req.headers['user-agent'] || null;
@@ -2475,6 +2493,18 @@ router.post('/payments/:id/audit-log', asyncHandler(async (req: Request, res: Re
 
 // GET /admin/payments/:id/audit-log — Get audit trail for a payment
 router.get('/payments/:id/audit-log', asyncHandler(async (req: Request, res: Response) => {
+  // M13: audit trail must not leak cross-branch — scope via the payment's fee.
+  {
+    const pay = await prisma.payment.findUnique({
+      where: { id: req.params.id },
+      select: { studentFee: { select: { academicYear: { select: { branchId: true } } } } },
+    });
+    if (!pay) {
+      res.status(404).json({ success: false, message: 'Payment not found' });
+      return;
+    }
+    if (targetBranchMismatch(req, pay.studentFee?.academicYear?.branchId)) { branchDenied(res, 'Audit log'); return; }
+  }
   const logs = await prisma.paymentAuditLog.findMany({
     where: { paymentId: req.params.id },
     orderBy: { createdAt: 'desc' },
@@ -2521,6 +2551,11 @@ router.get('/families/students-picker', asyncHandler(async (req: Request, res: R
   const { search, academicYearId, excludeFamilyId } = req.query;
   const ayId = await resolveAcademicYearId(academicYearId as string | undefined);
   if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
+  // M13: student picker must not leak another branch's students.
+  {
+    const ay = await prisma.academicYear.findUnique({ where: { id: ayId }, select: { branchId: true } });
+    if (targetBranchMismatch(req, ay?.branchId)) { branchDenied(res, 'Students'); return; }
+  }
 
   const where: any = {
     academicYearId: ayId,
@@ -2574,6 +2609,11 @@ router.get('/families', asyncHandler(async (req: Request, res: Response) => {
   if (isSearchMode && !resolvedAyId) {
     res.status(400).json({ success: false, message: 'No academic year specified' });
     return;
+  }
+  // M13: family names + student PII must not leak cross-branch.
+  if (resolvedAyId) {
+    const ay = await prisma.academicYear.findUnique({ where: { id: resolvedAyId }, select: { branchId: true } });
+    if (targetBranchMismatch(req, ay?.branchId)) { branchDenied(res, 'Families'); return; }
   }
 
   const where: any = {};
@@ -2720,6 +2760,12 @@ router.get('/families/:id', asyncHandler(async (req: Request, res: Response) => 
   const { academicYearId, feeStatus } = req.query;
   const ayId = await resolveAcademicYearId(academicYearId as string | undefined);
   if (!ayId) { res.status(400).json({ success: false, message: 'No academic year specified' }); return; }
+  // M13: dues + 50-payment history must not leak cross-branch (same guard
+  // contract as the M12 financial paths).
+  {
+    const ay = await prisma.academicYear.findUnique({ where: { id: ayId }, select: { branchId: true } });
+    if (targetBranchMismatch(req, ay?.branchId)) { branchDenied(res, 'Family'); return; }
+  }
   const statusFilter = typeof feeStatus === 'string' && feeStatus.trim() ? feeStatus.trim().toLowerCase() : '';
 
   const family = await prisma.family.findUnique({
@@ -3558,6 +3604,16 @@ router.post('/family-payments/:id/print-receipt', asyncHandler(async (req: Reque
     where: { familyPaymentId: req.params.id },
   });
   if (!receipt) { res.status(404).json({ success: false, message: 'No family receipt snapshot' }); return; }
+  {
+    const fp0 = await prisma.familyPayment.findUnique({
+      where: { id: req.params.id },
+      select: { academicYearId: true },
+    });
+    const ay0 = fp0?.academicYearId
+      ? await prisma.academicYear.findUnique({ where: { id: fp0.academicYearId }, select: { branchId: true } })
+      : null;
+    if (targetBranchMismatch(req, ay0?.branchId)) { branchDenied(res, 'Receipt'); return; }
+  }
   const updated = await prisma.familyPaymentReceipt.update({
     where: { id: receipt.id },
     data: {
@@ -3570,6 +3626,20 @@ router.post('/family-payments/:id/print-receipt', asyncHandler(async (req: Reque
 
 // GET /admin/family-payments/:id — Get family payment detail (for receipt)
 router.get('/family-payments/:id', asyncHandler(async (req: Request, res: Response) => {
+  {
+    const fp0 = await prisma.familyPayment.findUnique({
+      where: { id: req.params.id },
+      select: { academicYearId: true },
+    });
+    if (!fp0) {
+      res.status(404).json({ success: false, message: 'Not found' });
+      return;
+    }
+    const ay0 = fp0.academicYearId
+      ? await prisma.academicYear.findUnique({ where: { id: fp0.academicYearId }, select: { branchId: true } })
+      : null;
+    if (targetBranchMismatch(req, ay0?.branchId)) { branchDenied(res, 'Family payment'); return; }
+  }
   const fp = await prisma.familyPayment.findUnique({
     where: { id: req.params.id },
     include: {

@@ -191,3 +191,18 @@ describe('M10 marks/results E2E', () => {
     expect(last.content).toContain('84.5');
   });
 });
+
+describe('M13 marks cross-branch denial (zero mutation)', () => {
+  const token = () => getAuthHeader(generateTestToken(ids.admin, 'super_admin'));
+
+  test('marks entry against another branch scope denied with zero rows', async () => {
+    const before = await prisma.marksEntry.count({ where: { studentId: { in: [ids.stA, ids.stB] } } });
+    const res = await request(app)
+      .post(`/admin/result/structure/subjects/${ids.ecs}/marks`)
+      .query({ branchId: 'other-branch', academicYearId: ids.ay })
+      .set(token())
+      .send({ entries: [{ studentId: ids.stA, marksObtained: 10 }] });
+    expect([400, 403, 404]).toContain(res.status);
+    expect(await prisma.marksEntry.count({ where: { studentId: { in: [ids.stA, ids.stB] } } })).toBe(before);
+  });
+});

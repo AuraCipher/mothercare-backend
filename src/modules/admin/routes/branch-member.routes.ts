@@ -56,12 +56,38 @@ router.put('/:branchId/members/:userId', asyncHandler(async (req: Request, res: 
     return;
   }
 
+  // M13: only super_admin may alter a branch_admin's membership (demoting or
+  // removing the principal via the generic member endpoints was possible for
+  // any management user).
+  if ((req as any).user?.role !== 'super_admin') {
+    const existing = await prisma.branchMember.findUnique({
+      where: { branchId_userId: { branchId: req.params.branchId, userId: req.params.userId } },
+      select: { role: true },
+    });
+    if (existing?.role === 'branch_admin') {
+      res.status(403).json({ success: false, message: 'Only super_admin can change a branch_admin membership' });
+      return;
+    }
+  }
+
   const member = await branchMemberService.updateRole(req.params.branchId, req.params.userId, { role, keepTeacherRole, updatedById: (req as any).user?.id });
   res.json({ success: true, data: member });
 }));
 
 // DELETE /admin/branches/:branchId/members/:userId — Remove member
 router.delete('/:branchId/members/:userId', asyncHandler(async (req: Request, res: Response) => {
+  // M13: same guard as role changes (the service only protects the LAST
+  // admin; any management user could otherwise remove a principal).
+  if ((req as any).user?.role !== 'super_admin') {
+    const existing = await prisma.branchMember.findUnique({
+      where: { branchId_userId: { branchId: req.params.branchId, userId: req.params.userId } },
+      select: { role: true },
+    });
+    if (existing?.role === 'branch_admin') {
+      res.status(403).json({ success: false, message: 'Only super_admin can remove a branch_admin membership' });
+      return;
+    }
+  }
   await branchMemberService.removeMember(req.params.branchId, req.params.userId);
   res.status(204).json({ success: true, message: 'Member removed' });
 }));

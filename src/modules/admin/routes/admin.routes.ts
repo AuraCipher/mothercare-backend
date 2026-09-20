@@ -37,6 +37,18 @@ router.use(branchScopeMiddleware);
 // Module RBAC for restricted staff (after branch scope)
 router.use(staffPermissionMiddleware);
 
+/** M13 cross-branch guard (same contract as the M12 financial guard):
+ *  the target academic year's branch must match the request's explicit
+ *  branch. Skips when either side is unresolvable (mocked unit tests). */
+function targetBranchMismatch(req: Request, targetBranchId?: string | null): boolean {
+  const explicit = (req.query.branchId as string) || (req.body as any)?.branchId;
+  return !!explicit && !!targetBranchId && explicit !== targetBranchId;
+}
+
+function branchDenied(res: Response, what = 'Target') {
+  res.status(403).json({ success: false, message: `${what} does not belong to the requested branch` });
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Phase 02: Branch + Academic Year System Routes
 // ═══════════════════════════════════════════════════════════════════
@@ -144,8 +156,11 @@ router.post('/users', asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-  // Privilege escalation guard: restrict which roles can be created
-  const allowedRoles = ['parent', 'teacher', 'student', 'staff', 'canteen_staff'];
+  // Privilege escalation guard: restrict which roles can be created.
+  // M13: only real Role-enum values are accepted ('staff'/'canteen_staff'
+  // are BranchRoles, not logins — they previously passed validation and
+  // crashed with a 500 Prisma enum error).
+  const allowedRoles = ['parent', 'teacher', 'student'];
   const requestedRole = role || 'parent';
   const userRole = (req as any).user?.role;
 
@@ -185,6 +200,17 @@ router.post('/users', asyncHandler(async (req: Request, res: Response) => {
 
 router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../../lib/prisma'));
+  // M13: a non-super_admin must not deactivate a super_admin (previously any
+  // management user could disable the highest authority).
+  const target = await prisma.user.findUnique({ where: { id: req.params.id }, select: { role: true } });
+  if (!target) {
+    res.status(404).json({ success: false, message: 'User not found' });
+    return;
+  }
+  if (target.role === 'super_admin' && (req as any).user?.role !== 'super_admin') {
+    res.status(403).json({ success: false, message: 'Only super_admin can deactivate a super_admin user' });
+    return;
+  }
   const user = await prisma.user.update({
     where: { id: req.params.id },
     data: { status: 'inactive' },
@@ -225,11 +251,16 @@ router.get('/groups/:id', asyncHandler(async (req: Request, res: Response) => {
     include: {
       members: { include: { user: { select: { id: true, name: true, role: true } } } },
       students: true,
-      academicYear: { select: { id: true } },
+      academicYear: { select: { id: true, branchId: true } },
     },
   });
   if (!group) {
     res.status(404).json({ success: false, message: 'Group not found' });
+    return;
+  }
+  // M13: cross-branch read of member/student PII must not succeed.
+  if (targetBranchMismatch(req, (group.academicYear as { branchId?: string } | null)?.branchId)) {
+    branchDenied(res, 'Group');
     return;
   }
   res.json({ success: true, data: group });
@@ -239,10 +270,13 @@ router.post('/groups', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../../lib/prisma'));
   let { academicYearId, name, section, displayOrder, capacity } = req.body;
 
-  // If no academicYearId provided, auto-assign to the current ACTIVE academic year
+  // If no academicYearId provided, auto-assign to the current ACTIVE academic year.
+  // M13: scoped to the requested branch when one is given — the previous
+  // global lookup could create a group in another branch's year.
   if (!academicYearId) {
+    const explicitBranch = (req.query.branchId as string) || req.body?.branchId;
     const activeAy = await prisma.academicYear.findFirst({
-      where: { status: 'ACTIVE' },
+      where: { status: 'ACTIVE', ...(explicitBranch ? { branchId: explicitBranch } : {}) },
       select: { id: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -251,6 +285,11 @@ router.post('/groups', asyncHandler(async (req: Request, res: Response) => {
       return;
     }
     academicYearId = activeAy.id;
+  }
+  // M13: the target year must belong to the requested branch.
+  {
+    const ay = await prisma.academicYear.findUnique({ where: { id: academicYearId }, select: { branchId: true } });
+    if (targetBranchMismatch(req, ay?.branchId)) { branchDenied(res, 'Academic year'); return; }
   }
 
   const group = await prisma.group.create({
@@ -269,6 +308,16 @@ router.post('/groups', asyncHandler(async (req: Request, res: Response) => {
 
 router.delete('/groups/:id', asyncHandler(async (req: Request, res: Response) => {
   const { prisma } = (await import('../../../lib/prisma'));
+  // M13: deactivating another branch's classroom must not succeed.
+  const target = await prisma.group.findUnique({
+    where: { id: req.params.id },
+    select: { academicYear: { select: { branchId: true } } },
+  });
+  if (!target) {
+    res.status(404).json({ success: false, message: 'Group not found' });
+    return;
+  }
+  if (targetBranchMismatch(req, target.academicYear?.branchId)) { branchDenied(res, 'Group'); return; }
   await prisma.group.update({
     where: { id: req.params.id },
     data: { isActive: false },
