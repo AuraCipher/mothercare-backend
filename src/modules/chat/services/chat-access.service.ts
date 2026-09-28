@@ -136,6 +136,7 @@ type ChatListContext = {
   teacherAssignments: Map<string, Set<string>>; // classGroupId -> Set<teacherId>
   classTeacherAssignments: Map<string, Set<string>>; // classGroupId -> Set<teacherId> (isClassTeacher)
   fullGroupRooms: Map<string, { teacherAssignmentId: string | null; communityId: string | null }>;
+  groupRoomTeacherByAssignment: Map<string, string>; // teacherAssignmentId -> teacherId
   classRolePostMap: Map<string, boolean>; // communityId -> user has canPostInGroups role
   readStates: Map<string, { lastReadAt: Date | null }>;
   messageCounts: Map<string, number>; // roomId -> total non-deleted count
@@ -254,9 +255,11 @@ function computeCanPostFromContext(
     }
     if (!roomAllowed) {
       const full = ctx.fullGroupRooms.get(room.id);
+      // Subject room's own teacher (mirrors canPostGroupChat single-room path).
       if (full?.teacherAssignmentId) {
-        const teachers = ctx.teacherAssignments.get(full.teacherAssignmentId);
-        if (teachers?.has(userId)) roomAllowed = true;
+        if (ctx.groupRoomTeacherByAssignment.get(full.teacherAssignmentId) === userId) {
+          roomAllowed = true;
+        }
       }
       if (!roomAllowed && full?.communityId) {
         if (ctx.classRolePostMap.get(full.communityId)) roomAllowed = true;
@@ -433,6 +436,22 @@ async function buildChatListContext(
     }
   }
 
+  // 7b. Subject-room teachers by assignment (for group_chat teacherAssignmentId).
+  // teacherAssignments above is keyed by classGroupId and cannot be looked
+  // up by assignment id — that wrong-key lookup forced canPost=false on
+  // every teacher subject room.
+  const groupRoomTeacherByAssignment = new Map<string, string>();
+  const groupTeacherAssignmentIds = [...new Set(
+    [...fullGroupRooms.values()].map((r) => r.teacherAssignmentId).filter(Boolean),
+  )] as string[];
+  if (groupTeacherAssignmentIds.length > 0) {
+    const taRows = await prisma.teacherAssignment.findMany({
+      where: { id: { in: groupTeacherAssignmentIds } },
+      select: { id: true, teacherId: true },
+    });
+    for (const ta of taRows) groupRoomTeacherByAssignment.set(ta.id, ta.teacherId);
+  }
+
   // 8. Class role assignments (for group_chat with community)
   const classRolePostMap = new Map<string, boolean>();
   const communityIds = [...new Set(
@@ -508,6 +527,7 @@ async function buildChatListContext(
     teacherAssignments,
     classTeacherAssignments,
     fullGroupRooms,
+    groupRoomTeacherByAssignment,
     classRolePostMap,
     readStates,
     messageCounts,
