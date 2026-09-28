@@ -1,10 +1,12 @@
 import jwt from 'jsonwebtoken';
 import env from '../config/env';
-import { getUpstashRedis } from '../config/redis';
+import { checkBlacklisted, isBlacklistConfigured, putBlacklist } from '../config/blacklist-store';
 
 // ─── JWT Token Management ─────────────────────────────────────
-// Uses Upstash KV for token blacklisting (logout/revocation).
-// Falls back gracefully if Upstash is not configured.
+// Token blacklisting (logout/revocation) via src/config/blacklist-store —
+// uses whichever backend is configured: local/self-hosted TCP Redis
+// (REDIS_URL), Upstash over TCP/TLS, or Upstash REST, in any combination.
+// Falls back gracefully if none is configured.
 // ──────────────────────────────────────────────────────────────
 
 export function signToken(payload: {
@@ -28,21 +30,21 @@ export function verifyToken(token: string) {
   }) as any;
 }
 
-// ─── Blacklist (Redis-only with TTL eviction) ──────────────────────
-// Tokens are blacklisted in Upstash with TTL matching their remaining
-// expiry. No in-memory cache — prevents unbounded memory growth in
-// long-running processes. Falls back gracefully if Upstash is not configured.
+// ─── Blacklist (Redis with TTL eviction) ─────────────────────────
+// Tokens are blacklisted with TTL matching their remaining expiry, on
+// every configured backend (see blacklist-store.ts). No in-memory cache —
+// prevents unbounded memory growth in long-running processes. Falls back
+// gracefully if no blacklist backend is configured.
 
 /** Store a revoked token in Redis with TTL until it expires */
 export async function blacklistToken(token: string): Promise<void> {
   try {
-    const client = getUpstashRedis();
-    if (!client) return; // Upstash not configured, skip
+    if (!isBlacklistConfigured()) return; // no blacklist backend, skip
 
     const decoded = verifyToken(token) as any;
     const ttl = decoded.exp - Math.floor(Date.now() / 1000);
     if (ttl > 0) {
-      await client.set(`blacklist:${token}`, '1', { ex: ttl });
+      await putBlacklist(token, ttl);
     }
   } catch (e: any) {
     console.warn('[JWT] blacklist failed:', e.message);
@@ -55,16 +57,15 @@ const BLACKLIST_TIMEOUT_MS = 3_000;
 /** Check if a token has been revoked */
 export async function isBlacklisted(token: string): Promise<boolean> {
   try {
-    const client = getUpstashRedis();
-    if (!client) return false; // Upstash not configured, allow all
+    if (!isBlacklistConfigured()) return false; // no blacklist backend, allow all
 
     const result = await Promise.race([
-      client.get(`blacklist:${token}`),
+      checkBlacklisted(token),
       new Promise<null>((_, reject) =>
         setTimeout(() => reject(new Error('blacklist timeout')), BLACKLIST_TIMEOUT_MS),
       ),
     ]);
-    return result !== null;
+    return result === true;
   } catch (e: any) {
     console.warn('[JWT] blacklist check failed:', e.message);
     // Fail closed: deny if we can't verify — safer to reject a valid token

@@ -62,5 +62,13 @@ export async function testTcpRedisConnection(): Promise<boolean> {
 }
 
 export async function closeRedisConnection(): Promise<void> {
+  // Close the shared blacklist TCP client if it was opened.
+  // (Dynamic import avoids a static cycle: blacklist-store imports this module.)
+  try {
+    const { closeBlacklistTcp } = await import('./blacklist-store');
+    await closeBlacklistTcp();
+  } catch {
+    // shutdown path — ignore
+  }
   // BullMQ queue/worker instances own their connections and are closed separately.
 }

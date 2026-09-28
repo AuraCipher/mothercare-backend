@@ -2,6 +2,7 @@ import logger from './logger';
 import env from '../config/env';
 import { testRedisConnection } from '../config/redis';
 import { closeRedisConnection, testTcpRedisConnection } from '../config/redis-tcp';
+import { describeBlacklistBackends } from '../config/blacklist-store';
 import { closeMessageQueue } from '../queues/message.queue';
 import { closeChatQueue } from '../queues/chat.queue';
 import { stopMessageWorker } from '../queues/message.worker';
@@ -86,6 +87,11 @@ export async function runStartupChecks(): Promise<CheckResult[]> {
     });
     markDegraded('tcpRedis', env.REDIS_URL ? 'Unreachable — queue disabled' : 'Not configured');
   }
+
+  // ─── 5. JWT blacklist backend selection ───────────────────
+  // Shows which backend(s) revocation checks will use: local/self-hosted
+  // TCP (REDIS_URL), Upstash TCP/TLS, Upstash REST — or disabled.
+  results.push({ name: 'JWT Blacklist', status: 'ok', detail: describeBlacklistBackends() });
 
   return results;
 }
