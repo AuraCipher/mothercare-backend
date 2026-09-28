@@ -1062,33 +1062,22 @@ async function applySaleStockDeltas(
     const upb = Math.max(1, Number(upbResult[0].unitsPerBox || 1));
     const qty = item.quantity;
 
-    if (upb <= 1) {
-      // Simple case: stockUnits is the only field
-      const dec = await tx.$queryRaw<{ id: string }[]>`
-        UPDATE "canteen_products" SET "stockUnits" = "stockUnits" - ${qty}
-        WHERE "id" = ${item.productId} AND "stockUnits" >= ${qty}
-        RETURNING "id"
-      `;
-      if (!dec.length) httpError(400, 'Insufficient stock');
-    } else {
-      // Box + unit case: try loose units first, then break boxes
-      const dec1 = await tx.$queryRaw<{ id: string }[]>`
-        UPDATE "canteen_products" SET "stockUnits" = "stockUnits" - ${qty}
-        WHERE "id" = ${item.productId} AND "stockUnits" >= ${qty}
-        RETURNING "id"
-      `;
-      if (!dec1.length) {
-        const dec2 = await tx.$queryRaw<{ id: string }[]>`
-          UPDATE "canteen_products"
-          SET "stockBoxes" = "stockBoxes" - ${Math.ceil(qty / upb)},
-              "stockUnits" = "stockUnits" + ${upb} - ${qty}
-          WHERE "id" = ${item.productId}
-            AND ("stockBoxes" * ${upb} + "stockUnits") >= ${qty}
-          RETURNING "id"
-        `;
-        if (!dec2.length) httpError(400, 'Insufficient stock');
-      }
-    }
+    // Total-based decrement + re-normalization into boxes/units in a single
+    // statement. The old two-step (loose units first, then break boxes) credited
+    // back only `upb - qty` when breaking a box instead of
+    // `ceil(qty/upb) * upb - qty`, losing (ceil(qty/upb)-1)*upb units per sale
+    // and driving stockUnits/stockBoxes negative whenever qty > unitsPerBox.
+    // The total guard also covers the upb<=1 case (stock folded into stockBoxes
+    // by normalizeStock), which the old stockUnits-only branch never matched.
+    const dec = await tx.$queryRaw<{ id: string }[]>`
+      UPDATE "canteen_products"
+      SET "stockBoxes" = (("stockBoxes" * ${upb} + "stockUnits" - ${qty}) / ${upb}),
+          "stockUnits" = (("stockBoxes" * ${upb} + "stockUnits" - ${qty}) % ${upb})
+      WHERE "id" = ${item.productId}
+        AND ("stockBoxes" * ${upb} + "stockUnits") >= ${qty}
+      RETURNING "id"
+    `;
+    if (!dec.length) httpError(400, 'Insufficient stock');
   }
 }
 
@@ -1226,69 +1215,68 @@ export async function createSaleWithPaymentSplit(
     ? buildPricedLineItems(creditItems, productMap)
     : [];
 
-  const cashTotal = lineItemsTotal(cashLineItems);
-  const creditTotal = lineItemsTotal(creditLineItems);
-
-  if (Math.abs(cashTotal - data.cashAmount) > 0.02 || Math.abs(creditTotal - data.creditAmount) > 0.02) {
-    httpError(400, 'Could not split products between cash and credit — adjust amounts');
-  }
+  // The entered cash/credit amounts are the authoritative money values; product units are whole
+  // and usually cannot be summed to match them exactly (e.g. Rs 60 cash against units of 40+60).
+  // Units are therefore attributed to the cash/credit records on a best-effort basis — every unit
+  // still lands on exactly one record so stock and product reports stay complete — while each
+  // record stores the money that was actually entered.
 
   return prisma.$transaction(async (tx) => {
     const sales = [];
 
-    if (cashLineItems.length > 0) {
+    if (data.cashAmount > 0 || cashLineItems.length > 0) {
       sales.push(await createSaleRecord(tx, branchId, {
         paymentType: CanteenSalePaymentType.CASH,
         lineItems: cashLineItems,
-        totalAmount: cashTotal,
+        totalAmount: data.cashAmount,
         canteenAccountId: null,
       }, createdById));
     }
 
-    if (creditLineItems.length > 0) {
+    if (data.creditAmount > 0 || creditLineItems.length > 0) {
       let creditPool = pricedItemsFromSaleInputs(creditItems, productMap);
 
-      if (allocations.length > 0) {
-        for (const allocation of allocations) {
-          const { taken, remainder } = splitPricedItemsByAmount(creditPool, allocation.amount);
-          if (taken.length === 0) {
-            httpError(400, 'Could not split products for a credit allocation — adjust amounts');
+      if (allocations.length > 0 && data.creditAmount > 0) {
+        for (let i = 0; i < allocations.length; i++) {
+          const allocation = allocations[i];
+          // Units cannot be split mid-product, so the final allocation absorbs any leftover
+          // units — that keeps every credit unit attached to a sale record for reporting.
+          let taken: SaleItemInput[];
+          if (i === allocations.length - 1) {
+            taken = pricedItemsToSaleInputs(creditPool);
+            creditPool = [];
+          } else {
+            const split = splitPricedItemsByAmount(creditPool, allocation.amount);
+            taken = split.taken;
+            creditPool = split.remainder;
           }
-          const takenLineItems = buildPricedLineItems(taken, productMap);
-          const takenTotal = lineItemsTotal(takenLineItems);
-          if (Math.abs(takenTotal - allocation.amount) > 0.02) {
-            httpError(400, 'Could not match a credit allocation to product units — adjust amounts');
-          }
+          const takenLineItems = taken.length ? buildPricedLineItems(taken, productMap) : [];
           const accountId = await resolveCreditAccountId(
             tx,
             branchId,
-            takenTotal,
+            allocation.amount,
             allocation,
             createdById,
           );
           sales.push(await createSaleRecord(tx, branchId, {
             paymentType: CanteenSalePaymentType.CREDIT,
             lineItems: takenLineItems,
-            totalAmount: takenTotal,
+            totalAmount: allocation.amount,
             canteenAccountId: accountId,
           }, createdById));
-          creditPool = remainder;
-        }
-        if (creditPool.length > 0) {
-          httpError(400, 'Credit allocations did not cover all credit items');
         }
       } else {
         const accountId = await resolveCreditAccountId(
           tx,
           branchId,
-          creditTotal,
+          data.creditAmount,
           data,
           createdById,
         );
         sales.push(await createSaleRecord(tx, branchId, {
           paymentType: CanteenSalePaymentType.CREDIT,
           lineItems: creditLineItems,
-          totalAmount: creditTotal,
+          totalAmount: data.creditAmount,
           canteenAccountId: accountId,
         }, createdById));
       }

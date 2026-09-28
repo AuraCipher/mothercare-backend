@@ -1,6 +1,6 @@
 import { prismaMock } from '../../mocks/prisma';
 import * as canteenService from '../../../src/modules/canteen/canteen.service';
-import { CanteenSupplierPaymentDirection } from '@prisma/client';
+import { CanteenPersonType, CanteenSupplierPaymentDirection } from '@prisma/client';
 
 const branchId = 'branch-1';
 
@@ -230,6 +230,152 @@ describe('CanteenService', () => {
           'user-1',
         ),
       ).rejects.toMatchObject({ status: 400, message: expect.stringContaining('Insufficient stock') });
+    });
+
+    test('decrements stock with total-based box re-normalization', async () => {
+      prismaMock.canteenProduct.findMany.mockResolvedValue([
+        {
+          id: 'p1',
+          name: 'Coke',
+          unitPrice: { valueOf: () => 50 },
+          stockBoxes: 1,
+          stockUnits: 1,
+          unitsPerBox: 6,
+          isActive: true,
+        },
+      ] as any);
+      prismaMock.canteenSale.create.mockResolvedValue({
+        id: 's1',
+        paymentType: 'CASH',
+        totalAmount: 350,
+        items: [],
+      } as any);
+      // FOR UPDATE lock, then the single atomic decrement
+      (prismaMock.$queryRaw as any)
+        .mockResolvedValueOnce([{ unitsPerBox: 6 }])
+        .mockResolvedValueOnce([{ id: 'p1' }]);
+
+      await canteenService.createSale(
+        branchId,
+        { paymentType: 'CASH', items: [{ productId: 'p1', quantity: 7 }] },
+        'user-1',
+      );
+
+      expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
+      const sql = (prismaMock.$queryRaw as any).mock.calls[1][0].join('');
+      // Total-based re-normalization: (boxes*upb + units - qty) div/mod upb
+      expect(sql).toContain('("stockBoxes" * ');
+      expect(sql).toContain(') % ');
+      expect(sql).toContain('RETURNING "id"');
+      // The old two-step box-break (stockUnits + upb - qty, i.e. crediting back
+      // only ONE box no matter how many the quantity needed) lost
+      // (ceil(qty/upb)-1)*upb units per sale and drove stock negative.
+      expect(sql).not.toContain('"stockUnits" + ');
+      expect(sql).not.toContain('"stockBoxes" - ');
+    });
+  });
+
+  describe('createSaleWithPaymentSplit', () => {
+    // Two units (Rs 40 + Rs 60) so cash/credit amounts like 60/40 cannot be formed by
+    // summing whole units in line order — the exact case that used to return 400.
+    const items = [
+      { productId: 'p1', quantity: 1 },
+      { productId: 'p2', quantity: 1 },
+    ];
+
+    function mockProducts() {
+      prismaMock.canteenProduct.findMany.mockResolvedValue([
+        { id: 'p1', name: 'Chips', unitPrice: { valueOf: () => 40 }, stockBoxes: 0, stockUnits: 10, unitsPerBox: null, isActive: true },
+        { id: 'p2', name: 'Juice', unitPrice: { valueOf: () => 60 }, stockBoxes: 0, stockUnits: 10, unitsPerBox: null, isActive: true },
+      ] as any);
+    }
+
+    function saleCreateArgs(index: number) {
+      return (prismaMock.canteenSale.create as jest.Mock).mock.calls[index][0];
+    }
+
+    beforeEach(() => {
+      prismaMock.canteenSale.create.mockResolvedValue({ id: 'sale-1' } as any);
+      // applySaleStockDeltas: FOR UPDATE lock select + atomic decrement per product
+      prismaMock.$queryRaw.mockResolvedValue([{ id: 'row-1', unitsPerBox: 1 }] as any);
+    });
+
+    test('accepts a cash/credit split that whole units cannot match exactly', async () => {
+      mockProducts();
+      prismaMock.canteenAccount.findFirst.mockResolvedValue({ id: 'acc-1', branchId } as any);
+      prismaMock.canteenAccount.update.mockResolvedValue({} as any);
+
+      const sales = await canteenService.createSaleWithPaymentSplit(
+        branchId,
+        { items, cashAmount: 60, creditAmount: 40, accountId: 'acc-1' },
+        'user-1',
+      );
+
+      expect(sales).toHaveLength(2);
+      expect(prismaMock.canteenSale.create).toHaveBeenCalledTimes(2);
+      // Records carry the entered money, not the whole-unit sums (40/60).
+      expect(saleCreateArgs(0).data.paymentType).toBe('CASH');
+      expect(Number(saleCreateArgs(0).data.totalAmount)).toBe(60);
+      expect(saleCreateArgs(1).data.paymentType).toBe('CREDIT');
+      expect(Number(saleCreateArgs(1).data.totalAmount)).toBe(40);
+      expect(saleCreateArgs(1).data.canteenAccountId).toBe('acc-1');
+      // Account balance grows by the entered credit amount.
+      const updateArgs = prismaMock.canteenAccount.update.mock.calls[0]?.[0] as any;
+      expect(Number(updateArgs.data.runningBalance.increment)).toBe(40);
+      // Every unit is still attached to exactly one record.
+      const attached = [0, 1].flatMap((i) => (saleCreateArgs(i).data.items.create as any[]).map((li) => `${li.productId}:${li.quantity}`));
+      expect(attached.sort()).toEqual(['p1:1', 'p2:1']);
+    });
+
+    test('accepts credit allocations that whole units cannot match exactly', async () => {
+      mockProducts();
+      prismaMock.student.findFirst.mockResolvedValue({ id: 's1', name: 'Ali', phone: null } as any);
+      prismaMock.canteenAccount.findFirst.mockResolvedValue(null);
+      prismaMock.canteenAccount.create.mockResolvedValue({ id: 'acc-new' } as any);
+
+      const sales = await canteenService.createSaleWithPaymentSplit(
+        branchId,
+        {
+          items,
+          cashAmount: 0,
+          creditAmount: 100,
+          creditAllocations: [
+            { personType: CanteenPersonType.STUDENT, studentId: 's1', amount: 50 },
+            { personType: CanteenPersonType.STUDENT, studentId: 's2', amount: 50 },
+          ],
+        },
+        'user-1',
+      );
+
+      expect(sales).toHaveLength(2);
+      expect(prismaMock.canteenSale.create).toHaveBeenCalledTimes(2);
+      expect(Number(saleCreateArgs(0).data.totalAmount)).toBe(50);
+      expect(Number(saleCreateArgs(1).data.totalAmount)).toBe(50);
+      expect(saleCreateArgs(0).data.paymentType).toBe('CREDIT');
+      expect(saleCreateArgs(1).data.paymentType).toBe('CREDIT');
+      // Leftover units fall on the final allocation so no unit is dropped from reports.
+      const attached = [0, 1].flatMap((i) => (saleCreateArgs(i).data.items.create as any[]).map((li) => `${li.productId}:${li.quantity}`));
+      expect(attached.sort()).toEqual(['p1:1', 'p2:1']);
+      // Each person's balance grows by their allocated money.
+      expect(prismaMock.canteenAccount.create).toHaveBeenCalledTimes(2);
+      expect(Number((prismaMock.canteenAccount.create.mock.calls[0][0] as any).data.runningBalance)).toBe(50);
+      expect(Number((prismaMock.canteenAccount.create.mock.calls[1][0] as any).data.runningBalance)).toBe(50);
+    });
+
+    test('still records an all-cash sale as a single cash record', async () => {
+      mockProducts();
+
+      const sales = await canteenService.createSaleWithPaymentSplit(
+        branchId,
+        { items, cashAmount: 100, creditAmount: 0 },
+        'user-1',
+      );
+
+      expect(sales).toHaveLength(1);
+      expect(prismaMock.canteenSale.create).toHaveBeenCalledTimes(1);
+      expect(saleCreateArgs(0).data.paymentType).toBe('CASH');
+      expect(Number(saleCreateArgs(0).data.totalAmount)).toBe(100);
+      expect(prismaMock.canteenAccount.update).not.toHaveBeenCalled();
     });
   });
 });

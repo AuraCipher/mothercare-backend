@@ -55,7 +55,12 @@ export function formatStockLabel(
   unitsPerBox: number | null | undefined,
 ): string {
   const upb = unitsPerBoxOf(unitsPerBox);
-  if (upb <= 1) return `${stockUnits} unit${stockUnits === 1 ? '' : 's'}`;
+  if (upb <= 1) {
+    // normalizeStock folds non-boxed stock into stockBoxes when unitsPerBox is 1,
+    // so read the total, not just stockUnits.
+    const total = stockBoxes * upb + stockUnits;
+    return `${total} unit${total === 1 ? '' : 's'}`;
+  }
   const parts: string[] = [];
   if (stockBoxes > 0) parts.push(`${stockBoxes} box${stockBoxes === 1 ? '' : 'es'}`);
   if (stockUnits > 0) parts.push(`${stockUnits} unit${stockUnits === 1 ? '' : 's'}`);

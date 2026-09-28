@@ -22,6 +22,19 @@ describe('canteen-stock', () => {
     expect(formatStockLabel(0, 0, 12)).toBe('0 units');
   });
 
+  test('normalizeStock folds non-boxed stock into boxes when unitsPerBox is 1', () => {
+    expect(normalizeStock(0, 6, 1)).toEqual({ stockBoxes: 6, stockUnits: 0 });
+  });
+
+  test('formatStockLabel reads the total when unitsPerBox is 1', () => {
+    // normalizeStock stores upb=1 stock in stockBoxes — the label must not
+    // report "0 units" for it (same class of bug as the sales picker showing
+    // "1 box" while inventory showed "6 units").
+    expect(formatStockLabel(6, 0, 1)).toBe('6 units');
+    expect(formatStockLabel(0, 3, 1)).toBe('3 units');
+    expect(formatStockLabel(1, 1, 1)).toBe('2 units');
+  });
+
   test('aggregateSaleItemQuantities merges duplicate product lines', () => {
     expect(
       aggregateSaleItemQuantities([

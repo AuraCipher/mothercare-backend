@@ -268,7 +268,7 @@ function mockCanteenStaffMembership() {
 // DB-05: Mock $queryRaw for routes that use FOR UPDATE locking.
 // Must be called before sendRequest for POST sales / supplier payments / account payments.
 function mockQueryRawForRoute(label: string) {
-  if (label === 'POST sales' || label.startsWith('cash sale') || label === 'credit sale existing account' || label === 'split payment cash+credit' || label === 'cash sale decrements stock') {
+  if (label === 'POST sales' || label.startsWith('cash sale') || label === 'credit sale existing account' || label.startsWith('split payment') || label === 'cash sale decrements stock') {
     // applySaleStockDeltas: FOR UPDATE lock + atomic decrement
     (prismaMock.$queryRaw as any)
       .mockResolvedValueOnce([{ unitsPerBox: 1 }])
@@ -807,6 +807,9 @@ describe('Canteen integration routes', () => {
       ['cash sale multi qty', { paymentType: 'CASH', items: [{ productId: prodId, quantity: 3 }] }, 201],
       ['credit sale existing account', { paymentType: 'CREDIT', accountId: acctId, items: [{ productId: prodId, quantity: 1 }] }, 201],
       ['split payment cash+credit', { items: [{ productId: prodId, quantity: 2 }], cashAmount: 50, creditAmount: 50, accountId: acctId }, 201],
+      // Regression: cash/credit amounts that cannot be formed by summing whole product units
+      // (2 × Rs 50 units, Rs 60 cash) used to fail with "Could not split products…" 400.
+      ['split payment uneven cash+credit', { items: [{ productId: prodId, quantity: 2 }], cashAmount: 60, creditAmount: 40, accountId: acctId }, 201],
       ['list sales today', null, 200],
       ['list sales by date', null, 200],
       ['summary by date', null, 200],

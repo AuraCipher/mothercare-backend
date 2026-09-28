@@ -2,6 +2,7 @@ import { PayrollPayeeType } from '@prisma/client';
 import { prisma } from '../../../lib/prisma';
 import {
   attendancePayWeight,
+  calendarDayKey,
   monthBounds,
   prevSalaryMonth,
 } from '../utils/employee-attendance';
@@ -161,27 +162,11 @@ export async function buildPayrollContext(
 // IN-MEMORY DATE VALIDATION (replaces per-day DB queries)
 // ═══════════════════════════════════════════════════════════════════
 
-function startOfDay(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-function endOfDay(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(23, 59, 59, 999);
-  return x;
-}
-
 function dateInTenure(dateObj: Date, tenures: { joinedAt: Date; leftAt: Date | null }[]): boolean {
-  const d = startOfDay(dateObj);
+  const d = calendarDayKey(dateObj);
   return tenures.some((t) => {
-    const joined = startOfDay(t.joinedAt);
-    if (d < joined) return false;
-    if (t.leftAt) {
-      const left = endOfDay(t.leftAt);
-      if (d > left) return false;
-    }
+    if (d < calendarDayKey(t.joinedAt)) return false;
+    if (t.leftAt && d > calendarDayKey(t.leftAt)) return false;
     return true;
   });
 }
@@ -228,17 +213,13 @@ function isDateValidFromContext(
 
   // Fallback: profile joining date validation
   const joiningDate = ctx.joiningDates.get(userId);
-  if (joiningDate) {
-    if (startOfDay(dateObj) < startOfDay(joiningDate)) {
-      return 'Cannot mark attendance before employee joining date';
-    }
+  if (joiningDate && calendarDayKey(dateObj) < calendarDayKey(joiningDate)) {
+    return 'Cannot mark attendance before employee joining date';
   }
 
   // Inactive member with resigned date
-  if (!member.isActive && member.resignedAt) {
-    if (dateObj > endOfDay(member.resignedAt)) {
-      return 'Cannot mark attendance after employee leave date';
-    }
+  if (!member.isActive && member.resignedAt && calendarDayKey(dateObj) > calendarDayKey(member.resignedAt)) {
+    return 'Cannot mark attendance after employee leave date';
   }
 
   return null;

@@ -1,28 +1,35 @@
 import { prisma } from '../../../lib/prisma';
 import { validateAttendanceDate } from './attendance-scope';
 
-function startOfDay(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-function endOfDay(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(23, 59, 59, 999);
-  return x;
+/**
+ * Calendar-day key (YYYYMMDD) for comparing attendance dates against
+ * join/leave timestamps.
+ *
+ * The API sends attendance dates as 'YYYY-MM-DD', which `new Date()` parses
+ * to exactly UTC midnight. On a server west of UTC that instant falls on the
+ * PREVIOUS local day, so a naive local startOfDay() made "today" look like it
+ * was before a tenure that started today. Date-only values (exact UTC
+ * midnight) therefore keep their UTC day, while real timestamps (tenure
+ * joinedAt/leftAt, resignations) use the server's local calendar day — the
+ * operator's timezone.
+ */
+export function calendarDayKey(t: Date): number {
+  const isDateOnly =
+    t.getUTCHours() === 0 &&
+    t.getUTCMinutes() === 0 &&
+    t.getUTCSeconds() === 0 &&
+    t.getUTCMilliseconds() === 0;
+  return isDateOnly
+    ? t.getUTCFullYear() * 10000 + (t.getUTCMonth() + 1) * 100 + t.getUTCDate()
+    : t.getFullYear() * 10000 + (t.getMonth() + 1) * 100 + t.getDate();
 }
 
 /** Whether `date` falls inside any tenure segment (join..leave). */
 function dateInTenure(dateObj: Date, tenures: { joinedAt: Date; leftAt: Date | null }[]): boolean {
-  const d = startOfDay(dateObj);
+  const d = calendarDayKey(dateObj);
   return tenures.some((t) => {
-    const joined = startOfDay(t.joinedAt);
-    if (d < joined) return false;
-    if (t.leftAt) {
-      const left = endOfDay(t.leftAt);
-      if (d > left) return false;
-    }
+    if (d < calendarDayKey(t.joinedAt)) return false;
+    if (t.leftAt && d > calendarDayKey(t.leftAt)) return false;
     return true;
   });
 }
@@ -61,16 +68,12 @@ export async function validateEmployeeAttendanceDate(
     },
   });
   const joiningDate = user?.teacherProfile?.joiningDate ?? user?.staffProfile?.joiningDate;
-  if (joiningDate) {
-    if (startOfDay(dateObj) < startOfDay(joiningDate)) {
-      return 'Cannot mark attendance before employee joining date';
-    }
+  if (joiningDate && calendarDayKey(dateObj) < calendarDayKey(joiningDate)) {
+    return 'Cannot mark attendance before employee joining date';
   }
 
-  if (!member.isActive && member.resignedAt) {
-    if (dateObj > endOfDay(member.resignedAt)) {
-      return 'Cannot mark attendance after employee leave date';
-    }
+  if (!member.isActive && member.resignedAt && calendarDayKey(dateObj) > calendarDayKey(member.resignedAt)) {
+    return 'Cannot mark attendance after employee leave date';
   }
 
   return null;
