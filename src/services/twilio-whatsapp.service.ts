@@ -22,6 +22,19 @@ const TWILIO_FETCH_TIMEOUT_MS = 15_000;
 
 export type CredentialRecipientType = 'student' | 'teacher' | 'staff';
 
+// ─── Approved WhatsApp template contracts (M19/M19.1) ──────
+// These layouts mirror the currently approved provider templates:
+//   teacher_wc → 4 vars: [teacherName, website, username, password]
+//   staff_wc   → 5 vars: [designation, staffName, website, username, password]
+//   student_wc → 5 vars: [studentName, class, website, username, password]
+// The counts below are enforced in sendTemplateMessage — a mismatch
+// fails closed BEFORE any provider request. Never truncate/append/reorder.
+export const TEMPLATE_VARIABLE_COUNTS: Record<CredentialRecipientType, number> = {
+  teacher: 4,
+  staff: 5,
+  student: 5,
+};
+
 const TEMPLATE_SIDS: Record<CredentialRecipientType, string | undefined> = {
   student: undefined,
   teacher: undefined,
@@ -107,6 +120,36 @@ export async function sendTemplateMessage(params: {
     );
   }
 
+  if (!from) {
+    throw new TwilioWhatsAppError(
+      'Twilio WhatsApp sender is not configured. Set TWILIO_WHATSAPP_FROM in env.',
+      'config_missing',
+      false,
+      false,
+    );
+  }
+
+  // M19.1 — fail closed on template/variable mismatch. Never truncate,
+  // append, or reorder variables to fit; the caller must build the exact
+  // approved layout for this recipient type.
+  const expectedCount = TEMPLATE_VARIABLE_COUNTS[params.recipientType];
+  if (params.bodyParameters.length !== expectedCount) {
+    throw new TwilioWhatsAppError(
+      `Template variable count mismatch for ${params.recipientType}: expected ${expectedCount}, got ${params.bodyParameters.length}.`,
+      'template_mismatch',
+      false,
+      true,
+    );
+  }
+  if (params.bodyParameters.some((p) => !p || typeof p.text !== 'string' || !p.text.trim())) {
+    throw new TwilioWhatsAppError(
+      `Template variable missing/empty for ${params.recipientType}: all ${expectedCount} variables are required.`,
+      'template_mismatch',
+      false,
+      true,
+    );
+  }
+
   const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
   const contentVariables: Record<string, string> = {};
   params.bodyParameters.forEach((p, i) => {
@@ -114,7 +157,7 @@ export async function sendTemplateMessage(params: {
   });
 
   const payload = new URLSearchParams();
-  if (from) payload.append('From', `whatsapp:+${from}`);
+  payload.append('From', `whatsapp:+${from}`);
   payload.append('To', `whatsapp:+${to}`);
   payload.append('ContentSid', templateSid);
   payload.append('ContentVariables', JSON.stringify(contentVariables));
@@ -175,18 +218,97 @@ export function templateNameForRecipient(recipientType: CredentialRecipientType)
   return recipientType;
 }
 
-export function buildCredentialParameters(params: {
+/**
+ * student_wc {{2}} renders inside the sentence "admission in Class {{2}}",
+ * so the template already supplies the word "Class". Group names in this
+ * app usually repeat it ("Class 3", "Class 10"), which would render as
+ * "Class Class 3". Strip one leading "Class" word (case-insensitive) to
+ * keep the parent-facing sentence clean. Names without the prefix
+ * ("Playgroup") pass through untouched.
+ */
+export function formatClassLabel(groupName: string, section?: string | null): string {
+  const name = groupName.trim().replace(/^class\s+/i, '').trim();
+  const label = section?.trim() ? `${name} - ${section.trim()}` : name;
+  return label;
+}
+
+function toTextParam(text: string): TwilioTemplateParameter {
+  return { type: 'text', text };
+}
+
+/**
+ * teacher_wc — approved layout (exactly 4 variables):
+ *   {{1}} teacher name, {{2}} website, {{3}} username, {{4}} password.
+ * Never append a fifth variable (e.g. app download URL).
+ */
+export function buildTeacherParameters(params: {
   name: string;
+  website: string;
   username: string;
   password: string;
-  frontendUrl: string;
-  appDownloadUrl: string;
 }): TwilioTemplateParameter[] {
+  return [toTextParam(params.name), toTextParam(params.website), toTextParam(params.username), toTextParam(params.password)];
+}
+
+/**
+ * staff_wc — approved layout (exactly 5 variables):
+ *   {{1}} designation, {{2}} staff name, {{3}} website,
+ *   {{4}} username, {{5}} password.
+ * Designation must be the real StaffProfile.workRole (BranchMember.role
+ * fallback) — never hardcoded. A missing designation fails closed here so
+ * no provider request is attempted with a shifted payload.
+ */
+export function buildStaffParameters(params: {
+  designation: string;
+  name: string;
+  website: string;
+  username: string;
+  password: string;
+}): TwilioTemplateParameter[] {
+  if (!params.designation?.trim()) {
+    throw new TwilioWhatsAppError(
+      'Staff designation is required for staff_wc ({{1}}). Add a work role/designation first.',
+      'template_mismatch',
+      false,
+      true,
+    );
+  }
   return [
-    { type: 'text', text: params.name },
-    { type: 'text', text: params.username },
-    { type: 'text', text: params.password },
-    { type: 'text', text: params.frontendUrl },
-    { type: 'text', text: params.appDownloadUrl },
+    toTextParam(params.designation),
+    toTextParam(params.name),
+    toTextParam(params.website),
+    toTextParam(params.username),
+    toTextParam(params.password),
+  ];
+}
+
+/**
+ * student_wc — approved layout (exactly 5 variables):
+ *   {{1}} student name, {{2}} class, {{3}} website,
+ *   {{4}} username, {{5}} password.
+ * Class must be the authoritative Student.group label — never hardcoded.
+ * A missing class fails closed here so no incorrect value is ever sent.
+ */
+export function buildStudentParameters(params: {
+  name: string;
+  className: string;
+  website: string;
+  username: string;
+  password: string;
+}): TwilioTemplateParameter[] {
+  if (!params.className?.trim()) {
+    throw new TwilioWhatsAppError(
+      'Student class is required for student_wc ({{2}}). Assign a class first.',
+      'template_mismatch',
+      false,
+      true,
+    );
+  }
+  return [
+    toTextParam(params.name),
+    toTextParam(params.className),
+    toTextParam(params.website),
+    toTextParam(params.username),
+    toTextParam(params.password),
   ];
 }

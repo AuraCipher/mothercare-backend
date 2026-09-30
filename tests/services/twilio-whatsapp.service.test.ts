@@ -66,7 +66,13 @@ describe('sendTemplateMessage', () => {
     const result = await sendTemplateMessage({
       to: '+923001234567',
       recipientType: 'student',
-      bodyParameters: [{ type: 'text', text: 'Test' }],
+      bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
     });
 
     expect(result.messageId).toBe('SMxxxxxxxxxxxxxx');
@@ -85,7 +91,13 @@ describe('sendTemplateMessage', () => {
     await sendTemplateMessage({
       to: '+923001234567',
       recipientType: 'student',
-      bodyParameters: [{ type: 'text', text: 'Ali' }],
+      bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
     });
 
     const callArgs = (global.fetch as jest.Mock).mock.calls[0];
@@ -107,6 +119,8 @@ describe('sendTemplateMessage', () => {
       recipientType: 'student',
       bodyParameters: [
         { type: 'text', text: 'Ali' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
         { type: 'text', text: 'ali_student' },
         { type: 'text', text: 'Temp123!' },
       ],
@@ -117,10 +131,12 @@ describe('sendTemplateMessage', () => {
     expect(body).toContain('ContentSid=HXstudent1234567890abcdef12345678');
     expect(body).toContain('ContentVariables=');
     const rawVars = body.split('ContentVariables=')[1].split('&')[0];
-    const vars = JSON.parse(decodeURIComponent(rawVars));
+    const vars = JSON.parse(decodeURIComponent(rawVars.replace(/\+/g, ' ')));
     expect(vars['1']).toBe('Ali');
-    expect(vars['2']).toBe('ali_student');
-    expect(vars['3']).toBe('Temp123!');
+    expect(vars['2']).toBe('Grade 5');
+    expect(vars['3']).toBe('https://example.invalid');
+    expect(vars['4']).toBe('ali_student');
+    expect(vars['5']).toBe('Temp123!');
   });
 
   test('formats To with whatsapp: prefix', async () => {
@@ -132,7 +148,12 @@ describe('sendTemplateMessage', () => {
     await sendTemplateMessage({
       to: '03001234567',
       recipientType: 'teacher',
-      bodyParameters: [],
+      bodyParameters: [
+        { type: 'text', text: 'Test Teacher' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
     });
 
     const callArgs = (global.fetch as jest.Mock).mock.calls[0];
@@ -148,7 +169,12 @@ describe('sendTemplateMessage', () => {
     await sendTemplateMessage({
       to: '+923001234567',
       recipientType: 'teacher',
-      bodyParameters: [],
+      bodyParameters: [
+        { type: 'text', text: 'Test Teacher' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
     });
 
     const callArgs = (global.fetch as jest.Mock).mock.calls[0];
@@ -164,7 +190,13 @@ describe('sendTemplateMessage', () => {
     await sendTemplateMessage({
       to: '+923001234567',
       recipientType: 'staff',
-      bodyParameters: [],
+      bodyParameters: [
+        { type: 'text', text: 'Test Staff' },
+        { type: 'text', text: 'Accountant' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
     });
 
     const callArgs = (global.fetch as jest.Mock).mock.calls[0];
@@ -181,7 +213,13 @@ describe('sendTemplateMessage', () => {
     await expect(sendTemplateMessage({
       to: '+923001234567',
       recipientType: 'student',
-      bodyParameters: [],
+      bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
     })).rejects.toMatchObject({
       code: 'auth_error',
       retryable: false,
@@ -198,7 +236,13 @@ describe('sendTemplateMessage', () => {
     await expect(sendTemplateMessage({
       to: '+923001234567',
       recipientType: 'student',
-      bodyParameters: [],
+      bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
     })).rejects.toMatchObject({
       code: 'rate_limit',
       retryable: true,
@@ -211,7 +255,13 @@ describe('sendTemplateMessage', () => {
     await expect(sendTemplateMessage({
       to: '+923001234567',
       recipientType: 'student',
-      bodyParameters: [],
+      bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
     })).rejects.toMatchObject({
       code: 'network_error',
       retryable: true,
@@ -228,7 +278,13 @@ describe('sendTemplateMessage', () => {
     await expect(sendTemplateMessage({
       to: '+923001234567',
       recipientType: 'student',
-      bodyParameters: [],
+      bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
     })).rejects.toMatchObject({
       code: 'recipient_error',
       solvable: true,
@@ -244,7 +300,13 @@ describe('sendTemplateMessage', () => {
     await expect(sendTemplateMessage({
       to: '+923001234567',
       recipientType: 'student',
-      bodyParameters: [],
+      bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
     })).rejects.toMatchObject({
       code: 'config_missing',
     });
@@ -261,7 +323,13 @@ describe('sendTemplateMessage', () => {
     await expect(sendTemplateMessage({
       to: '+923001234567',
       recipientType: 'student',
-      bodyParameters: [],
+      bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
     })).rejects.toMatchObject({
       code: 'invalid_response',
     });

@@ -53,7 +53,9 @@ import {
   classifyTwilioError,
   TwilioWhatsAppError,
   templateNameForRecipient,
-  buildCredentialParameters,
+  buildTeacherParameters,
+  buildStaffParameters,
+  buildStudentParameters,
 } from '../../src/services/twilio-whatsapp.service';
 import { deliverCredential } from '../../src/services/credential-delivery.service';
 
@@ -87,7 +89,13 @@ describe('R2-12c — Twilio configuration validation', () => {
       sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
       }),
     ).rejects.toMatchObject({ code: 'config_missing', retryable: false });
   });
@@ -101,7 +109,13 @@ describe('R2-12c — Twilio configuration validation', () => {
       sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
       }),
     ).rejects.toMatchObject({ code: 'config_missing', retryable: false });
   });
@@ -115,7 +129,13 @@ describe('R2-12c — Twilio configuration validation', () => {
       sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
       }),
     ).rejects.toMatchObject({ code: 'config_missing' });
   });
@@ -129,7 +149,13 @@ describe('R2-12c — Twilio configuration validation', () => {
       sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
       }),
     ).rejects.toMatchObject({ code: 'config_missing' });
   });
@@ -143,7 +169,13 @@ describe('R2-12c — Twilio configuration validation', () => {
       sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
       }),
     ).rejects.toMatchObject({ code: 'config_missing', retryable: false });
   });
@@ -332,30 +364,64 @@ describe('R2-12c — Template and parameter builders', () => {
     expect(templateNameForRecipient('staff')).toBe('staff');
   });
 
-  test('buildCredentialParameters returns 5 text parameters', () => {
-    const params = buildCredentialParameters({
-      name: 'Test User',
-      username: 'user1',
-      password: 'pass123',
-      frontendUrl: 'https://example.com',
-      appDownloadUrl: 'https://example.com/app',
+  test('buildTeacherParameters returns approved teacher_wc layout (4 vars)', () => {
+    const params = buildTeacherParameters({
+      name: 'Teacher',
+      website: 'https://example.invalid',
+      username: 'USER',
+      password: 'PASS',
+    });
+    expect(params).toHaveLength(4);
+    expect(params.map((p) => p.text)).toEqual([
+      'Teacher',
+      'https://example.invalid',
+      'USER',
+      'PASS',
+    ]);
+  });
+
+  test('buildStaffParameters returns approved staff_wc layout (5 vars)', () => {
+    const params = buildStaffParameters({
+      designation: 'Teacher',
+      name: 'Staff Member',
+      website: 'https://example.invalid',
+      username: 'USER',
+      password: 'PASS',
     });
     expect(params).toHaveLength(5);
-    expect(params[0].text).toBe('Test User');
-    expect(params[1].text).toBe('user1');
-    expect(params[2].text).toBe('pass123');
-    expect(params[3].text).toBe('https://example.com');
-    expect(params[4].text).toBe('https://example.com/app');
+    expect(params.map((p) => p.text)).toEqual([
+      'Teacher',
+      'Staff Member',
+      'https://example.invalid',
+      'USER',
+      'PASS',
+    ]);
+  });
+
+  test('buildStudentParameters returns approved student_wc layout (5 vars)', () => {
+    const params = buildStudentParameters({
+      name: 'Student',
+      className: 'Grade 5',
+      website: 'https://example.invalid',
+      username: 'USER',
+      password: 'PASS',
+    });
+    expect(params).toHaveLength(5);
+    expect(params.map((p) => p.text)).toEqual([
+      'Student',
+      'Grade 5',
+      'https://example.invalid',
+      'USER',
+      'PASS',
+    ]);
   });
 
   test('all parameters have type "text"', () => {
-    const params = buildCredentialParameters({
-      name: 'A',
-      username: 'B',
-      password: 'C',
-      frontendUrl: 'D',
-      appDownloadUrl: 'E',
-    });
+    const params = [
+      ...buildTeacherParameters({ name: 'A', website: 'B', username: 'C', password: 'D' }),
+      ...buildStaffParameters({ designation: 'E', name: 'F', website: 'G', username: 'H', password: 'I' }),
+      ...buildStudentParameters({ name: 'J', className: 'K', website: 'L', username: 'M', password: 'N' }),
+    ];
     params.forEach((p) => expect(p.type).toBe('text'));
   });
 });
@@ -380,7 +446,13 @@ describe('R2-12c — Twilio network error handling', () => {
       await sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
       });
       fail('Should have thrown');
     } catch (err: any) {
@@ -398,7 +470,13 @@ describe('R2-12c — Twilio network error handling', () => {
       await sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
       });
       fail('Should have thrown');
     } catch (err: any) {
@@ -433,7 +511,13 @@ describe('R2-12c — Twilio network error handling', () => {
       await sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
       });
     } catch {}
 
@@ -454,7 +538,13 @@ describe('R2-12c — Twilio network error handling', () => {
       await sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
       });
     } catch {}
 
@@ -475,7 +565,13 @@ describe('R2-12c — Twilio network error handling', () => {
       await sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
       });
       fail('Should have thrown');
     } catch (err: any) {
@@ -496,7 +592,13 @@ describe('R2-12c — Twilio network error handling', () => {
       await sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
       });
       fail('Should have thrown');
     } catch (err: any) {
@@ -517,7 +619,13 @@ describe('R2-12c — Twilio network error handling', () => {
       await sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+        { type: 'text', text: 'Test Student' },
+        { type: 'text', text: 'Grade 5' },
+        { type: 'text', text: 'https://example.invalid' },
+        { type: 'text', text: 'USER' },
+        { type: 'text', text: 'PASS' },
+      ]
       });
       fail('Should have thrown');
     } catch (err: any) {
@@ -549,6 +657,7 @@ describe('R2-12c — Credential delivery retryable propagation', () => {
       password: 'pass',
       name: 'Test',
       recipientType: 'student',
+      className: 'Grade 5',
     });
 
     expect(result.success).toBe(false);
@@ -570,6 +679,7 @@ describe('R2-12c — Credential delivery retryable propagation', () => {
       password: 'pass',
       name: 'Test',
       recipientType: 'student',
+      className: 'Grade 5',
     });
 
     expect(result.success).toBe(false);
@@ -591,6 +701,7 @@ describe('R2-12c — Credential delivery retryable propagation', () => {
       password: 'pass',
       name: 'Test',
       recipientType: 'student',
+      className: 'Grade 5',
     });
 
     expect(result.success).toBe(false);
@@ -610,6 +721,7 @@ describe('R2-12c — Credential delivery retryable propagation', () => {
       password: 'pass',
       name: 'Test',
       recipientType: 'student',
+      className: 'Grade 5',
     });
 
     expect(result.success).toBe(false);
@@ -628,6 +740,7 @@ describe('R2-12c — Credential delivery retryable propagation', () => {
       password: 'pass',
       name: 'Test',
       recipientType: 'student',
+      className: 'Grade 5',
     });
 
     const allLogs = logOutput.map((l) => JSON.stringify(l));

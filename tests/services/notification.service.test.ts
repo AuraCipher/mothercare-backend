@@ -2,7 +2,6 @@ jest.mock('../../src/services/twilio-whatsapp.service', () => ({
   ...jest.requireActual('../../src/services/twilio-whatsapp.service'),
   sendTemplateMessage: jest.fn(),
   templateNameForRecipient: jest.requireActual('../../src/services/twilio-whatsapp.service').templateNameForRecipient,
-  buildCredentialParameters: jest.requireActual('../../src/services/twilio-whatsapp.service').buildCredentialParameters,
 }));
 
 jest.mock('../../src/queues/message.queue', () => ({
@@ -33,6 +32,7 @@ describe('notification.service sendCredential', () => {
       username: 'ali_student',
       password: 'Temp123!',
       recipientType: 'student',
+      className: 'Grade 5',
     });
 
     expect(result.success).toBe(true);
@@ -70,6 +70,7 @@ describe('notification.service sendCredential', () => {
       username: 'ali_student',
       password: 'Temp123!',
       recipientType: 'student',
+      className: 'Grade 5',
     });
 
     expect(result.success).toBe(false);

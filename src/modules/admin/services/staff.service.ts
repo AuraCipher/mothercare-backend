@@ -778,8 +778,15 @@ class StaffService {
     });
     if (!member) throw { status: 404, message: 'Staff member not found' };
 
-    const phone = member.user.phone?.trim() || (await prisma.staffProfile.findUnique({ where: { userId: staffUserId }, select: { phone: true } }))?.phone?.trim();
+    const staffProfile = await prisma.staffProfile.findUnique({ where: { userId: staffUserId }, select: { phone: true, workRole: true } });
+    const phone = member.user.phone?.trim() || staffProfile?.phone?.trim();
     if (!phone) throw { status: 400, message: 'No phone number on file. Add a phone number first.' };
+
+    // M19.1 — staff_wc {{1}} requires the authoritative designation:
+    // StaffProfile.workRole, falling back to the BranchMember role.
+    // Fail safely BEFORE rotating the password.
+    const designation = staffProfile?.workRole?.trim() || String(member.role || '').trim();
+    if (!designation) throw { status: 400, message: 'No designation/work role on file. Add a work role first.' };
 
     const { generatePassword } = await import('../../../utils/username');
     const tempPassword = generatePassword();
@@ -796,6 +803,7 @@ class StaffService {
       password: tempPassword,
       name: member.user.name,
       recipientType: 'staff',
+      designation,
     });
 
     try {

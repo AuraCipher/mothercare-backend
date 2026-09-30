@@ -471,13 +471,22 @@ class StudentService {
     const bc = await import('bcryptjs');
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      select: { id: true, name: true, studentWhatsapp: true, username: true, phone: true, user: { select: { id: true, username: true } } },
+      select: { id: true, name: true, studentWhatsapp: true, username: true, phone: true, group: { select: { name: true, section: true } }, user: { select: { id: true, username: true } } },
     });
     if (!student) throw { status: 404, message: 'Student not found' };
     if (!student.user) throw { status: 400, message: 'No login credentials. Generate credentials first.' };
 
     const whatsapp = student.studentWhatsapp || student.phone;
     if (!whatsapp) throw { status: 400, message: 'No WhatsApp/phone number available for this student.' };
+
+    // M19.1 — student_wc {{2}} requires the authoritative class label.
+    // Fail safely BEFORE rotating the password so a missing class can never
+    // lock the account with an undelivered credential.
+    // The approved body already prints "Class" before {{2}}, so one leading
+    // "Class" is stripped from the group name (see formatClassLabel).
+    const { formatClassLabel } = await import('../../../services/twilio-whatsapp.service');
+    const className = student.group ? formatClassLabel(student.group.name, student.group.section) : null;
+    if (!className) throw { status: 400, message: 'No class assigned to this student. Assign a class first.' };
 
     // Generate a fresh temporary password, hash it, save it
     const tempPassword = generatePassword();
@@ -494,6 +503,7 @@ class StudentService {
       password: tempPassword,
       name: student.name,
       recipientType: 'student',
+      className,
     });
 
     const status = result.success ? 'sent' : 'failed';

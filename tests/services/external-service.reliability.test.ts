@@ -339,7 +339,13 @@ describe('Twilio — sendTemplateMessage', () => {
       await sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+          { type: 'text', text: 'Test Student' },
+          { type: 'text', text: 'Grade 5' },
+          { type: 'text', text: 'https://example.invalid' },
+          { type: 'text', text: 'USER' },
+          { type: 'text', text: 'PASS' },
+        ]
       });
       fail('Should have thrown');
     } catch (err: any) {
@@ -357,7 +363,13 @@ describe('Twilio — sendTemplateMessage', () => {
       await sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+          { type: 'text', text: 'Test Student' },
+          { type: 'text', text: 'Grade 5' },
+          { type: 'text', text: 'https://example.invalid' },
+          { type: 'text', text: 'USER' },
+          { type: 'text', text: 'PASS' },
+        ]
       });
       fail('Should have thrown');
     } catch (err: any) {
@@ -375,7 +387,13 @@ describe('Twilio — sendTemplateMessage', () => {
       await sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+          { type: 'text', text: 'Test Student' },
+          { type: 'text', text: 'Grade 5' },
+          { type: 'text', text: 'https://example.invalid' },
+          { type: 'text', text: 'USER' },
+          { type: 'text', text: 'PASS' },
+        ]
       });
     } catch {
       // expected
@@ -413,6 +431,7 @@ describe('credential-delivery — deliverCredential', () => {
       password: 'TempPass123!',
       name: 'Test Student',
       recipientType: 'student',
+      className: 'Grade 5',
     });
 
     expect(result.success).toBe(false);
@@ -434,6 +453,7 @@ describe('credential-delivery — deliverCredential', () => {
       password: 'TempPass123!',
       name: 'Test Student',
       recipientType: 'student',
+      className: 'Grade 5',
     });
 
     expect(result.success).toBe(false);
@@ -455,6 +475,7 @@ describe('credential-delivery — deliverCredential', () => {
       password: 'TempPass123!',
       name: 'Test Student',
       recipientType: 'student',
+      className: 'Grade 5',
     });
 
     expect(result.success).toBe(false);
@@ -476,6 +497,7 @@ describe('credential-delivery — deliverCredential', () => {
       password: 'TempPass123!',
       name: 'Test Student',
       recipientType: 'student',
+      className: 'Grade 5',
     });
 
     expect(result.success).toBe(false);
@@ -505,7 +527,13 @@ describe('Secret-safe logging', () => {
       await sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+          { type: 'text', text: 'Test Student' },
+          { type: 'text', text: 'Grade 5' },
+          { type: 'text', text: 'https://example.invalid' },
+          { type: 'text', text: 'USER' },
+          { type: 'text', text: 'PASS' },
+        ]
       });
     } catch {
       // expected
@@ -532,7 +560,13 @@ describe('Secret-safe logging', () => {
       await sendTemplateMessage({
         to: '03001234567',
         recipientType: 'student',
-        bodyParameters: [{ type: 'text', text: 'Test' }],
+        bodyParameters: [
+          { type: 'text', text: 'Test Student' },
+          { type: 'text', text: 'Grade 5' },
+          { type: 'text', text: 'https://example.invalid' },
+          { type: 'text', text: 'USER' },
+          { type: 'text', text: 'PASS' },
+        ]
       });
     } catch {
       // expected

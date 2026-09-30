@@ -9,6 +9,11 @@ interface NotificationService {
     password: string;
     name: string;
     recipientType: CredentialRecipientType;
+    /** Staff only — required for staff_wc {{1}}. */
+    designation?: string;
+    /** Student only — required for student_wc {{2}}. */
+    className?: string;
+    website?: string;
   }): Promise<SendCredentialResult>;
 }
 
