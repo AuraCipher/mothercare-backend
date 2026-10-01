@@ -161,7 +161,7 @@ router.put('/students/:id/set-password', passwordSetLimiter, asyncHandler(async 
 // POST /students/:id/save-credential — Manual WhatsApp handoff save (M21).
 // Persists the FRONTEND-generated password (hash only), records handoff
 // timestamps, returns the website for local message construction.
-// NEVER calls Twilio/queue/worker. Local try/catch preserves the machine
+// NEVER calls any messaging provider, queue, or worker. Local try/catch preserves the machine
 // code (e.g. PASSWORD_REPLACEMENT_REQUIRED) the drawer state machine needs.
 router.post('/students/:id/save-credential', passwordSetLimiter, asyncHandler(async (req: Request, res: Response) => {
   const { password, adminPassword, replaceExisting, idempotencyKey } = req.body;
@@ -184,47 +184,6 @@ router.post('/students/:id/save-credential', passwordSetLimiter, asyncHandler(as
     const status = e?.status || 500;
     res.status(status).json({ success: false, code: e?.code, message: e?.message || 'Failed to save credential' });
   }
-}));
-
-// POST /students/:id/send-credentials — Send via WhatsApp
-router.post('/students/:id/send-credentials', passwordSetLimiter, asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id;
-  const result = await studentService.sendCredentials(req.params.id, userId, req.ip);
-  res.json({ success: true, data: result });
-}));
-
-// POST /students/send-to-new — Send only to students who haven't received yet (AY scoped)
-router.post('/students/send-to-new', asyncHandler(async (req: Request, res: Response) => {
-  const scope = await requireScope(req, res);
-  if (!scope) return;
-  const userId = (req as any).user?.id;
-  const students = await prisma.student.findMany({
-    where: {
-      academicYearId: scope.academicYearId,
-      academicYear: { branchId: scope.branchId },
-      credentialSentAt: null,
-      user: { isNot: null },
-    },
-    select: { id: true },
-  });
-  if (students.length === 0) {
-    res.json({ success: true, data: { sent: 0, skipped: 0, failed: 0, results: [], message: 'All students already have credentials sent' } });
-    return;
-  }
-  const result = await studentService.sendAllCredentials(students.map(s => s.id), userId, req.ip);
-  res.json({ success: true, data: result });
-}));
-
-// POST /students/send-all-credentials — Send to all selected
-router.post('/students/send-all-credentials', passwordSetLimiter, asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id;
-  const { studentIds } = req.body;
-  if (!studentIds || !Array.isArray(studentIds) || studentIds.length === 0) {
-    res.status(400).json({ success: false, message: 'studentIds array is required' });
-    return;
-  }
-  const result = await studentService.sendAllCredentials(studentIds, userId, req.ip);
-  res.json({ success: true, data: result });
 }));
 
 // PUT /students/:id/status — Update student status (with log)

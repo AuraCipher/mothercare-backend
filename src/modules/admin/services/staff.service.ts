@@ -1,6 +1,8 @@
 import { prisma } from '../../../lib/prisma';
 import { hashPassword } from '../../../lib/password';
 import { deleteFileRecordById } from '../../upload/upload.service';
+import env from '../../../config/env';
+import { assertPasswordPolicy } from '../../../utils/password-policy';
 import type { StaffModule } from '@prisma/client';
 import {
   normalizePermissionInput,
@@ -763,76 +765,125 @@ class StaffService {
     return { message: 'Password updated successfully' };
   }
 
-  async sendCredentials(
+  // ─── Manual WhatsApp handoff: Save Credential (M22) ───
+  // Composite save for the staff credential drawer. Persists the
+  // FRONTEND-generated password (never mints a second one) and returns the
+  // website for local message construction. NEVER touches the messaging
+  // provider, queue, or worker.
+  // Staff-side tracking columns do not exist in the schema, so the
+  // "existing password" signal is the audit trail: a prior password_reset or
+  // credential_save row for this member. Handoff history likewise lives in
+  // auditLog (credential_save rows carry credentialSentAt). No migration.
+
+  async saveCredential(
     branchId: string,
     staffUserId: string,
+    input: { password: string; adminPassword: string; replaceExisting?: boolean; idempotencyKey?: string },
     adminId: string,
     ipAddress?: string,
   ) {
     const bc = await import('bcryptjs');
     const member = await prisma.branchMember.findUnique({
       where: { branchId_userId: { branchId, userId: staffUserId } },
-      include: {
-        user: { select: { id: true, name: true, username: true, phone: true } },
-      },
+      include: { user: { select: { id: true, name: true, username: true, phone: true } } },
     });
     if (!member) throw { status: 404, message: 'Staff member not found' };
 
-    const staffProfile = await prisma.staffProfile.findUnique({ where: { userId: staffUserId }, select: { phone: true, workRole: true } });
-    const phone = member.user.phone?.trim() || staffProfile?.phone?.trim();
-    if (!phone) throw { status: 400, message: 'No phone number on file. Add a phone number first.' };
-
-    // M19.1 — staff_wc {{1}} requires the authoritative designation:
-    // StaffProfile.workRole, falling back to the BranchMember role.
-    // Fail safely BEFORE rotating the password.
+    const staffProfile = await prisma.staffProfile.findUnique({
+      where: { userId: staffUserId },
+      select: { workRole: true, phone: true },
+    });
     const designation = staffProfile?.workRole?.trim() || String(member.role || '').trim();
-    if (!designation) throw { status: 400, message: 'No designation/work role on file. Add a work role first.' };
+    if (!designation) throw { status: 400, code: 'NO_DESIGNATION', message: 'Designation/work role is required before saving credentials.' };
 
-    const { generatePassword } = await import('../../../utils/username');
-    const tempPassword = generatePassword();
-    const hash = await bc.hash(tempPassword, 12);
-    await prisma.user.update({
-      where: { id: staffUserId },
-      data: { passwordHash: hash },
+    const username = member.user.username || member.user.name;
+    if (!username) throw { status: 400, code: 'NO_USERNAME', message: 'Username is required before saving credentials.' };
+    const phone = member.user.phone?.trim() || staffProfile?.phone?.trim();
+    if (!phone) throw { status: 400, code: 'NO_PHONE', message: 'Phone number is required before saving credentials.' };
+
+    assertPasswordPolicy(input.password);
+
+    const priorSaves = await prisma.auditLog.findMany({
+      where: { entity: 'StaffMember', entityId: member.id, action: { in: ['password_reset', 'credential_save'] } },
+      orderBy: { createdAt: 'desc' },
+      take: 1,
+      select: { id: true },
     });
+    if (priorSaves.length > 0 && !input.replaceExisting) {
+      throw { status: 409, code: 'PASSWORD_REPLACEMENT_REQUIRED', message: 'Staff member already has a password. Confirm replacement first.' };
+    }
 
-    const notificationService = (await import('../../../services/notification.service')).default;
-    const result = await notificationService.sendCredential({
-      to: phone,
-      username: member.user.username || member.user.name,
-      password: tempPassword,
-      name: member.user.name,
-      recipientType: 'staff',
-      designation,
+    if (input.idempotencyKey) {
+      const prior = await prisma.auditLog.findFirst({
+        where: {
+          action: 'credential_save', entity: 'StaffMember', entityId: member.id,
+          metadata: { path: ['idempotencyKey'], equals: input.idempotencyKey },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { newValue: true },
+      });
+      const prev = (prior?.newValue as any) || {};
+      if (prior && prev.credentialSentAt) {
+        return {
+          idempotent: true,
+          website: prev.website || env.FRONTEND_URL || 'https://mothercareschool.pk',
+          schoolName: prev.schoolName || env.SCHOOL_NAME || 'Mother Care School',
+          appUrl: prev.appUrl || env.APP_DOWNLOAD_URL || 'https://play.google.com/store/apps/details?id=com.mothercare.app',
+          credentialSentAt: prev.credentialSentAt,
+        };
+      }
+    }
+
+    const admin = await prisma.user.findUnique({ where: { id: adminId } });
+    if (!admin) throw { status: 404, message: 'Admin user not found' };
+    const isMatch = await bc.compare(input.adminPassword, admin.passwordHash);
+    if (!isMatch) throw { status: 403, message: 'Admin password is incorrect' };
+
+    const recentChanges = await prisma.auditLog.findMany({
+      where: { entity: 'StaffMember', entityId: member.id, action: { in: ['password_reset', 'credential_save'] } },
+      orderBy: { createdAt: 'desc' },
+      take: 3,
+      select: { newValue: true },
     });
+    for (const entry of recentChanges) {
+      const prevHash = (entry.newValue as any)?.passwordHash;
+      if (prevHash && typeof prevHash === 'string') {
+        const isReused = await bc.compare(input.password, prevHash);
+        if (isReused) {
+          throw { status: 409, message: 'This password was used recently. Please generate a different one.' };
+        }
+      }
+    }
 
-    try {
-      await prisma.auditLog.create({
+    const newHash = await bc.hash(input.password, 12);
+    const now = new Date();
+    const website = env.FRONTEND_URL || 'https://mothercareschool.pk';
+    const schoolName = env.SCHOOL_NAME || 'Mother Care School';
+    const appUrl = env.APP_DOWNLOAD_URL || 'https://play.google.com/store/apps/details?id=com.mothercare.app';
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: staffUserId }, data: { passwordHash: newHash } }),
+      prisma.auditLog.create({
         data: {
           userId: adminId,
-          action: 'credential_sent',
+          action: 'credential_save',
           entity: 'StaffMember',
           entityId: member.id,
           newValue: {
-            sent: result.success,
-            status: result.success ? 'sent' : 'failed',
-            to: phone.slice(0, 6) + '****',
+            username,
+            designation,
+            passwordHash: newHash,
+            credentialSentAt: now.toISOString(),
+            website,
+            schoolName,
+            appUrl,
           },
+          metadata: input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined,
           ipAddress,
         },
-      });
-    } catch { /* best-effort */ }
+      }),
+    ]);
 
-    return {
-      sent: result.success,
-      status: result.success ? 'sent' : 'failed',
-      channel: result.channel,
-      messageId: result.messageId,
-      errorCode: result.errorCode,
-      errorMessage: result.errorMessage,
-      retryable: result.retryable,
-      solvable: result.solvable,
-    };
+    return { success: true, website, schoolName, appUrl, credentialSentAt: now.toISOString() };
   }
 }
 

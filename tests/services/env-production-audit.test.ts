@@ -33,15 +33,8 @@ const envSchema = z.object({
   UPSTASH_REDIS_REST_URL: z.string().optional(),
   UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
   REDIS_URL: z.string().optional(),
-  MESSAGE_QUEUE_CONCURRENCY: z.string().default('3'),
   RESEND_API_KEY: z.string().optional(),
   RESEND_FROM_EMAIL: z.string().optional(),
-  TWILIO_ACCOUNT_SID: z.string().optional(),
-  TWILIO_AUTH_TOKEN: z.string().optional(),
-  TWILIO_WHATSAPP_FROM: z.string().optional(),
-  TWILIO_TEMPLATE_STUDENT: z.string().optional(),
-  TWILIO_TEMPLATE_TEACHER: z.string().optional(),
-  TWILIO_TEMPLATE_STAFF: z.string().optional(),
   ALLOWED_ORIGINS: z.string().optional(),
   R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),
@@ -149,8 +142,6 @@ describe('R2-12c — Provider config graceful degradation', () => {
       JWT_SECRET: 'a'.repeat(32),
       RESEND_API_KEY: undefined,
       RESEND_FROM_EMAIL: undefined,
-      TWILIO_ACCOUNT_SID: undefined,
-      TWILIO_AUTH_TOKEN: undefined,
       R2_ACCOUNT_ID: undefined,
       R2_ACCESS_KEY_ID: undefined,
       R2_SECRET_ACCESS_KEY: undefined,
@@ -263,14 +254,10 @@ describe('R2-12c — .env.production template audit', () => {
     expect(dbLine).toContain('PASSWORD');
   });
 
-  test('Twilio credentials are empty in template', () => {
+  test('No Twilio variables remain in template (M22 removal)', () => {
     const lines = productionEnv.split('\n');
-    const twilioSid = lines.find((l) => l.startsWith('TWILIO_ACCOUNT_SID='));
-    const twilioToken = lines.find((l) => l.startsWith('TWILIO_AUTH_TOKEN='));
-    expect(twilioSid).toBeDefined();
-    expect(twilioToken).toBeDefined();
-    expect(twilioSid!.trim()).toBe('TWILIO_ACCOUNT_SID=');
-    expect(twilioToken!.trim()).toBe('TWILIO_AUTH_TOKEN=');
+    const twilioLines = lines.filter((l) => l.includes('TWILIO'));
+    expect(twilioLines).toEqual([]);
   });
 
   test('R2 credentials are empty in template', () => {
@@ -334,17 +321,10 @@ describe('R2-12c — Docker development environment', () => {
     expect(fcmLine).toContain('false');
   });
 
-  test('.env.docker has external services commented out', () => {
+  test('.env.docker has no Twilio references (M22 removal)', () => {
     const dockerEnv = fs.readFileSync(dockerEnvPath, 'utf8');
-    const lines = dockerEnv.split('\n');
-    // External services should be commented or empty
-    const twilioLines = lines.filter((l) => l.includes('TWILIO'));
-    const twilioActive = twilioLines.filter((l) => !l.startsWith('#') && l.includes('='));
-    // Active Twilio lines should have empty values
-    for (const line of twilioActive) {
-      const value = line.split('=')[1]?.trim();
-      expect(!value || value === '').toBe(true);
-    }
+    const twilioLines = dockerEnv.split('\n').filter((l) => l.includes('TWILIO'));
+    expect(twilioLines).toEqual([]);
   });
 });
 
@@ -380,11 +360,11 @@ describe('R2-12c — env.ts source audit', () => {
   });
 
   test('Provider configs are optional (not required)', () => {
-    // R2, Resend, Twilio, FCM should all be optional
+    // R2, Resend, FCM should all be optional (Twilio removed in M22)
     expect(envSrc).toContain('R2_ACCOUNT_ID: z.string().optional()');
     expect(envSrc).toContain('RESEND_API_KEY: z.string().optional()');
-    expect(envSrc).toContain('TWILIO_ACCOUNT_SID: z.string().optional()');
     expect(envSrc).toContain('FCM_ENABLED:');
+    expect(envSrc).not.toContain('TWILIO_');
   });
 
   test('PUSH_MASTER_SECRET requires min 32 chars when set', () => {
@@ -395,24 +375,19 @@ describe('R2-12c — env.ts source audit', () => {
 // ─── Sensitive values redacted from logs ───────────────────
 
 describe('R2-12c — Log redaction audit', () => {
-  test('Twilio WhatsApp service masks phone numbers in logs', () => {
-    const src = fs.readFileSync(
-      path.resolve(__dirname, '../../src/services/twilio-whatsapp.service.ts'),
-      'utf8',
-    );
-    expect(src).toContain("to.slice(0, 6) + '****'");
-  });
-
-  test('Twilio WhatsApp service does not log auth token', () => {
-    const src = fs.readFileSync(
-      path.resolve(__dirname, '../../src/services/twilio-whatsapp.service.ts'),
-      'utf8',
-    );
-    // The auth header is built but should not be logged
-    const logStatements = src.match(/logger\.\w+\([^)]*\)/g) || [];
-    for (const log of logStatements) {
-      expect(log).not.toContain('authToken');
-      expect(log).not.toContain('TWILIO_AUTH_TOKEN');
+  test('Manual save-credential paths log no passwords', () => {
+    for (const file of [
+      '../../src/modules/admin/services/student.service.ts',
+      '../../src/modules/admin/services/teacher.service.ts',
+      '../../src/modules/admin/services/staff.service.ts',
+    ]) {
+      const src = fs.readFileSync(path.resolve(__dirname, file), 'utf8');
+      const method = src.slice(src.indexOf('async saveCredential('));
+      const logStatements = method.match(/logger\.\w+\([^)]*\)/g) || [];
+      for (const log of logStatements) {
+        expect(log).not.toMatch(/password/i);
+      }
+      expect(method).not.toMatch(/TWILIO_/);
     }
   });
 
@@ -426,14 +401,6 @@ describe('R2-12c — Log redaction audit', () => {
       expect(log).not.toContain('RESEND_API_KEY');
       expect(log).not.toContain('apiKey');
     }
-  });
-
-  test('credential-delivery masks phone numbers in logs', () => {
-    const src = fs.readFileSync(
-      path.resolve(__dirname, '../../src/services/credential-delivery.service.ts'),
-      'utf8',
-    );
-    expect(src).toContain("to.slice(0, 6) + '****'");
   });
 
   test('FCM service does not log device tokens', () => {

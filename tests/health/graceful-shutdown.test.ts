@@ -32,17 +32,8 @@ jest.mock('../../src/config/redis-tcp', () => ({
   closeRedisConnection: jest.fn(),
 }));
 
-jest.mock('../../src/queues/message.queue', () => ({
-  closeMessageQueue: jest.fn(),
-}));
-
 jest.mock('../../src/queues/chat.queue', () => ({
   closeChatQueue: jest.fn(),
-}));
-
-jest.mock('../../src/queues/message.worker', () => ({
-  stopMessageWorker: jest.fn(),
-  startMessageWorker: jest.fn(),
 }));
 
 jest.mock('../../src/queues/chat.worker', () => ({

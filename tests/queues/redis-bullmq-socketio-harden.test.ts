@@ -6,7 +6,6 @@
  * - Chat queue close is idempotent
  * - Socket.IO closeChatSocket cleans up Redis adapter connections
  * - Dead job types no longer exported from chat.queue
- * - Message worker still handles credential_send
  */
 
 /* ------------------------------------------------------------------ */
@@ -86,11 +85,6 @@ import {
   getChatIo,
 } from '../../src/modules/chat/socket/chat.socket';
 
-import {
-  MESSAGE_QUEUE_NAME,
-  CREDENTIAL_SEND_JOB,
-  closeMessageQueue,
-} from '../../src/queues/message.queue';
 
 /* ------------------------------------------------------------------ */
 /*  Tests: Dead code removal verification                              */
@@ -177,24 +171,6 @@ describe('R2-08 — Socket.IO closeChatSocket', () => {
 
 /* ------------------------------------------------------------------ */
 /*  Tests: Message queue constants and close                           */
-/* ------------------------------------------------------------------ */
-
-describe('R2-08 — Message queue', () => {
-  test('MESSAGE_QUEUE_NAME is "messages"', () => {
-    expect(MESSAGE_QUEUE_NAME).toBe('messages');
-  });
-
-  test('CREDENTIAL_SEND_JOB is "credential_send"', () => {
-    expect(CREDENTIAL_SEND_JOB).toBe('credential_send');
-  });
-
-  test('closeMessageQueue is idempotent', async () => {
-    await closeMessageQueue();
-    await closeMessageQueue();
-    await closeMessageQueue();
-  });
-});
-
 /* ------------------------------------------------------------------ */
 /*  Tests: enqueueChatPushFanout with null queue (no Redis)            */
 /* ------------------------------------------------------------------ */

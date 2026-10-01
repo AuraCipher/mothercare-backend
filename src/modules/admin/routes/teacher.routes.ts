@@ -123,11 +123,30 @@ router.post('/teachers/:id/set-password', passwordSetLimiter, asyncHandler(async
   res.json({ success: true, message: result.message });
 }));
 
-// POST /admin/teachers/:id/send-credentials — Send via WhatsApp
-router.post('/teachers/:id/send-credentials', asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id;
-  const result = await teacherProfileService.sendCredentials(req.params.id, userId, req.ip);
-  res.json({ success: true, data: result });
+// POST /admin/teachers/:id/save-credential — Manual WhatsApp handoff save (M22).
+// Persists the frontend-generated password; NEVER calls any messaging provider or queue.
+// Preserves the machine code (PASSWORD_REPLACEMENT_REQUIRED) for the drawer.
+router.post('/teachers/:id/save-credential', passwordSetLimiter, asyncHandler(async (req: Request, res: Response) => {
+  const { password, adminPassword, replaceExisting, idempotencyKey } = req.body;
+  const adminId = (req as any).user?.id;
+  if (!password || !adminPassword) {
+    res.status(400).json({ success: false, message: 'password and adminPassword are required' });
+    return;
+  }
+  const branchId = (req.query.branchId as string) || req.body?.branchId;
+  try {
+    const result = await teacherProfileService.saveCredential(
+      req.params.id,
+      { password, adminPassword, replaceExisting: !!replaceExisting, idempotencyKey },
+      adminId,
+      req.ip,
+      branchId,
+    );
+    res.json({ success: true, data: result });
+  } catch (e: any) {
+    const status = e?.status || 500;
+    res.status(status).json({ success: false, code: e?.code, message: e?.message || 'Failed to save credential' });
+  }
 }));
 
 // TC-016: GET /admin/teachers/:id/assignments — Get teacher's assignments (AY scoped)

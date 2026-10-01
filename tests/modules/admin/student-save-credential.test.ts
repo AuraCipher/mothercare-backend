@@ -13,7 +13,7 @@ jest.mock('bcryptjs', () => ({
 
 jest.mock('../../../src/config/env', () => ({
   __esModule: true,
-  default: { FRONTEND_URL: 'https://school.test' },
+  default: { FRONTEND_URL: 'https://school.test', SCHOOL_NAME: 'Test School', APP_DOWNLOAD_URL: 'https://school.test/app' },
 }));
 
 import { prismaMock } from '../../mocks/prisma';
@@ -183,7 +183,7 @@ describe('saveCredential — commit + response shape', () => {
 
   test('response has website + timestamps and NO password', async () => {
     const res: any = await studentService.saveCredential('s1', input, 'admin1');
-    expect(res).toMatchObject({ success: true, website: 'https://school.test' });
+    expect(res).toMatchObject({ success: true, website: 'https://school.test', schoolName: 'Test School', appUrl: 'https://school.test/app' });
     expect(res.credentialGeneratedAt).toBeDefined();
     expect(res.credentialSentAt).toBeDefined();
     expect(JSON.stringify(res)).not.toContain('NewPass123!x');

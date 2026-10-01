@@ -93,8 +93,11 @@ for (const [digit, letter] of Object.entries(DIGIT_TO_LETTER)) {
 /**
  * Generate a random password (12 chars, UTF-8 safe)
  * Used as initial password when creating student credentials.
+ * M22: cryptographically secure (node:crypto), replacing Math.random.
  */
 export function generatePassword(): string {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { randomInt } = require('node:crypto') as typeof import('node:crypto');
   const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   const lower = 'abcdefghijklmnopqrstuvwxyz';
   const digits = '0123456789';
@@ -103,19 +106,19 @@ export function generatePassword(): string {
 
   let pw = '';
   // Ensure at least one of each type
-  pw += upper[Math.floor(Math.random() * upper.length)];
-  pw += lower[Math.floor(Math.random() * lower.length)];
-  pw += digits[Math.floor(Math.random() * digits.length)];
-  pw += special[Math.floor(Math.random() * special.length)];
+  pw += upper[randomInt(upper.length)];
+  pw += lower[randomInt(lower.length)];
+  pw += digits[randomInt(digits.length)];
+  pw += special[randomInt(special.length)];
 
   for (let i = 0; i < 8; i++) {
-    pw += all[Math.floor(Math.random() * all.length)];
+    pw += all[randomInt(all.length)];
   }
 
   // Shuffle using Fisher-Yates
   const arr = pw.split('');
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = randomInt(i + 1);
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
 

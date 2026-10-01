@@ -31,7 +31,7 @@ jest.mock('../../../src/modules/admin/services/staff.service', () => ({
     deactivateStaff: jest.fn().mockResolvedValue({ id: 'u1', status: 'inactive' }),
     reactivateStaff: jest.fn().mockResolvedValue({ id: 'u1', status: 'active' }),
     setPassword: jest.fn().mockResolvedValue({ message: 'Password updated' }),
-    sendCredentials: jest.fn().mockResolvedValue({ sent: true }),
+    saveCredential: jest.fn().mockResolvedValue({ success: true, website: 'https://school.test' }),
   },
 }));
 
@@ -94,7 +94,13 @@ const STAFF_ENDPOINTS: StaffEndpoint[] = [
     body: validSetPasswordBody,
     successStatus: 200,
   },
-  { label: 'POST send-credentials', method: 'post', path: `${BASE}/${STAFF_USER_ID}/send-credentials`, successStatus: 200 },
+  {
+    label: 'POST save-credential',
+    method: 'post',
+    path: `${BASE}/${STAFF_USER_ID}/save-credential`,
+    body: { password: 'NewPass123!x', adminPassword: 'AdminPass123!', replaceExisting: true, idempotencyKey: 'k1' },
+    successStatus: 200,
+  },
 ];
 
 function send(
@@ -135,7 +141,7 @@ function resetStaffMocks() {
   (staffService.deactivateStaff as jest.Mock).mockResolvedValue({ id: 'u1', status: 'inactive' });
   (staffService.reactivateStaff as jest.Mock).mockResolvedValue({ id: 'u1', status: 'active' });
   (staffService.setPassword as jest.Mock).mockResolvedValue({ message: 'Password updated' });
-  (staffService.sendCredentials as jest.Mock).mockResolvedValue({ sent: true });
+  (staffService.saveCredential as jest.Mock).mockResolvedValue({ success: true, website: 'https://school.test' });
 }
 
 describe('Staff admin integration routes', () => {
@@ -490,16 +496,18 @@ describe('Staff admin integration routes', () => {
       expect(staffService.setPassword).toHaveBeenCalled();
     });
 
-    test('send-credentials returns sent flag', async () => {
+    test('save-credential saves and returns website', async () => {
       const res = await request(app)
-        .post(`${BASE}/${STAFF_USER_ID}/send-credentials`)
+        .post(`${BASE}/${STAFF_USER_ID}/save-credential`)
         .query(scopeQuery)
-        .set(adminAuth);
+        .set(adminAuth)
+        .send({ password: 'NewPass123!x', adminPassword: 'AdminPass123!', replaceExisting: true, idempotencyKey: 'k1' });
       expect(res.status).toBe(200);
-      expect(res.body.data.sent).toBe(true);
-      expect(staffService.sendCredentials).toHaveBeenCalledWith(
+      expect(res.body.data.website).toBe('https://school.test');
+      expect(staffService.saveCredential).toHaveBeenCalledWith(
         TEST_BRANCH_ID,
         STAFF_USER_ID,
+        { password: 'NewPass123!x', adminPassword: 'AdminPass123!', replaceExisting: true, idempotencyKey: 'k1' },
         'admin-1',
         expect.any(String),
       );

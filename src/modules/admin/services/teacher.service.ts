@@ -1,6 +1,8 @@
 import { prisma } from '../../../lib/prisma';
 import { deleteFileRecordById } from '../../upload/upload.service';
 import { syncTeachersForBranch } from '../../canteen/canteen-credit-rules';
+import env from '../../../config/env';
+import { assertPasswordPolicy } from '../../../utils/password-policy';
 
 // ═══════════════════════════════════════════════════════════════════
 // TYPES
@@ -529,73 +531,144 @@ class TeacherProfileService {
     return { message: 'Teacher deleted permanently.' };
   }
 
-  // ─── Send credentials via WhatsApp ─────────────────────────
+  // ─── Manual WhatsApp handoff: Save Credential (M22) ───
+  // Composite save for the teacher credential drawer. Persists the
+  // FRONTEND-generated password (never mints a second one), records the
+  // manual-handoff timestamp, returns the website for local message
+  // construction. NEVER touches the messaging provider, queue, or worker.
+  // Existing-password signal: teacherProfile.passwordSetAt (set only when a
+  // password was knowingly saved; the create-time default does not set it).
+  // credentialStatus 'sent' here means MANUAL HANDOFF INITIATED.
 
-  async sendCredentials(profileId: string, userId: string, ipAddress?: string) {
+  async saveCredential(
+    profileId: string,
+    input: { password: string; adminPassword: string; replaceExisting?: boolean; idempotencyKey?: string },
+    adminId: string,
+    ipAddress?: string,
+    branchId?: string,
+  ) {
     const bc = await import('bcryptjs');
+
     const profile = await prisma.teacherProfile.findUnique({
       where: { id: profileId },
-      select: { id: true, userId: true, phone: true, user: { select: { name: true, username: true } } },
-    });
-    if (!profile) throw { status: 404, message: 'Teacher not found' };
-    if (!profile.phone) throw { status: 400, message: 'No phone number available for this teacher.' };
-
-    // Generate fresh temp password
-    const { generatePassword } = await import('../../../utils/username');
-    const tempPassword = generatePassword();
-    const hash = await bc.hash(tempPassword, 12);
-    await prisma.user.update({
-      where: { id: profile.userId },
-      data: { passwordHash: hash },
-    });
-
-    const notificationService = (await import('../../../services/notification.service')).default;
-    const result = await notificationService.sendCredential({
-      to: profile.phone,
-      username: profile.user.username || profile.user.name,
-      password: tempPassword,
-      name: profile.user.name,
-      recipientType: 'teacher',
-    });
-
-    // Update tracking fields
-    const status = result.success ? 'sent' : 'failed';
-    const now = new Date();
-    await prisma.teacherProfile.update({
-      where: { id: profileId },
-      data: {
-        credentialSentAt: now,
-        credentialStatus: status,
-        passwordSetAt: now,
+      select: {
+        id: true, userId: true, phone: true, passwordSetAt: true,
+        user: { select: { username: true, name: true, phone: true, passwordHash: true } },
       },
     });
+    if (!profile) throw { status: 404, message: 'Teacher profile not found' };
 
-    // Audit trail
-    try {
-      await prisma.auditLog.create({
+    // M22 §13 — target-branch ownership via branch membership (never the old gap).
+    if (branchId) {
+      const membership = await prisma.branchMember.findUnique({
+        where: { branchId_userId: { branchId, userId: profile.userId } },
+      });
+      if (!membership) throw { status: 403, message: 'Teacher does not belong to the requested branch' };
+    }
+
+    const username = profile.user.username || profile.user.name;
+    if (!username) throw { status: 400, code: 'NO_USERNAME', message: 'Username is required before saving credentials.' };
+    const phone = profile.phone?.trim() || profile.user.phone?.trim();
+    if (!phone) throw { status: 400, code: 'NO_PHONE', message: 'Phone number is required before saving credentials.' };
+
+    assertPasswordPolicy(input.password);
+
+    const hasExistingPassword = !!profile.passwordSetAt;
+    if (hasExistingPassword && !input.replaceExisting) {
+      throw { status: 409, code: 'PASSWORD_REPLACEMENT_REQUIRED', message: 'Teacher already has a password. Confirm replacement first.' };
+    }
+
+    if (input.idempotencyKey) {
+      const prior = await prisma.auditLog.findFirst({
+        where: {
+          action: 'credential_save', entity: 'TeacherProfile', entityId: profileId,
+          metadata: { path: ['idempotencyKey'], equals: input.idempotencyKey },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { newValue: true },
+      });
+      const prev = (prior?.newValue as any) || {};
+      if (prior && prev.credentialSentAt) {
+        return {
+          idempotent: true,
+          website: prev.website || env.FRONTEND_URL || 'https://mothercareschool.pk',
+          schoolName: prev.schoolName || env.SCHOOL_NAME || 'Mother Care School',
+          appUrl: prev.appUrl || env.APP_DOWNLOAD_URL || 'https://play.google.com/store/apps/details?id=com.mothercare.app',
+          credentialGeneratedAt: prev.credentialGeneratedAt,
+          credentialSentAt: prev.credentialSentAt,
+        };
+      }
+    }
+
+    const admin = await prisma.user.findUnique({ where: { id: adminId } });
+    if (!admin) throw { status: 404, message: 'Admin user not found' };
+    const isMatch = await bc.compare(input.adminPassword, admin.passwordHash);
+    if (!isMatch) throw { status: 403, message: 'Admin password is incorrect' };
+
+    const recentChanges = await prisma.auditLog.findMany({
+      where: { entity: 'TeacherProfile', entityId: profileId, action: { in: ['password_reset', 'credential_save'] } },
+      orderBy: { createdAt: 'desc' },
+      take: 3,
+      select: { newValue: true },
+    });
+    for (const entry of recentChanges) {
+      const prevHash = (entry.newValue as any)?.passwordHash;
+      if (prevHash && typeof prevHash === 'string') {
+        const isReused = await bc.compare(input.password, prevHash);
+        if (isReused) {
+          throw { status: 409, message: 'This password was used recently. Please generate a different one.' };
+        }
+      }
+    }
+
+    const newHash = await bc.hash(input.password, 12);
+    const now = new Date();
+    const website = env.FRONTEND_URL || 'https://mothercareschool.pk';
+    const schoolName = env.SCHOOL_NAME || 'Mother Care School';
+    const appUrl = env.APP_DOWNLOAD_URL || 'https://play.google.com/store/apps/details?id=com.mothercare.app';
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: profile.userId }, data: { passwordHash: newHash } }),
+      prisma.teacherProfile.update({
+        where: { id: profileId },
         data: {
-          userId,
-          action: 'credential_sent',
+          passwordSetAt: now,
+          credentialGeneratedAt: now,
+          credentialSentAt: now,
+          credentialStatus: 'sent', // manual-handoff-initiated semantics (M22)
+        },
+      }),
+      prisma.auditLog.create({
+        data: {
+          userId: adminId,
+          action: 'credential_save',
           entity: 'TeacherProfile',
           entityId: profileId,
-          newValue: { sent: result.success, status, to: profile.phone.slice(0, 6) + '****' },
+          newValue: {
+            username,
+            passwordHash: newHash,
+            credentialGeneratedAt: now.toISOString(),
+            credentialSentAt: now.toISOString(),
+            website,
+            schoolName,
+            appUrl,
+          },
+          metadata: input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined,
           ipAddress,
         },
-      });
-    } catch { /* best-effort */ }
+      }),
+    ]);
 
     return {
-      sent: result.success,
-      status,
-      channel: result.channel,
-      messageId: result.messageId,
-      errorCode: result.errorCode,
-      errorMessage: result.errorMessage,
-      retryable: result.retryable,
-      solvable: result.solvable,
+      success: true,
+      website,
+      schoolName,
+      appUrl,
+      credentialGeneratedAt: now.toISOString(),
+      credentialSentAt: now.toISOString(),
     };
   }
 }
+
 
 // ═══════════════════════════════════════════════════════════════════
 // TEACHER ASSIGNMENT SERVICE

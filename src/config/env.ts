@@ -22,15 +22,8 @@ const envSchema = z.object({
   UPSTASH_REDIS_REST_URL: z.string().optional(),
   UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
   REDIS_URL: z.string().optional(),
-  MESSAGE_QUEUE_CONCURRENCY: z.string().default('3'),
   RESEND_API_KEY: z.string().optional(),
   RESEND_FROM_EMAIL: z.string().optional(),
-  TWILIO_ACCOUNT_SID: z.string().optional(),
-  TWILIO_AUTH_TOKEN: z.string().optional(),
-  TWILIO_WHATSAPP_FROM: z.string().optional(),
-  TWILIO_TEMPLATE_STUDENT: z.string().optional(),
-  TWILIO_TEMPLATE_TEACHER: z.string().optional(),
-  TWILIO_TEMPLATE_STAFF: z.string().optional(),
   ALLOWED_ORIGINS: z.string().optional(),
 
   // Cloudflare R2 (optional — falls back to local uploads/ when unset)

@@ -169,16 +169,27 @@ router.post('/:userId/set-password', passwordSetLimiter, asyncHandler(async (req
   res.json({ success: true, message: result.message });
 }));
 
-router.post('/:userId/send-credentials', asyncHandler(async (req, res) => {
+router.post('/:userId/save-credential', passwordSetLimiter, asyncHandler(async (req, res) => {
   const ctx = await assertStaffAdmin(req, res);
   if (!ctx) return;
-  const data = await staffService.sendCredentials(
-    ctx.branchId,
-    req.params.userId,
-    (req as any).user.id,
-    req.ip,
-  );
-  res.json({ success: true, data });
+  const { password, adminPassword, replaceExisting, idempotencyKey } = req.body;
+  if (!password || !adminPassword) {
+    res.status(400).json({ success: false, message: 'password and adminPassword are required' });
+    return;
+  }
+  try {
+    const data = await staffService.saveCredential(
+      ctx.branchId,
+      req.params.userId,
+      { password, adminPassword, replaceExisting: !!replaceExisting, idempotencyKey },
+      (req as any).user.id,
+      req.ip,
+    );
+    res.json({ success: true, data });
+  } catch (e: any) {
+    const status = e?.status || 500;
+    res.status(status).json({ success: false, code: e?.code, message: e?.message || 'Failed to save credential' });
+  }
 }));
 
 export default router;

@@ -35,8 +35,7 @@ jest.mock('../../../src/modules/admin/services/student.service', () => ({
     unlinkParent: jest.fn().mockResolvedValue({}),
     generateCredentials: jest.fn().mockResolvedValue({ username: 'gen', password: 'Tmp1!' }),
     setPassword: jest.fn().mockResolvedValue({ message: 'OK' }),
-    sendCredentials: jest.fn().mockResolvedValue({ sent: true }),
-    sendAllCredentials: jest.fn().mockResolvedValue({ sent: 0 }),
+    saveCredential: jest.fn().mockResolvedValue({ success: true }),
   },
 }));
 
@@ -56,7 +55,7 @@ jest.mock('../../../src/modules/admin/services/teacher.service', () => ({
     deactivate: jest.fn().mockResolvedValue({ message: 'Deactivated' }),
     reactivate: jest.fn().mockResolvedValue({ message: 'Reactivated' }),
     setPassword: jest.fn().mockResolvedValue({ message: 'OK' }),
-    sendCredentials: jest.fn().mockResolvedValue({ sent: true }),
+    saveCredential: jest.fn().mockResolvedValue({ success: true }),
   },
   teacherAssignmentService: {
     findByTeacher: jest.fn().mockResolvedValue([]),

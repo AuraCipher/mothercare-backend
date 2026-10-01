@@ -3,9 +3,7 @@ import env from '../config/env';
 import { testRedisConnection } from '../config/redis';
 import { closeRedisConnection, testTcpRedisConnection } from '../config/redis-tcp';
 import { describeBlacklistBackends } from '../config/blacklist-store';
-import { closeMessageQueue } from '../queues/message.queue';
 import { closeChatQueue } from '../queues/chat.queue';
-import { stopMessageWorker } from '../queues/message.worker';
 import { stopChatWorker } from '../queues/chat.worker';
 import { closeMediaQueue } from '../queues/media.queue';
 import { stopMediaWorker } from '../queues/media.worker';
@@ -83,7 +81,7 @@ export async function runStartupChecks(): Promise<CheckResult[]> {
     results.push({
       name: 'Redis (TCP / Queue)',
       status: 'ok',
-      detail: env.REDIS_URL ? 'Configured but unreachable — sends fall back to direct delivery' : 'REDIS_URL not set — queue disabled',
+      detail: env.REDIS_URL ? 'Configured but unreachable — queue features disabled' : 'REDIS_URL not set — queue disabled',
     });
     markDegraded('tcpRedis', env.REDIS_URL ? 'Unreachable — queue disabled' : 'Not configured');
   }
@@ -156,11 +154,9 @@ export function setupGracefulShutdown(prisma: { $disconnect: () => Promise<void>
     server.close(async () => {
       logger.info('HTTP server closed — no new connections accepted');
 
-      await step('stopMessageWorker', stopMessageWorker);
       await step('stopChatWorker', stopChatWorker);
       await step('stopMediaWorker', stopMediaWorker);
       await step('closeMediaQueue', closeMediaQueue);
-      await step('closeMessageQueue', closeMessageQueue);
       await step('closeChatQueue', closeChatQueue);
       await step('closeChatSocket', closeChatSocket);
       await step('closeRedisConnection', closeRedisConnection);

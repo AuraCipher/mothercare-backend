@@ -10243,11 +10243,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-  '/admin/staff/{userId}/send-credentials':
+  '/admin/staff/{userId}/save-credential':
     post:
       tags: [Staff RBAC]
-      summary: POST /admin/staff/{userId}/send-credentials
-      operationId: post_admin_staff_userId_send_credentials
+      summary: POST /admin/staff/{userId}/save-credential
+      operationId: post_admin_staff_userId_save_credential
       security: [{ bearerAuth: [] }]
       parameters:
         - name: userId
@@ -10255,6 +10255,12 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JsonObjectRequest"
       responses:
         '201':
           description: Success
@@ -11560,86 +11566,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-  '/admin/students/send-all-credentials':
-    post:
-      tags: [Admin ERP]
-      summary: POST /admin/students/send-all-credentials
-      operationId: post_admin_students_send_all_credentials
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - $ref: "#/components/parameters/branchId"
-        - $ref: "#/components/parameters/academicYearId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/JsonObjectRequest"
-      responses:
-        '201':
-          description: Success
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GenericDataResponse"
-        '400':
-          description: Validation or business rule error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        '401':
-          description: Missing or invalid JWT
-        '403':
-          description: Forbidden — role or module permission
-        '404':
-          description: Resource not found
-        '422':
-          description: Zod validation error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-  '/admin/students/send-to-new':
-    post:
-      tags: [Admin ERP]
-      summary: POST /admin/students/send-to-new
-      operationId: post_admin_students_send_to_new
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - $ref: "#/components/parameters/branchId"
-        - $ref: "#/components/parameters/academicYearId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/JsonObjectRequest"
-      responses:
-        '201':
-          description: Success
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GenericDataResponse"
-        '400':
-          description: Validation or business rule error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        '401':
-          description: Missing or invalid JWT
-        '403':
-          description: Forbidden — role or module permission
-        '404':
-          description: Resource not found
-        '422':
-          description: Zod validation error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
   '/admin/students/{id}':
     get:
       tags: [Admin ERP]
@@ -12218,11 +12144,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-  '/admin/students/{id}/send-credentials':
+  '/admin/students/{id}/save-credential':
     post:
       tags: [Admin ERP]
-      summary: POST /admin/students/{id}/send-credentials
-      operationId: post_admin_students_id_send_credentials
+      summary: POST /admin/students/{id}/save-credential
+      operationId: post_admin_students_id_save_credential
       security: [{ bearerAuth: [] }]
       parameters:
         - name: id
@@ -12230,6 +12156,12 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JsonObjectRequest"
       responses:
         '201':
           description: Success
@@ -13011,11 +12943,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-  '/admin/teachers/{id}/send-credentials':
+  '/admin/teachers/{id}/save-credential':
     post:
       tags: [Admin ERP]
-      summary: POST /admin/teachers/{id}/send-credentials
-      operationId: post_admin_teachers_id_send_credentials
+      summary: POST /admin/teachers/{id}/save-credential
+      operationId: post_admin_teachers_id_save_credential
       security: [{ bearerAuth: [] }]
       parameters:
         - name: id
@@ -13023,6 +12955,12 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JsonObjectRequest"
       responses:
         '201':
           description: Success

@@ -6,7 +6,6 @@ import { initSentry } from './src/lib/sentry';
 import { prisma } from './src/lib/prisma';
 import { runStartupChecks, printStartupBanner, setupGracefulShutdown } from './src/lib/startup';
 import logger from './src/lib/logger';
-import { startMessageWorker } from './src/queues/message.worker';
 import { startChatWorker } from './src/queues/chat.worker';
 import { startMediaWorker } from './src/queues/media.worker';
 import { startUploadSessionSweeper } from './src/modules/upload/upload-session-sweeper';
@@ -62,7 +61,6 @@ async function main() {
     // ─── 3. Setup graceful shutdown ────────────────────────
     setupGracefulShutdown(prisma, server);
 
-    startMessageWorker();
     startChatWorker();
     startMediaWorker();
     startUploadSessionSweeper();

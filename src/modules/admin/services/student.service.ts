@@ -1,8 +1,8 @@
 import { prisma } from '../../../lib/prisma';
 import { deleteFileRecordById } from '../../upload/upload.service';
 import { generateUsername, generatePassword } from '../../../utils/username';
-import notificationService from '../../../services/notification.service';
 import env from '../../../config/env';
+import { assertPasswordPolicy } from '../../../utils/password-policy';
 
 export interface CreateStudentInput {
   name: string;
@@ -509,7 +509,7 @@ class StudentService {
     const phone = student.studentWhatsapp || student.phone;
     if (!phone) throw { status: 400, code: 'NO_PHONE', message: 'WhatsApp/phone number is required before saving credentials.' };
     if (!student.userId || !student.user) throw { status: 400, message: 'Student has no login credentials. Generate credentials first.' };
-    if (!input.password || input.password.length < 8) throw { status: 400, message: 'A valid generated password is required.' };
+    assertPasswordPolicy(input.password);
 
     // M21 §18 — authoritative existing-password check. Fail closed, no mutation.
     const hasExistingPassword = !!student.passwordSetAt;
@@ -533,6 +533,8 @@ class StudentService {
         return {
           idempotent: true,
           website: prev.website || env.FRONTEND_URL || 'https://mothercareschool.pk',
+          schoolName: prev.schoolName || env.SCHOOL_NAME || 'Mother Care School',
+          appUrl: prev.appUrl || env.APP_DOWNLOAD_URL || 'https://play.google.com/store/apps/details?id=com.mothercare.app',
           credentialGeneratedAt: prev.credentialGeneratedAt,
           credentialSentAt: prev.credentialSentAt,
         };
@@ -562,10 +564,12 @@ class StudentService {
       }
     }
 
-    // M21 §24 — commit hash + timestamps + audit together. No Twilio, no queue, ever.
+    // M21 §24 — commit hash + timestamps + audit together. No provider, no queue, ever.
     const newHash = await bc.hash(input.password, 12);
     const now = new Date();
     const website = env.FRONTEND_URL || 'https://mothercareschool.pk';
+    const schoolName = env.SCHOOL_NAME || 'Mother Care School';
+    const appUrl = env.APP_DOWNLOAD_URL || 'https://play.google.com/store/apps/details?id=com.mothercare.app';
     const [_, __, audit] = await prisma.$transaction([
       prisma.user.update({ where: { id: student.userId }, data: { passwordHash: newHash } }),
       prisma.student.update({
@@ -589,6 +593,8 @@ class StudentService {
             credentialGeneratedAt: now.toISOString(),
             credentialSentAt: now.toISOString(),
             website,
+            schoolName,
+            appUrl,
           },
           metadata: input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined,
           ipAddress,
@@ -601,131 +607,11 @@ class StudentService {
     return {
       success: true,
       website,
+      schoolName,
+      appUrl,
       credentialGeneratedAt: now.toISOString(),
       credentialSentAt: now.toISOString(),
     };
-  }
-
-  // ─── Send credentials via WhatsApp ─────────────────────────
-
-  /**
-   * Send login credentials to a single student via WhatsApp.
-   * Generates a fresh temporary password so the student can log in immediately.
-   */
-  async sendCredentials(studentId: string, userId: string, ipAddress?: string) {
-    const bc = await import('bcryptjs');
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-      select: { id: true, name: true, studentWhatsapp: true, username: true, phone: true, group: { select: { name: true, section: true } }, user: { select: { id: true, username: true } } },
-    });
-    if (!student) throw { status: 404, message: 'Student not found' };
-    if (!student.user) throw { status: 400, message: 'No login credentials. Generate credentials first.' };
-
-    const whatsapp = student.studentWhatsapp || student.phone;
-    if (!whatsapp) throw { status: 400, message: 'No WhatsApp/phone number available for this student.' };
-
-    // M19.1 — student_wc {{2}} requires the authoritative class label.
-    // Fail safely BEFORE rotating the password so a missing class can never
-    // lock the account with an undelivered credential.
-    // The approved body already prints "Class" before {{2}}, so one leading
-    // "Class" is stripped from the group name (see formatClassLabel).
-    const { formatClassLabel } = await import('../../../services/twilio-whatsapp.service');
-    const className = student.group ? formatClassLabel(student.group.name, student.group.section) : null;
-    if (!className) throw { status: 400, message: 'No class assigned to this student. Assign a class first.' };
-
-    // Generate a fresh temporary password, hash it, save it
-    const tempPassword = generatePassword();
-    const hash = await bc.hash(tempPassword, 12);
-    await prisma.user.update({
-      where: { id: student.user.id },
-      data: { passwordHash: hash },
-    });
-
-    // Send via WhatsApp
-    const result = await notificationService.sendCredential({
-      to: whatsapp,
-      username: student.user.username || student.username || '—',
-      password: tempPassword,
-      name: student.name,
-      recipientType: 'student',
-      className,
-    });
-
-    const status = result.success ? 'sent' : 'failed';
-    const now = new Date();
-
-    // Update student credential tracking fields
-    await prisma.student.update({
-      where: { id: studentId },
-      data: {
-        credentialSentAt: now,
-        credentialStatus: status,
-        passwordSetAt: now,
-        ...(result.success ? { credentialDeliveredAt: null, credentialSeenAt: null } : {}),
-      },
-    });
-
-    // Create CredentialSend history record (redacted — no passwords)
-    await prisma.credentialSend.create({
-      data: {
-        studentId,
-        sentAt: now,
-        status,
-        to: whatsapp.slice(0, 6) + '****',
-        errorMsg: result.success ? null : result.errorMessage || result.messageStatus || 'Unknown error',
-        sentById: userId,
-      },
-    });
-
-    // Audit trail
-    try {
-      await prisma.auditLog.create({
-        data: {
-          userId,
-          action: 'credential_sent',
-          entity: 'Student',
-          entityId: studentId,
-          newValue: { sent: result.success, status, to: whatsapp.slice(0, 6) + '****' },
-          ipAddress,
-        },
-      });
-    } catch { /* best-effort */ }
-
-    return {
-      sent: result.success,
-      status,
-      to: whatsapp.slice(0, 6) + '****',
-      channel: result.channel,
-      messageId: result.messageId,
-      errorCode: result.errorCode,
-      errorMessage: result.errorMessage,
-      retryable: result.retryable,
-      solvable: result.solvable,
-    };
-  }
-
-  /**
-   * Send credentials via WhatsApp to multiple students.
-   * Processes sequentially with delay to avoid rate limits.
-   */
-  async sendAllCredentials(studentIds: string[], userId: string, ipAddress?: string) {
-    const results: { studentId: string; sent: boolean; reason?: string }[] = [];
-    let sent = 0, skipped = 0, failed = 0;
-
-    for (const sid of studentIds) {
-      try {
-        const result = await this.sendCredentials(sid, userId, ipAddress);
-        results.push({ studentId: sid, sent: result.sent });
-        if (result.sent) sent++; else failed++;
-      } catch (e: any) {
-        const reason = e.message || 'Unknown error';
-        results.push({ studentId: sid, sent: false, reason });
-        if (reason.includes('no WhatsApp') || reason.includes('credentials')) skipped++;
-        else failed++;
-      }
-    }
-
-    return { sent, skipped, failed, results };
   }
 }
 

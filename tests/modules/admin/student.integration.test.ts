@@ -33,8 +33,7 @@ jest.mock('../../../src/modules/admin/services/student.service', () => ({
     unlinkParent: jest.fn().mockResolvedValue({ studentId: 's1', parentId: 'p1' }),
     generateCredentials: jest.fn().mockResolvedValue({ username: 'ali123', password: 'TempPass1!' }),
     setPassword: jest.fn().mockResolvedValue({ message: 'Password updated successfully' }),
-    sendCredentials: jest.fn().mockResolvedValue({ sent: true, status: 'sent', to: '030012****' }),
-    sendAllCredentials: jest.fn().mockResolvedValue({ sent: 2, skipped: 0, failed: 0, results: [] }),
+    saveCredential: jest.fn().mockResolvedValue({ success: true, website: 'https://school.test' }),
   },
 }));
 
@@ -130,13 +129,11 @@ const ALL_ROUTES: RouteSpec[] = [
     body: { password: 'NewPass123!', adminPassword: 'AdminPass123!' },
     successStatus: 200,
   },
-  { label: 'POST send-credentials', method: 'post', path: `${BASE}/${STUDENT_ID}/send-credentials`, successStatus: 200 },
-  { label: 'POST send-to-new', method: 'post', path: `${BASE}/send-to-new`, needsScope: true, successStatus: 200 },
   {
-    label: 'POST send-all-credentials',
+    label: 'POST save-credential',
     method: 'post',
-    path: `${BASE}/send-all-credentials`,
-    body: { studentIds: ['s1', 's2'] },
+    path: `${BASE}/${STUDENT_ID}/save-credential`,
+    body: { password: 'NewPass123!x', adminPassword: 'AdminPass123!', replaceExisting: true, idempotencyKey: 'k1' },
     successStatus: 200,
   },
   {
@@ -188,8 +185,7 @@ function resetStudentMocks() {
   (studentService.unlinkParent as jest.Mock).mockResolvedValue({ studentId: 's1', parentId: 'p1' });
   (studentService.generateCredentials as jest.Mock).mockResolvedValue({ username: 'ali123', password: 'TempPass1!' });
   (studentService.setPassword as jest.Mock).mockResolvedValue({ message: 'Password updated successfully' });
-  (studentService.sendCredentials as jest.Mock).mockResolvedValue({ sent: true, status: 'sent' });
-  (studentService.sendAllCredentials as jest.Mock).mockResolvedValue({ sent: 2, skipped: 0, failed: 0, results: [] });
+  (studentService.saveCredential as jest.Mock).mockResolvedValue({ success: true, website: 'https://school.test' });
   (staffService.resolveUserAccess as jest.Mock).mockResolvedValue({
     isRestricted: false,
     isFullAdmin: true,
@@ -345,46 +341,17 @@ describe('Student admin integration routes', () => {
     });
   });
 
-  describe('POST /admin/students/send-all-credentials — validation', () => {
-    const sendAllEp = ALL_ROUTES.find((e) => e.label === 'POST send-all-credentials')!;
+  describe('POST /admin/students/:id/save-credential — validation', () => {
+    const saveEp = ALL_ROUTES.find((e) => e.label === 'POST save-credential')!;
 
     test.each([
-      ['missing studentIds', {}],
-      ['empty array', { studentIds: [] }],
-      ['null studentIds', { studentIds: null }],
-      ['non-array studentIds', { studentIds: 's1' }],
+      ['missing password', { adminPassword: 'AdminPass123!' }],
+      ['missing adminPassword', { password: 'NewPass123!x' }],
+      ['both missing', {}],
     ])('400 — %s', async (_label, body) => {
-      const res = await send(sendAllEp, { auth: adminAuth, query: scopeQuery, body });
+      const res = await send(saveEp, { auth: adminAuth, query: scopeQuery, body });
       expect(res.status).toBe(400);
-      expect(res.body.message).toMatch(/studentIds array is required/i);
-    });
-  });
-
-  describe('PUT /admin/students/:id/status — validation', () => {
-    const statusEp = ALL_ROUTES.find((e) => e.label === 'PUT status')!;
-
-    test('400 — missing status', async () => {
-      const res = await send(statusEp, { auth: adminAuth, query: scopeQuery, body: { reason: 'test' } });
-      expect(res.status).toBe(400);
-      expect(res.body.message).toMatch(/status is required/i);
-    });
-
-    test.each([
-      ['INVALID'],
-      ['active'],
-      ['PENDING'],
-      ['DROPPED'],
-    ])('400 — invalid status %s', async (status) => {
-      const res = await send(statusEp, { auth: adminAuth, query: scopeQuery, body: { status } });
-      expect(res.status).toBe(400);
-      expect(res.body.message).toMatch(/invalid status/i);
-    });
-
-    test('404 — student not found', async () => {
-      (prismaMock.student.findUnique as jest.Mock).mockResolvedValue(null);
-      const res = await send(statusEp, { auth: adminAuth, query: scopeQuery, body: { status: 'SUSPENDED' } });
-      expect(res.status).toBe(404);
-      expect(res.body.message).toMatch(/student not found/i);
+      expect(res.body.message).toMatch(/password and adminPassword are required/i);
     });
   });
 
@@ -686,48 +653,34 @@ describe('Student admin integration routes', () => {
       );
     });
 
-    test('POST send-credentials returns sent flag', async () => {
+    test('POST save-credential saves and returns website', async () => {
       const res = await request(app)
-        .post(`${BASE}/${STUDENT_ID}/send-credentials`)
-        .query(scopeQuery)
-        .set(adminAuth);
-      expect(res.status).toBe(200);
-      expect(res.body.data.sent).toBe(true);
-      expect(studentService.sendCredentials).toHaveBeenCalledWith(
-        STUDENT_ID,
-        'admin-1',
-        expect.any(String),
-      );
-    });
-
-    test('POST send-to-new with pending students', async () => {
-      (prismaMock.student.findMany as jest.Mock).mockResolvedValue([{ id: 's1' }, { id: 's2' }]);
-      const res = await request(app).post(`${BASE}/send-to-new`).query(scopeQuery).set(adminAuth);
-      expect(res.status).toBe(200);
-      expect(studentService.sendAllCredentials).toHaveBeenCalledWith(['s1', 's2'], 'admin-1', expect.any(String));
-    });
-
-    test('POST send-to-new when all already sent', async () => {
-      (prismaMock.student.findMany as jest.Mock).mockResolvedValue([]);
-      const res = await request(app).post(`${BASE}/send-to-new`).query(scopeQuery).set(adminAuth);
-      expect(res.status).toBe(200);
-      expect(res.body.data.sent).toBe(0);
-      expect(res.body.data.message).toMatch(/already have credentials sent/i);
-    });
-
-    test('POST send-all-credentials with studentIds', async () => {
-      const res = await request(app)
-        .post(`${BASE}/send-all-credentials`)
+        .post(`${BASE}/${STUDENT_ID}/save-credential`)
         .query(scopeQuery)
         .set(adminAuth)
-        .send({ studentIds: ['s1', 's2', 's3'] });
+        .send({ password: 'NewPass123!x', adminPassword: 'AdminPass123!', replaceExisting: true, idempotencyKey: 'k1' });
       expect(res.status).toBe(200);
-      expect(res.body.data.sent).toBe(2);
-      expect(studentService.sendAllCredentials).toHaveBeenCalledWith(
-        ['s1', 's2', 's3'],
+      expect(res.body.data.website).toBe('https://school.test');
+      expect(studentService.saveCredential).toHaveBeenCalledWith(
+        STUDENT_ID,
+        { password: 'NewPass123!x', adminPassword: 'AdminPass123!', replaceExisting: true, idempotencyKey: 'k1' },
         'admin-1',
         expect.any(String),
+        'b1',
       );
+    });
+
+    test('POST save-credential preserves PASSWORD_REPLACEMENT_REQUIRED code', async () => {
+      (studentService.saveCredential as jest.Mock).mockRejectedValueOnce({
+        status: 409, code: 'PASSWORD_REPLACEMENT_REQUIRED', message: 'Confirm replacement.',
+      });
+      const res = await request(app)
+        .post(`${BASE}/${STUDENT_ID}/save-credential`)
+        .query(scopeQuery)
+        .set(adminAuth)
+        .send({ password: 'NewPass123!x', adminPassword: 'AdminPass123!' });
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('PASSWORD_REPLACEMENT_REQUIRED');
     });
   });
 

@@ -460,7 +460,7 @@ function applyFallbacks(method: string, path: string, partial?: OperationSpec): 
   if (!spec.requestBody && BODY_METHODS.has(method) && !path.startsWith('/api')) {
     const actionSuffix = path.split('/').pop() ?? '';
     const noBodyActions = new Set([
-      'revert', 'print-receipt', 'reactivate', 'deactivate', 'send-credentials',
+      'revert', 'print-receipt', 'reactivate', 'deactivate',
       'notify', 'resume', 'publish', 'pause', 'archive', 'unarchive', 'end', 'void', 'unlink',
       'refresh', 'logout', 'duplicate-last',
     ]);

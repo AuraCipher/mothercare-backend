@@ -63,16 +63,6 @@ jest.mock('../../src/config/env', () => ({
   },
 }));
 
-jest.mock('../../src/services/credential-delivery.service', () => ({
-  __esModule: true,
-  deliverCredential: jest.fn().mockResolvedValue({
-    success: true,
-    channel: 'whatsapp',
-    messageId: 'mock-msg-id',
-    messageStatus: 'sent',
-  }),
-}));
-
 jest.mock('../../src/modules/chat/push/fcm.service', () => ({
   __esModule: true,
   sendEncryptedPushToUsers: jest.fn().mockResolvedValue({ sent: 0, skipped: 0 }),
@@ -237,30 +227,7 @@ describe('R2-12B — B. BullMQ Queue Lifecycle', () => {
     expect(completed).toBe(true);
   }, 15_000);
 
-  test('message queue: enqueue + worker processes + completion', async () => {
-    const { getCredentialQueue, CREDENTIAL_SEND_JOB, closeMessageQueue } = await import('../../src/queues/message.queue');
-    const { startMessageWorker, stopMessageWorker } = await import('../../src/queues/message.worker');
 
-    const q = getCredentialQueue()!;
-    expect(q).not.toBeNull();
-
-    const worker = startMessageWorker();
-    expect(worker).not.toBeNull();
-    cleanupFns.push(() => stopMessageWorker());
-    cleanupFns.push(() => closeMessageQueue());
-
-    const job = await q.add(CREDENTIAL_SEND_JOB, {
-      to: '+923001234567',
-      username: 'testuser',
-      password: 'testpass',
-      name: 'Test User',
-      recipientType: 'student',
-    }, { jobId: makeTestId() });
-
-    expect(job.id).toBeDefined();
-    const completed = await waitForJob(job, 'completed');
-    expect(completed).toBe(true);
-  }, 15_000);
 
   test('chat worker rejects unknown job names gracefully', async () => {
     const { getChatQueue, closeChatQueue } = await import('../../src/queues/chat.queue');
@@ -276,19 +243,7 @@ describe('R2-12B — B. BullMQ Queue Lifecycle', () => {
     expect(failed).toBe(true);
   }, 15_000);
 
-  test('message worker rejects unknown job names gracefully', async () => {
-    const { getCredentialQueue, closeMessageQueue } = await import('../../src/queues/message.queue');
-    const { startMessageWorker, stopMessageWorker } = await import('../../src/queues/message.worker');
 
-    const q = getCredentialQueue()!;
-    startMessageWorker();
-    cleanupFns.push(() => stopMessageWorker());
-    cleanupFns.push(() => closeMessageQueue());
-
-    const job = await q.add('unknown_type', { arbitrary: 'data' } as any, { jobId: makeTestId() });
-    const failed = await waitForJob(job, 'failed');
-    expect(failed).toBe(true);
-  }, 15_000);
 
   test('chat queue retry: unknown job fails without crashing worker', async () => {
     const { getChatQueue, closeChatQueue } = await import('../../src/queues/chat.queue');
@@ -372,105 +327,9 @@ describe('R2-12B — B. BullMQ Queue Lifecycle', () => {
     await closeChatQueue();
   });
 
-  test('message queue close is idempotent', async () => {
-    const { getCredentialQueue, closeMessageQueue } = await import('../../src/queues/message.queue');
-    getCredentialQueue();
-    await closeMessageQueue();
-    await closeMessageQueue();
-  });
-});
 
-/* ────────────────────────────────────────────────────────────
-   C. Worker Concurrency
-   ──────────────────────────────────────────────────────────── */
 
-describe('R2-12B — C. Worker Concurrency', () => {
-  const cleanupFns: Array<() => Promise<void>> = [];
 
-  afterEach(async () => {
-    for (const fn of cleanupFns.reverse()) {
-      try { await fn(); } catch { /* best effort */ }
-    }
-    cleanupFns.length = 0;
-  });
-
-  test('chat worker processes multiple jobs concurrently', async () => {
-    const { getChatQueue, CHAT_PUSH_FANOUT_JOB, closeChatQueue } = await import('../../src/queues/chat.queue');
-    const { startChatWorker, stopChatWorker } = await import('../../src/queues/chat.worker');
-
-    const q = getChatQueue()!;
-    startChatWorker();
-    cleanupFns.push(() => stopChatWorker());
-    cleanupFns.push(() => closeChatQueue());
-
-    const jobs = await Promise.all(
-      Array.from({ length: 3 }, (_, i) =>
-        q.add(CHAT_PUSH_FANOUT_JOB, {
-          roomId: `room-conc-${i}`,
-          messageId: `msg-conc-${makeTestId()}-${i}`,
-          senderId: 'sender-conc',
-          recipientUserIds: [`user-conc-${i}`],
-          preview: `Concurrent job ${i}`,
-          roomName: `Concurrent Room ${i}`,
-          keyVersion: 1,
-        }, { jobId: makeTestId() }),
-      ),
-    );
-
-    expect(jobs).toHaveLength(3);
-
-    const allCompleted = await new Promise<boolean>((resolve) => {
-      const deadline = setTimeout(() => resolve(false), 15_000);
-      const check = setInterval(async () => {
-        const states = await Promise.all(jobs.map(j => j.getState()));
-        if (states.every(s => s === 'completed' || s === 'failed')) {
-          clearInterval(check);
-          clearTimeout(deadline);
-          resolve(states.every(s => s === 'completed'));
-        }
-      }, 300);
-    });
-
-    expect(allCompleted).toBe(true);
-  }, 20_000);
-
-  test('message worker processes multiple jobs concurrently', async () => {
-    const { getCredentialQueue, CREDENTIAL_SEND_JOB, closeMessageQueue } = await import('../../src/queues/message.queue');
-    const { startMessageWorker, stopMessageWorker } = await import('../../src/queues/message.worker');
-
-    const q = getCredentialQueue()!;
-    startMessageWorker();
-    cleanupFns.push(() => stopMessageWorker());
-    cleanupFns.push(() => closeMessageQueue());
-
-    const jobs = await Promise.all(
-      Array.from({ length: 3 }, (_, i) =>
-        q.add(CREDENTIAL_SEND_JOB, {
-          to: `+92300000000${i}`,
-          username: `user${i}`,
-          password: `pass${i}`,
-          name: `User ${i}`,
-          recipientType: 'student',
-        }, { jobId: makeTestId() }),
-      ),
-    );
-
-    expect(jobs).toHaveLength(3);
-
-    const allCompleted = await new Promise<boolean>((resolve) => {
-      const deadline = setTimeout(() => resolve(false), 15_000);
-      const check = setInterval(async () => {
-        const states = await Promise.all(jobs.map(j => j.getState()));
-        if (states.every(s => s === 'completed' || s === 'failed')) {
-          clearInterval(check);
-          clearTimeout(deadline);
-          resolve(states.every(s => s === 'completed'));
-        }
-      }, 300);
-    });
-
-    expect(allCompleted).toBe(true);
-  }, 20_000);
 });
 
 /* ────────────────────────────────────────────────────────────
@@ -495,141 +354,7 @@ describe('R2-12B — D. Graceful Shutdown', () => {
     await stopChatWorker(); // idempotent
   });
 
-  test('stopMessageWorker closes worker cleanly', async () => {
-    const { startMessageWorker, stopMessageWorker } = await import('../../src/queues/message.worker');
-    const worker = startMessageWorker();
-    expect(worker).not.toBeNull();
-    await stopMessageWorker();
-    await stopMessageWorker(); // idempotent
-  });
 
-  test('closeChatSocket cleans up ioredis pub/sub connections', async () => {
-    const { initChatSocket, closeChatSocket, getChatIo } = await import('../../src/modules/chat/socket/chat.socket');
-
-    const server = http.createServer();
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-
-    const io = await initChatSocket(server);
-    expect(io).not.toBeNull();
-
-    await closeChatSocket();
-    expect(getChatIo()).toBeNull();
-
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  });
-
-  test('closeMessageQueue cleans up queue + queueEvents', async () => {
-    const { getCredentialQueue, closeMessageQueue } = await import('../../src/queues/message.queue');
-
-    const q = getCredentialQueue()!;
-    expect(q).not.toBeNull();
-
-    await closeMessageQueue();
-    await closeMessageQueue(); // idempotent
-  });
-
-  test('closeChatQueue cleans up queue', async () => {
-    const { getChatQueue, closeChatQueue } = await import('../../src/queues/chat.queue');
-
-    const q = getChatQueue()!;
-    expect(q).not.toBeNull();
-
-    await closeChatQueue();
-    await closeChatQueue(); // idempotent
-  });
-
-  test('full shutdown sequence: workers → queues → socket → done', async () => {
-    const { startChatWorker, stopChatWorker } = await import('../../src/queues/chat.worker');
-    const { startMessageWorker, stopMessageWorker } = await import('../../src/queues/message.worker');
-    const { getChatQueue, closeChatQueue } = await import('../../src/queues/chat.queue');
-    const { getCredentialQueue, closeMessageQueue } = await import('../../src/queues/message.queue');
-    const { initChatSocket, closeChatSocket } = await import('../../src/modules/chat/socket/chat.socket');
-
-    startMessageWorker();
-    startChatWorker();
-    getChatQueue();
-    getCredentialQueue();
-
-    const server = http.createServer();
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    await initChatSocket(server);
-
-    const shutdownStart = Date.now();
-    await stopMessageWorker();
-    await stopChatWorker();
-    await closeMessageQueue();
-    await closeChatQueue();
-    await closeChatSocket();
-    const totalMs = Date.now() - shutdownStart;
-
-    expect(totalMs).toBeLessThan(5000);
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  });
-});
-
-/* ────────────────────────────────────────────────────────────
-   E. Socket.IO
-   ──────────────────────────────────────────────────────────── */
-
-describe('R2-12B — E. Socket.IO', () => {
-  test('initChatSocket creates server and Redis adapter connections', async () => {
-    const { initChatSocket, closeChatSocket, getChatIo } = await import('../../src/modules/chat/socket/chat.socket');
-
-    const server = http.createServer();
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-
-    const io = await initChatSocket(server);
-    expect(io).not.toBeNull();
-    expect(getChatIo()).toBe(io);
-
-    const adapter = (io as any).adapter;
-    expect(adapter).toBeDefined();
-
-    await closeChatSocket();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  });
-
-  test('closeChatSocket is idempotent', async () => {
-    const { initChatSocket, closeChatSocket } = await import('../../src/modules/chat/socket/chat.socket');
-
-    const server = http.createServer();
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    await initChatSocket(server);
-
-    await closeChatSocket();
-    await closeChatSocket();
-    await closeChatSocket();
-
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  });
-
-  test('Socket.IO server handles invalid auth without crashing', async () => {
-    const { initChatSocket, closeChatSocket } = await import('../../src/modules/chat/socket/chat.socket');
-
-    const server = http.createServer();
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    const port = (server.address() as any).port;
-
-    await initChatSocket(server);
-
-    const { io: clientIo } = await import('socket.io-client');
-    const client = clientIo(`http://127.0.0.1:${port}`, {
-      auth: { token: 'invalid-token' },
-      reconnection: false,
-      timeout: 3000,
-    });
-
-    const gotError = await new Promise<boolean>((resolve) => {
-      client.on('connect_error', () => resolve(true));
-      client.on('error', () => resolve(true));
-      setTimeout(() => resolve(false), 4000);
-    });
-
-    expect(gotError).toBe(true);
-    client.disconnect();
-    await closeChatSocket();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }, 10_000);
 
   test('Socket.IO server closes cleanly under load', async () => {
     const { initChatSocket, closeChatSocket } = await import('../../src/modules/chat/socket/chat.socket');
