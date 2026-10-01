@@ -2,6 +2,7 @@ import { prisma } from '../../../lib/prisma';
 import { deleteFileRecordById } from '../../upload/upload.service';
 import { generateUsername, generatePassword } from '../../../utils/username';
 import notificationService from '../../../services/notification.service';
+import env from '../../../config/env';
 
 export interface CreateStudentInput {
   name: string;
@@ -459,6 +460,150 @@ class StudentService {
     } catch { /* audit log is best-effort */ }
 
     return { message: 'Password updated successfully' };
+  }
+
+  // ─── Manual WhatsApp handoff: Save Credential (M21) ───
+  // Composite save for the Students Operations drawer. Persists the
+  // FRONTEND-generated password (never mints a second one), records the
+  // manual-handoff timestamp, and returns the website for local message
+  // construction. NEVER touches the messaging provider, queue, or worker —
+  // the browser opens WhatsApp with a prefilled message; the app sends nothing.
+  //
+  // "Existing password" signal: student.passwordSetAt (set only when a
+  // password was knowingly saved before; generate-credentials alone does
+  // not set it). Backend is authoritative — row state on the page is advisory.
+  // credentialStatus 'sent' in this flow means MANUAL HANDOFF INITIATED,
+  // never provider-confirmed delivery.
+
+  async saveCredential(
+    studentId: string,
+    input: { password: string; adminPassword: string; replaceExisting?: boolean; idempotencyKey?: string },
+    adminId: string,
+    ipAddress?: string,
+    branchId?: string,
+  ) {
+    const bc = await import('bcryptjs');
+
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: {
+        id: true, name: true, username: true, userId: true,
+        passwordSetAt: true,
+        group: { select: { id: true } },
+        studentWhatsapp: true, phone: true,
+        academicYear: { select: { branchId: true } },
+        user: { select: { passwordHash: true } },
+      },
+    });
+    if (!student) throw { status: 404, message: 'Student not found' };
+
+    // M21 §26 — target-branch ownership (M13 pattern). Never reproduced the old gap.
+    const targetBranch = student.academicYear?.branchId;
+    if (branchId && targetBranch && branchId !== targetBranch) {
+      throw { status: 403, message: 'Student does not belong to the requested branch' };
+    }
+
+    // M21 §12/§23 — business preconditions for the save leg.
+    if (!student.username) throw { status: 400, code: 'NO_USERNAME', message: 'Username is required before saving credentials.' };
+    if (!student.group) throw { status: 400, code: 'NO_CLASS', message: 'Class is required before saving credentials.' };
+    const phone = student.studentWhatsapp || student.phone;
+    if (!phone) throw { status: 400, code: 'NO_PHONE', message: 'WhatsApp/phone number is required before saving credentials.' };
+    if (!student.userId || !student.user) throw { status: 400, message: 'Student has no login credentials. Generate credentials first.' };
+    if (!input.password || input.password.length < 8) throw { status: 400, message: 'A valid generated password is required.' };
+
+    // M21 §18 — authoritative existing-password check. Fail closed, no mutation.
+    const hasExistingPassword = !!student.passwordSetAt;
+    if (hasExistingPassword && !input.replaceExisting) {
+      throw { status: 409, code: 'PASSWORD_REPLACEMENT_REQUIRED', message: 'Student already has a password. Confirm replacement first.' };
+    }
+
+    // M21 §25 — idempotency: same key seen on a recent credential_save audit
+    // resolves to the stored result WITHOUT re-hashing or rotating.
+    if (input.idempotencyKey) {
+      const prior = await prisma.auditLog.findFirst({
+        where: {
+          action: 'credential_save', entity: 'Student', entityId: studentId,
+          metadata: { path: ['idempotencyKey'], equals: input.idempotencyKey },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { newValue: true },
+      });
+      const prev = (prior?.newValue as any) || {};
+      if (prior && prev.credentialSentAt) {
+        return {
+          idempotent: true,
+          website: prev.website || env.FRONTEND_URL || 'https://mothercareschool.pk',
+          credentialGeneratedAt: prev.credentialGeneratedAt,
+          credentialSentAt: prev.credentialSentAt,
+        };
+      }
+    }
+
+    // M21 §19 — acting-admin verification (same pattern as set-password).
+    const admin = await prisma.user.findUnique({ where: { id: adminId } });
+    if (!admin) throw { status: 404, message: 'Admin user not found' };
+    const isMatch = await bc.compare(input.adminPassword, admin.passwordHash);
+    if (!isMatch) throw { status: 403, message: 'Admin password is incorrect' };
+
+    // M21 §20 — password-history protection (last 3, across both actions).
+    const recentChanges = await prisma.auditLog.findMany({
+      where: { entity: 'Student', entityId: studentId, action: { in: ['password_reset', 'credential_save'] } },
+      orderBy: { createdAt: 'desc' },
+      take: 3,
+      select: { newValue: true },
+    });
+    for (const entry of recentChanges) {
+      const prevHash = (entry.newValue as any)?.passwordHash;
+      if (prevHash && typeof prevHash === 'string') {
+        const isReused = await bc.compare(input.password, prevHash);
+        if (isReused) {
+          throw { status: 409, message: 'This password was used recently. Please generate a different one.' };
+        }
+      }
+    }
+
+    // M21 §24 — commit hash + timestamps + audit together. No Twilio, no queue, ever.
+    const newHash = await bc.hash(input.password, 12);
+    const now = new Date();
+    const website = env.FRONTEND_URL || 'https://mothercareschool.pk';
+    const [_, __, audit] = await prisma.$transaction([
+      prisma.user.update({ where: { id: student.userId }, data: { passwordHash: newHash } }),
+      prisma.student.update({
+        where: { id: studentId },
+        data: {
+          passwordSetAt: now,
+          credentialGeneratedAt: now,
+          credentialSentAt: now,
+          credentialStatus: 'sent', // manual-handoff-initiated semantics (M21 §34)
+        },
+      }),
+      prisma.auditLog.create({
+        data: {
+          userId: adminId,
+          action: 'credential_save',
+          entity: 'Student',
+          entityId: studentId,
+          newValue: {
+            username: student.name,
+            passwordHash: newHash,
+            credentialGeneratedAt: now.toISOString(),
+            credentialSentAt: now.toISOString(),
+            website,
+          },
+          metadata: input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined,
+          ipAddress,
+        },
+      }),
+    ]);
+    void audit;
+
+    // M21 §44 — response carries NO password (drawer already holds P1).
+    return {
+      success: true,
+      website,
+      credentialGeneratedAt: now.toISOString(),
+      credentialSentAt: now.toISOString(),
+    };
   }
 
   // ─── Send credentials via WhatsApp ─────────────────────────

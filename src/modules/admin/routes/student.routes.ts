@@ -158,6 +158,34 @@ router.put('/students/:id/set-password', passwordSetLimiter, asyncHandler(async 
   res.json({ success: true, message: result.message });
 }));
 
+// POST /students/:id/save-credential — Manual WhatsApp handoff save (M21).
+// Persists the FRONTEND-generated password (hash only), records handoff
+// timestamps, returns the website for local message construction.
+// NEVER calls Twilio/queue/worker. Local try/catch preserves the machine
+// code (e.g. PASSWORD_REPLACEMENT_REQUIRED) the drawer state machine needs.
+router.post('/students/:id/save-credential', passwordSetLimiter, asyncHandler(async (req: Request, res: Response) => {
+  const { password, adminPassword, replaceExisting, idempotencyKey } = req.body;
+  const adminId = (req as any).user?.id;
+  if (!password || !adminPassword) {
+    res.status(400).json({ success: false, message: 'password and adminPassword are required' });
+    return;
+  }
+  const branchId = (req.query.branchId as string) || req.body?.branchId;
+  try {
+    const result = await studentService.saveCredential(
+      req.params.id,
+      { password, adminPassword, replaceExisting: !!replaceExisting, idempotencyKey },
+      adminId,
+      req.ip,
+      branchId,
+    );
+    res.json({ success: true, data: result });
+  } catch (e: any) {
+    const status = e?.status || 500;
+    res.status(status).json({ success: false, code: e?.code, message: e?.message || 'Failed to save credential' });
+  }
+}));
+
 // POST /students/:id/send-credentials — Send via WhatsApp
 router.post('/students/:id/send-credentials', passwordSetLimiter, asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user?.id;
