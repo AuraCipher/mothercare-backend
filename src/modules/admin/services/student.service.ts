@@ -35,6 +35,26 @@ export interface CreateStudentInput {
   createdById?: string;
 }
 
+export interface ParentLink {
+  isPrimary?: boolean | null;
+  parent?: { whatsapp?: string | null; phone?: string | null } | null;
+}
+
+/**
+ * Resolve the WhatsApp recipient for a student: the PARENT's number.
+ * Primary parent first, then any linked parent; whatsapp before phone.
+ * Students are minors — the student's own numbers are never used here.
+ */
+export function pickParentWhatsapp(links: ParentLink[] | null | undefined): string | null {
+  if (!links || links.length === 0) return null;
+  const ordered = [...links].sort((a, b) => Number(b.isPrimary ?? false) - Number(a.isPrimary ?? false));
+  for (const link of ordered) {
+    const number = link.parent?.whatsapp?.trim() || link.parent?.phone?.trim();
+    if (number) return number;
+  }
+  return null;
+}
+
 export interface UpdateStudentInput {
   name?: string;
   gender?: 'male' | 'female' | 'other';
@@ -88,7 +108,15 @@ class StudentService {
     const [data, total] = await Promise.all([
       prisma.student.findMany({
         where, skip, take: limit > 0 ? limit : undefined, orderBy: [{ group: { displayOrder: 'asc' } }, { rollNumber: 'asc' }],
-        include: { group: { select: { id: true, name: true, section: true } } },
+        include: {
+          group: { select: { id: true, name: true, section: true } },
+          parents: {
+            select: {
+              isPrimary: true,
+              parent: { select: { whatsapp: true, phone: true } },
+            },
+          },
+        },
       }),
       prisma.student.count({ where }),
     ]);
@@ -462,8 +490,7 @@ class StudentService {
     return { message: 'Password updated successfully' };
   }
 
-  // ─── Manual WhatsApp handoff: Save Credential (M21) ───
-  // Composite save for the Students Operations drawer. Persists the
+  // ─── Manual WhatsApp handoff: Save Credential (M21) ───  // Composite save for the Students Operations drawer. Persists the
   // FRONTEND-generated password (never mints a second one), records the
   // manual-handoff timestamp, and returns the website for local message
   // construction. NEVER touches the messaging provider, queue, or worker —
@@ -490,9 +517,14 @@ class StudentService {
         id: true, name: true, username: true, userId: true,
         passwordSetAt: true,
         group: { select: { id: true } },
-        studentWhatsapp: true, phone: true,
         academicYear: { select: { branchId: true } },
         user: { select: { passwordHash: true } },
+        parents: {
+          select: {
+            isPrimary: true,
+            parent: { select: { whatsapp: true, phone: true } },
+          },
+        },
       },
     });
     if (!student) throw { status: 404, message: 'Student not found' };
@@ -506,8 +538,10 @@ class StudentService {
     // M21 §12/§23 — business preconditions for the save leg.
     if (!student.username) throw { status: 400, code: 'NO_USERNAME', message: 'Username is required before saving credentials.' };
     if (!student.group) throw { status: 400, code: 'NO_CLASS', message: 'Class is required before saving credentials.' };
-    const phone = student.studentWhatsapp || student.phone;
-    if (!phone) throw { status: 400, code: 'NO_PHONE', message: 'WhatsApp/phone number is required before saving credentials.' };
+    // Recipient is ALWAYS the parent's number (primary first, whatsapp before
+    // phone). The student's own numbers are never used for sending.
+    const recipientPhone = pickParentWhatsapp(student.parents);
+    if (!recipientPhone) throw { status: 400, code: 'NO_PHONE', message: 'Parent WhatsApp/phone number is required before saving credentials.' };
     if (!student.userId || !student.user) throw { status: 400, message: 'Student has no login credentials. Generate credentials first.' };
     assertPasswordPolicy(input.password);
 
@@ -535,6 +569,7 @@ class StudentService {
           website: prev.website || env.FRONTEND_URL || 'https://mothercareschool.pk',
           schoolName: prev.schoolName || env.SCHOOL_NAME || 'Mother Care School',
           appUrl: prev.appUrl || env.APP_DOWNLOAD_URL || 'https://play.google.com/store/apps/details?id=com.mothercare.app',
+          recipientPhone: prev.recipientPhone || recipientPhone,
           credentialGeneratedAt: prev.credentialGeneratedAt,
           credentialSentAt: prev.credentialSentAt,
         };
@@ -595,6 +630,7 @@ class StudentService {
             website,
             schoolName,
             appUrl,
+            recipientPhone,
           },
           metadata: input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined,
           ipAddress,
@@ -609,6 +645,7 @@ class StudentService {
       website,
       schoolName,
       appUrl,
+      recipientPhone,
       credentialGeneratedAt: now.toISOString(),
       credentialSentAt: now.toISOString(),
     };

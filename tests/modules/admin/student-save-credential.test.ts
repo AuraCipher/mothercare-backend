@@ -26,9 +26,11 @@ const baseStudent = {
   userId: 'u1',
   passwordSetAt: null,
   group: { id: 'g1' },
-  studentWhatsapp: '03001234567',
-  phone: null,
   academicYear: { branchId: 'b1' },
+  parents: [
+    { isPrimary: false, parent: { whatsapp: null, phone: '03009998888' } },
+    { isPrimary: true, parent: { whatsapp: '03001112222', phone: '03003334444' } },
+  ],
   user: { passwordHash: '$2a$12$old_hash' },
 };
 
@@ -82,11 +84,26 @@ describe('saveCredential — preconditions', () => {
     ).rejects.toMatchObject({ status: 400, code: 'NO_CLASS' });
   });
 
-  test('400 NO_PHONE when both numbers missing', async () => {
-    (prismaMock.student.findUnique as jest.Mock).mockResolvedValue({ ...baseStudent, studentWhatsapp: null, phone: null });
+  test('400 NO_PHONE when no parent number exists', async () => {
+    (prismaMock.student.findUnique as jest.Mock).mockResolvedValue({ ...baseStudent, parents: [] });
     await expect(
       studentService.saveCredential('s1', input, 'admin1'),
     ).rejects.toMatchObject({ status: 400, code: 'NO_PHONE' });
+  });
+
+  test('400 NO_PHONE when parents have no numbers', async () => {
+    (prismaMock.student.findUnique as jest.Mock).mockResolvedValue({
+      ...baseStudent,
+      parents: [{ isPrimary: true, parent: { whatsapp: null, phone: null } }],
+    });
+    await expect(
+      studentService.saveCredential('s1', input, 'admin1'),
+    ).rejects.toMatchObject({ status: 400, code: 'NO_PHONE' });
+  });
+
+  test('response carries the primary parent number as recipientPhone', async () => {
+    const res: any = await studentService.saveCredential('s1', input, 'admin1');
+    expect(res.recipientPhone).toBe('03001112222');
   });
 
   test('400 when student has no login user', async () => {
@@ -230,5 +247,35 @@ describe('saveCredential — no provider involvement', () => {
     const method = src.slice(src.indexOf('async saveCredential('), src.indexOf('// ─── Send credentials via WhatsApp'));
     const stripped = method.replace(/NEVER[^\n]*/g, '');
     expect(stripped).not.toMatch(/ContentSid|sendTemplateMessage|deliverCredential|enqueueCredentialSend|notificationService/i);
+  });
+});
+
+describe('pickParentWhatsapp', () => {
+  const { pickParentWhatsapp } = require('../../../src/modules/admin/services/student.service');
+
+  test('prefers primary parent over first-listed', () => {
+    expect(pickParentWhatsapp([
+      { isPrimary: false, parent: { whatsapp: '03000000001', phone: null } },
+      { isPrimary: true, parent: { whatsapp: '03000000002', phone: null } },
+    ])).toBe('03000000002');
+  });
+
+  test('prefers whatsapp over phone within a parent', () => {
+    expect(pickParentWhatsapp([
+      { isPrimary: true, parent: { whatsapp: '03000000003', phone: '03000000004' } },
+    ])).toBe('03000000003');
+  });
+
+  test('falls back to non-primary and to phone', () => {
+    expect(pickParentWhatsapp([
+      { isPrimary: false, parent: { whatsapp: null, phone: '03000000005' } },
+    ])).toBe('03000000005');
+  });
+
+  test('returns null when nothing usable', () => {
+    expect(pickParentWhatsapp([])).toBeNull();
+    expect(pickParentWhatsapp(null)).toBeNull();
+    expect(pickParentWhatsapp([{ isPrimary: true, parent: { whatsapp: '  ', phone: null } }])).toBeNull();
+    expect(pickParentWhatsapp([{ isPrimary: true, parent: null }])).toBeNull();
   });
 });
