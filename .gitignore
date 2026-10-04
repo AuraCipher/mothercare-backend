@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# deploy.sh parks the previous build here as a rollback target
+dist.prev/
 coverage/
 tests/coverage/
 tests/results/
