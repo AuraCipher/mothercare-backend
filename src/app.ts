@@ -25,6 +25,18 @@ import { isReady, getReadinessReport, getComponentStatus, getUptimeMs } from './
 
 const app = express();
 
+// ─── Reverse proxy — trust exactly one hop ───────────────────
+// nginx sets X-Forwarded-For. With Express' default `trust proxy` = false:
+//   1. req.ip is 127.0.0.1 for every client → all users share ONE
+//      rate-limit bucket, and audit logs record the proxy, not the user.
+//   2. express-rate-limit THROWS ERR_ERL_UNEXPECTED_X_FORWARDED_FOR on
+//      every rate-limited request → 500 on /auth/login, /api/*, /admin/*.
+// `1` trusts only the proxy immediately in front of us, so req.ip is the
+// real client IP and client-supplied X-Forwarded-For entries are ignored.
+// Must NOT be `true` — express-rate-limit rejects that as permissive
+// (ERR_ERL_PERMISSIVE_TRUST_PROXY).
+app.set('trust proxy', 1);
+
 // ─── Security & Parsing ──────────────────────────────────────
 // Helmet with relaxed CSP for the key-manager page (inline scripts needed).
 // All other routes keep the strict default.

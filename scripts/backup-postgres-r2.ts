@@ -18,6 +18,12 @@
  *   DB_BACKUP_RETENTION_DAYS (default: 30)
  *   DB_BACKUP_PREFIX (default: db_backup)
  */
+// MUST be first: this script reads process.env only (lines 38-41) and never
+// parsed .env itself. Under cron there are no inherited env vars, so every run
+// died with "Missing required env: DATABASE_URL". dotenv reads $PWD/.env — the
+// caller (scripts/vps-pg-backup.sh) cds into APP_DIR first. dotenv never
+// overrides vars already in process.env, so interactive use is unaffected.
+import 'dotenv/config';
 import { spawn } from 'child_process';
 import { createHash } from 'crypto';
 import fs from 'fs';
@@ -31,7 +37,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 
 // ─── Configuration ──────────────────────────────────────────────
 
@@ -73,12 +79,54 @@ function availableDisk(dir: string): number {
   }
 }
 
+// Prisma appends driver-only params (?schema=public&connection_limit=…) that
+// libpq rejects outright: `pg_dump: error: invalid URI query parameter: "schema"`.
+// Observed live in the local scheduled-task test — pg_dump exited 1 before
+// dumping a single byte, and the psql version probe silently returned "unknown".
+// String-based (NOT new URL()) so passwords containing @, # or % keep their
+// original encoding — URL parsing would re-encode or truncate them.
+const LIBPQ_PARAMS = new Set([
+  'sslmode', 'sslrootcert', 'sslcert', 'sslkey', 'sslcrl', 'sslcrldir',
+  'application_name', 'connect_timeout', 'options', 'target_session_attrs',
+  'gssencmode', 'channel_binding', 'keepalives', 'keepalives_idle',
+  'keepalives_interval', 'keepalives_count',
+]);
+
+function toLibpqUrl(raw: string): string {
+  const q = raw.indexOf('?');
+  if (q === -1) return raw;
+  const base = raw.slice(0, q);
+  const kept: string[] = [];
+  const dropped: string[] = [];
+  for (const pair of raw.slice(q + 1).split('&')) {
+    if (!pair) continue;
+    const eq = pair.indexOf('=');
+    const key = eq === -1 ? pair : pair.slice(0, eq);
+    if (LIBPQ_PARAMS.has(key)) kept.push(pair);
+    else dropped.push(key);
+  }
+  if (dropped.length) {
+    console.log(JSON.stringify({
+      event: 'dburl:sanitized',
+      droppedParams: dropped,
+      keptParams: kept.map((p) => p.split('=')[0]),
+    }));
+  }
+  return kept.length ? `${base}?${kept.join('&')}` : base;
+}
+
 function getPostgresVersion(databaseUrl: string): string {
   try {
-    // Extract host/port/db from DATABASE_URL for a quick version query
-    const url = new URL(databaseUrl);
-    const cmd = `psql "${databaseUrl}" -t -A -c "SELECT version();" 2>/dev/null | head -1`;
-    return execSync(cmd, { encoding: 'utf-8', timeout: 10_000 }).trim() || 'unknown';
+    // execFileSync (no shell): the old `psql … 2>/dev/null | head -1` needed a
+    // POSIX shell — on Windows cmd.exe it printed "The system cannot find the
+    // path specified." (no `head`) and always reported pgVersion:"unknown".
+    const url = toLibpqUrl(databaseUrl);
+    const out = execFileSync('psql', [url, '-t', '-A', '-c', 'SELECT version();'], {
+      encoding: 'utf-8',
+      timeout: 10_000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return out.trim().split(/\r?\n/)[0] || 'unknown';
   } catch {
     return 'unknown';
   }
@@ -96,7 +144,7 @@ function formatBytes(bytes: number): string {
 function runPgDump(databaseUrl: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const stderrChunks: Buffer[] = [];
-    const dump = spawn('pg_dump', ['-Fc', '-f', outputPath, databaseUrl], {
+    const dump = spawn('pg_dump', ['-Fc', '-f', outputPath, toLibpqUrl(databaseUrl)], {
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     dump.stderr.on('data', (chunk) => stderrChunks.push(chunk));
