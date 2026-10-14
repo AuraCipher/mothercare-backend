@@ -590,6 +590,60 @@ export async function listPayrollPayees(branchId: string): Promise<PayrollPayeeR
   return [...teacherRows, ...staffRows];
 }
 
+/**
+ * Resolve a single branch payee WITHOUT the active-only filters.
+ * Used by read-only history (payroll profile): deactivated teachers/staff
+ * leave the active payee list, but their past months/payments stay in the
+ * ledger and their profile must still render the same empty/history view
+ * as an active payee. Returns null when the user was never in this branch
+ * (callers keep their 404 in that case).
+ */
+export async function findBranchPayeeIncludingInactive(
+  branchId: string,
+  payeeUserId: string,
+): Promise<PayrollPayeeRow | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: payeeUserId },
+    select: {
+      id: true,
+      name: true,
+      role: true,
+      teacherProfile: { select: { salary: true, employeeId: true } },
+      staffProfile: { select: { salary: true, employeeId: true, workRole: true } },
+      branchMembers: { where: { branchId }, select: { role: true } },
+    },
+  });
+  if (!user || user.branchMembers.length === 0) return null;
+  const branchRole = user.branchMembers[0]?.role ?? 'teacher';
+
+  if (user.role === 'teacher') {
+    return {
+      userId: user.id,
+      name: user.name,
+      payeeType: 'TEACHER',
+      branchRole,
+      profileSalary: user.teacherProfile?.salary != null ? Number(user.teacherProfile.salary) : 0,
+      employeeId: user.teacherProfile?.employeeId ?? null,
+      workRole: null,
+    };
+  }
+  if (
+    branchRole !== 'teacher' &&
+    (STAFF_PAYROLL_ROLES as readonly string[]).includes(branchRole)
+  ) {
+    return {
+      userId: user.id,
+      name: user.name,
+      payeeType: 'STAFF',
+      branchRole,
+      profileSalary: user.staffProfile?.salary != null ? Number(user.staffProfile.salary) : 0,
+      employeeId: user.staffProfile?.employeeId ?? null,
+      workRole: user.staffProfile?.workRole ?? null,
+    };
+  }
+  return null;
+}
+
 export async function refreshPayrollMonthBalance(
   branchId: string,
   payeeUserId: string,

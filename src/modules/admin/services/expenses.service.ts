@@ -9,6 +9,7 @@ import { prisma } from '../../../lib/prisma';
 import {
   computePayrollMonth,
   listPayrollPayees,
+  findBranchPayeeIncludingInactive,
   buildPayrollContext,
   refreshPayrollMonthBalance,
 } from './payroll-calculation.service';
@@ -352,7 +353,14 @@ class ExpensesService {
     limit = 12,
   ) {
     const payees = await listPayrollPayees(branchId);
-    const payee = payees.find((p) => p.userId === payeeUserId);
+    let payee = payees.find((p) => p.userId === payeeUserId);
+    if (!payee) {
+      // Read-only history: deactivated teachers/staff are out of the active
+      // payee list, but their ledger history must still render (same empty /
+      // history view as an active payee with no payments yet).
+      payee = await findBranchPayeeIncludingInactive(branchId, payeeUserId)
+        ?? undefined;
+    }
     if (!payee) throw { status: 404, message: 'Payee not found in branch payroll list' };
 
     const balances = await prisma.payrollMonthBalance.findMany({

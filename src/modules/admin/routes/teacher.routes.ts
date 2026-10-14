@@ -37,8 +37,10 @@ router.post('/teachers', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // TC-012: GET /admin/teachers — List teachers (branch-scoped when branchId provided)
+// Optional ?status=inactive → deactivated teachers of the branch (for the
+// Deactivated list page); ?status=all → both. Default = active only.
 router.get('/teachers', asyncHandler(async (req: Request, res: Response) => {
-  const { search, qualification, page, limit, branchId } = req.query;
+  const { search, qualification, page, limit, branchId, status } = req.query;
 
   const result = await teacherProfileService.findAll({
     search: search as string,
@@ -46,6 +48,7 @@ router.get('/teachers', asyncHandler(async (req: Request, res: Response) => {
     page: page ? parseInt(page as string, 10) : 1,
     limit: limit ? parseInt(limit as string, 10) : 20,
     branchId: branchId as string | undefined,
+    status: status as string | undefined,
   });
 
   res.json({ success: true, ...result });

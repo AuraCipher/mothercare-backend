@@ -219,14 +219,20 @@ class TeacherProfileService {
   }
 
   // TC-002: List teachers in branch (branch-scoped, not academic-year-scoped)
+  // status: 'active' (default) → only teachers with an active branch membership.
+  //   'inactive' → deactivated teachers of this branch (user.status inactive;
+  //   their branch membership rows are kept but flipped to isActive=false).
+  //   'all' → every teacher ever linked to this branch, either status.
   async findAll(params: {
     search?: string;
     qualification?: string;
     page?: number;
     limit?: number;
     branchId?: string;
+    status?: string;
   }) {
     const { search, qualification, page = 1, limit = 20, branchId } = params;
+    const status = params.status === 'inactive' || params.status === 'all' ? params.status : undefined;
     if (branchId) {
       await this.syncBranchMemberships(branchId);
     }
@@ -234,7 +240,16 @@ class TeacherProfileService {
 
     const userFilter: Record<string, unknown> = { role: 'teacher' };
     if (branchId) {
-      userFilter.branchMembers = { some: { branchId, isActive: true } };
+      if (status === 'inactive') {
+        userFilter.status = 'inactive';
+        userFilter.branchMembers = { some: { branchId } };
+      } else if (status === 'all') {
+        userFilter.branchMembers = { some: { branchId } };
+      } else {
+        userFilter.branchMembers = { some: { branchId, isActive: true } };
+      }
+    } else if (status === 'inactive') {
+      userFilter.status = 'inactive';
     }
 
     let where: Record<string, unknown> = { user: userFilter };
