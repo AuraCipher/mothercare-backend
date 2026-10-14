@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "prisma generate && nodemon --watch src --watch server.ts --ext ts --exec \"npx ts-node server.ts\"",
     "build": "tsc --project tsconfig.build.json",
+    "postbuild": "node scripts/copy-admin.js",
     "start": "node dist/server.js",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
