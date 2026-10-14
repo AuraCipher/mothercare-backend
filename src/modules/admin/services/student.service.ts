@@ -32,6 +32,20 @@ export interface CreateStudentInput {
   // Guardian fields — if provided, creates a parent profile and links it
   guardianName?: string;
   guardianRelation?: string;
+  // Dedicated guardian CONTACT fields. When any of these are supplied the
+  // parent profile is written from them alone and the student's own
+  // phone / studentEmail / studentWhatsapp are NOT copied across — those
+  // belong to the student row. Falls back to the student's values when
+  // omitted, so legacy callers (the existing Add-Student form, which labels
+  // a single set of numbers as "Guardian") keep behaving exactly as before.
+  guardianPhone?: string;
+  guardianWhatsapp?: string;
+  guardianEmail?: string;
+  guardianCnic?: string;
+  guardianOccupation?: string;
+  guardianEmployerName?: string;
+  guardianMaritalStatus?: string;
+  guardianMonthlyIncome?: string;
   createdById?: string;
 }
 
@@ -77,6 +91,11 @@ export interface UpdateStudentInput {
   referredBy?: string;
   groupId?: string;
   admissionNumber?: string;
+  // These two were previously accepted by the UI but silently dropped: the
+  // interface omitted them AND the prisma.update() data did not include them,
+  // so editing Roll No or Admission Date appeared to save and did nothing.
+  rollNumber?: string;
+  admissionDate?: string;
   profilePhotoId?: string;
   updatedById?: string;
 }
@@ -224,6 +243,14 @@ class StudentService {
       include: { group: { select: { id: true, name: true, section: true } } },
     });
 
+    // Resolve guardian contact. Dedicated guardian* fields win; otherwise fall
+    // back to the student's own values so legacy callers (the Add-Student form,
+    // which sends ONE set of numbers labelled "Guardian") keep working as before.
+    // The student row itself always keeps its own phone/email/whatsapp as-is.
+    const guardianPhone = data.guardianPhone?.trim() || data.phone || null;
+    const guardianWhatsapp = data.guardianWhatsapp?.trim() || data.studentWhatsapp || null;
+    const guardianEmail = data.guardianEmail?.trim() || data.studentEmail || null;
+
     // If guardian name provided, create parent profile and link
     if (data.guardianName) {
       const baseUsername = `parent_${student.admissionNumber?.toLowerCase() || student.id.slice(0, 8)}`;
@@ -235,8 +262,8 @@ class StudentService {
             username: baseUsername,
             passwordHash: '$2a$12$placeholder',
             role: 'parent',
-            phone: data.phone || null,
-            email: data.studentEmail || null,
+            phone: guardianPhone,
+            email: guardianEmail,
             status: 'active',
           },
         });
@@ -248,8 +275,8 @@ class StudentService {
             username: `${baseUsername}_${Math.random().toString(36).slice(2, 6)}`,
             passwordHash: '$2a$12$placeholder',
             role: 'parent',
-            phone: data.phone || null,
-            email: null,
+            phone: guardianPhone,
+            email: guardianEmail,
             status: 'active',
           },
         });
@@ -259,9 +286,14 @@ class StudentService {
           data: {
             userId: parentUser.id,
             relation: data.guardianRelation || 'Guardian',
-            phone: data.phone || null,
-            whatsapp: data.studentWhatsapp || null,
-            email: data.studentEmail || null,
+            phone: guardianPhone,
+            whatsapp: guardianWhatsapp,
+            email: guardianEmail,
+            cnicNumber: data.guardianCnic?.trim() || null,
+            occupation: data.guardianOccupation?.trim() || null,
+            employerName: data.guardianEmployerName?.trim() || null,
+            maritalStatus: data.guardianMaritalStatus?.trim() || null,
+            monthlyIncome: data.guardianMonthlyIncome?.trim() || null,
           },
         });
         await prisma.studentParent.create({
@@ -298,6 +330,8 @@ class StudentService {
         previousSchool: data.previousSchool, previousClass: data.previousClass,
         tcNumber: data.tcNumber, referredBy: data.referredBy,
         groupId: data.groupId, admissionNumber: data.admissionNumber,
+        rollNumber: data.rollNumber,
+        admissionDate: data.admissionDate ? new Date(data.admissionDate) : undefined,
         profilePhotoId: data.profilePhotoId,
         updatedById: (data as any).updatedById,
       },
