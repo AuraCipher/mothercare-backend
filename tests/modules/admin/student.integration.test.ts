@@ -203,7 +203,11 @@ function resetPrismaMocks() {
   (prismaMock.parentProfile.update as jest.Mock).mockResolvedValue({ id: 'pp1', phone: '03001112222' });
   (prismaMock.emergencyContact.findUnique as jest.Mock).mockResolvedValue({ id: CONTACT_ID, studentId: STUDENT_ID });
   (prismaMock.emergencyContact.update as jest.Mock).mockResolvedValue({ id: CONTACT_ID, name: 'Mother' });
-  (prismaMock.$transaction as jest.Mock).mockResolvedValue([{ id: STUDENT_ID }, { id: 'log1' }]);
+  // Parent create runs inside a callback transaction; batch-form callers
+  // elsewhere still receive the legacy fixed payload.
+  (prismaMock.$transaction as jest.Mock).mockImplementation(async (cb: any) =>
+    typeof cb === 'function' ? cb(prismaMock) : [{ id: STUDENT_ID }, { id: 'log1' }],
+  );
   (prismaMock.studentStatusLog.findMany as jest.Mock).mockResolvedValue([]);
 }
 
@@ -371,6 +375,69 @@ describe('Student admin integration routes', () => {
       const res = await send(parentEp, { auth: adminAuth, query: scopeQuery, body: { name: 'Parent' } });
       expect(res.status).toBe(404);
       expect(res.body.message).toMatch(/student not found/i);
+    });
+  });
+
+  describe('PUT /admin/students/:id/parent — blank CNIC never collides', () => {
+    const parentEp = ALL_ROUTES.find((e) => e.label === 'PUT parent profile')!;
+
+    test('create: blank cnicNumber is stored as null (not "")', async () => {
+      (prismaMock.student.findUnique as jest.Mock).mockResolvedValue({ id: STUDENT_ID });
+      (prismaMock.studentParent.findFirst as jest.Mock).mockResolvedValue(null);
+      const res = await send(parentEp, {
+        auth: adminAuth,
+        query: scopeQuery,
+        body: { name: 'Hasan', relation: 'father', cnicNumber: '', whatsapp: '03086735560' },
+      });
+      expect(res.status).toBe(201);
+      expect(prismaMock.parentProfile.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ cnicNumber: null }) }),
+      );
+    });
+
+    test('update: cleared cnicNumber is stored as null', async () => {
+      (prismaMock.student.findUnique as jest.Mock).mockResolvedValue({ id: STUDENT_ID });
+      (prismaMock.studentParent.findFirst as jest.Mock).mockResolvedValue({ parentId: 'pp1' });
+      const res = await send(parentEp, {
+        auth: adminAuth,
+        query: scopeQuery,
+        body: { cnicNumber: '  ' },
+      });
+      expect(res.status).toBe(200);
+      expect(prismaMock.parentProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ cnicNumber: null }) }),
+      );
+    });
+
+    test('non-blank cnicNumber passes through untouched', async () => {
+      (prismaMock.student.findUnique as jest.Mock).mockResolvedValue({ id: STUDENT_ID });
+      (prismaMock.studentParent.findFirst as jest.Mock).mockResolvedValue(null);
+      const res = await send(parentEp, {
+        auth: adminAuth,
+        query: scopeQuery,
+        body: { name: 'Hasan', cnicNumber: '35202-1234567-1' },
+      });
+      expect(res.status).toBe(201);
+      expect(prismaMock.parentProfile.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ cnicNumber: '35202-1234567-1' }) }),
+      );
+    });
+
+    test('taken base username falls back to a suffixed one before the transaction', async () => {
+      (prismaMock.student.findUnique as jest.Mock).mockResolvedValue({ id: STUDENT_ID });
+      (prismaMock.studentParent.findFirst as jest.Mock).mockResolvedValue(null);
+      (prismaMock.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce({ id: 'u-taken' })
+        .mockResolvedValueOnce(null);
+      const res = await send(parentEp, {
+        auth: adminAuth,
+        query: scopeQuery,
+        body: { name: 'Hasan', cnicNumber: '35202-1234567-1' },
+      });
+      expect(res.status).toBe(201);
+      const createArg = (prismaMock.user.create as jest.Mock).mock.calls[0][0];
+      expect(createArg.data.username).not.toBe('parent_s1');
+      expect(createArg.data.username).toMatch(/^parent_s1_/);
     });
   });
 

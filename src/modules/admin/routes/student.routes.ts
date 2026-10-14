@@ -101,6 +101,13 @@ router.put('/students/:id/parent', asyncHandler(async (req: Request, res: Respon
 
   const link = await prisma.studentParent.findFirst({ where: { studentId: req.params.id }, select: { parentId: true } });
   const { name, ...parentData } = req.body;
+  // Empty string is "not provided", not a value: cnicNumber is @unique and
+  // Postgres treats '' as a colliding value (unlike NULL). Normalize so
+  // clearing the field (update) or leaving it blank (create) never P2002s
+  // against every other blank-CNICC parent.
+  if ('cnicNumber' in parentData && typeof parentData.cnicNumber === 'string' && parentData.cnicNumber.trim() === '') {
+    parentData.cnicNumber = null;
+  }
 
   if (link) {
     // Update existing parent profile
@@ -110,23 +117,31 @@ router.put('/students/:id/parent', asyncHandler(async (req: Request, res: Respon
     });
     res.json({ success: true, data: updated });
   } else if (name) {
-    // Create new parent user + profile + link
+    // Create new parent user + profile + link atomically — a failure halfway
+    // (e.g. profile validation) must not leave an orphaned parent User row.
     // Use a random unguessable password hash — parent accounts are password-reset by admin only
     const unusablePassword = crypto.randomBytes(32).toString('hex');
     const unusableHash = await bcrypt.hash(unusablePassword, 12);
     const baseUsername = `parent_${student.id.slice(0, 8)}`;
-    const parentUser = await prisma.user.create({
-      data: { name, username: baseUsername, passwordHash: unusableHash, role: 'parent', status: 'active' },
-    }).catch(async () => {
-      return prisma.user.create({
-        data: { name, username: `${baseUsername}_${Math.random().toString(36).slice(2, 6)}`, passwordHash: unusableHash, role: 'parent', status: 'active' },
+    // Resolve a free username BEFORE the transaction: a unique violation
+    // inside the tx aborts it (25P02) and would kill an in-tx retry as well.
+    let username = baseUsername;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const taken = await prisma.user.findUnique({ where: { username }, select: { id: true } });
+      if (!taken) break;
+      username = `${baseUsername}_${Math.random().toString(36).slice(2, 6)}`;
+    }
+    const profile = await prisma.$transaction(async (tx) => {
+      const parentUser = await tx.user.create({
+        data: { name, username, passwordHash: unusableHash, role: 'parent', status: 'active' },
       });
-    });
-    const profile = await prisma.parentProfile.create({
-      data: { userId: parentUser.id, ...parentData },
-    });
-    await prisma.studentParent.create({
-      data: { studentId: req.params.id, parentId: profile.id, relation: parentData.relation || 'Guardian', isPrimary: true },
+      const created = await tx.parentProfile.create({
+        data: { userId: parentUser.id, ...parentData },
+      });
+      await tx.studentParent.create({
+        data: { studentId: req.params.id, parentId: created.id, relation: parentData.relation || 'Guardian', isPrimary: true },
+      });
+      return created;
     });
     res.status(201).json({ success: true, data: profile });
   } else {
