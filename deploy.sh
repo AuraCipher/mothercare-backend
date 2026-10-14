@@ -204,4 +204,4 @@ fi
 log "DONE"
 log "  app:      $APP_NAME ($(pm2 pid "$APP_NAME") pid)"
 log "  admin UI: $PUBLIC_URL/key-manager"
-log "  backups:  scripts/vps-pg-backup.sh (cron 02:30) — check: tail -20 /var/log/mcs/pg-backup.log"
+log "  backups:  scripts/vps-pg-backup.sh (cron 02:00 PKT) — check: tail -20 /var/log/mcs/pg-backup.log"
