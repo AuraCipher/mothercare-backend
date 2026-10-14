@@ -244,8 +244,9 @@ describe('DB-03D: applyCarry query-count scaling', () => {
 
     await batchPromotionService.applyCarry('run-1', 'branch-1');
 
-    // 2 calls: source subjects + created subjects in target
-    expect(prismaMock.subject.findMany).toHaveBeenCalledTimes(2);
+    // No re-query: target IDs are known at create time, so source subjects
+    // are the only read (fewer queries than before, same guarantee).
+    expect(prismaMock.subject.findMany).toHaveBeenCalledTimes(1);
   });
 
   test('subject.createMany called once (not per-subject)', async () => {
@@ -310,9 +311,14 @@ describe('DB-03D: applyCarry behavioral equivalence', () => {
     const createManyCall = prismaMock.student.createMany.mock.calls[0] as any;
     const created = createManyCall[0].data as any[];
     expect(created).toHaveLength(2); // only g1 and g2 students promoted
-    expect(created[0].groupId).toBe('new-g2'); // g1 → g2
+    // Target group IDs are client-generated: resolve the +1 order mapping
+    // through the captured group rows instead of literal IDs.
+    const groupRows = prismaMock.group.createMany.mock.calls[0]![0]!.data as any[];
+    const order2 = groupRows.find((r: any) => r.displayOrder === 2);
+    const order3 = groupRows.find((r: any) => r.displayOrder === 3);
+    expect(created[0].groupId).toBe(order2.id); // g1 → order 2
     expect(created[0].status).toBe('ACTIVE');
-    expect(created[1].groupId).toBe('new-g3'); // g2 → g3
+    expect(created[1].groupId).toBe(order3.id); // g2 → order 3
     expect(created[1].status).toBe('ACTIVE');
   });
 

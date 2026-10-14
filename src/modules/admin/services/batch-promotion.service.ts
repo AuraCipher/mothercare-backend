@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../../../lib/prisma';
 import type { BatchPromotionRunPhase, Prisma, StudentCredentialTag, StudentStatus } from '@prisma/client';
 import {
@@ -50,7 +51,7 @@ class BatchPromotionService {
     expectedPhase: string,
   ): Promise<LockedRun> {
     const rows = await tx.$queryRaw<LockedRun[]>`
-      SELECT * FROM "BatchPromotionRun"
+      SELECT * FROM "batch_promotion_runs"
       WHERE id = ${runId} AND "branchId" = ${branchId}
       FOR UPDATE
     `;
@@ -201,8 +202,39 @@ class BatchPromotionService {
     });
   }
 
-  async getRun(runId: string, branchId: string) {
-    const run = await prisma.batchPromotionRun.findFirst({
+  // Update the "what to keep" checkboxes while the run is still DRAFT.
+  // Lets the wizard collect carry options in step 3 (after start, before
+  // snapshot) instead of freezing them at start time. Same dependency rules
+  // as applyCarry so an invalid config can never be saved.
+  async updateCarryOptions(runId: string, branchId: string, carryOptions: Partial<CarryOptions>) {
+    const run = await this.getRun(runId, branchId);
+    if (run.phase !== 'DRAFT') {
+      throw {
+        status: 400,
+        message: `Carry options can only be changed while the run is in DRAFT phase (run is '${run.phase}')`,
+      };
+    }
+    const merged = mergeCarryOptions({
+      ...((run.carryOptions as Partial<CarryOptions> | null) ?? {}),
+      ...carryOptions,
+    });
+    if (merged.students && !merged.classes) {
+      throw { status: 400, message: 'Cannot carry students without carrying classes.' };
+    }
+    if (merged.teacherAssignments && (!merged.classes || !merged.subjects)) {
+      throw { status: 400, message: 'Teacher assignments require both classes and subjects carry options.' };
+    }
+    if (merged.timetableGrid && (!merged.classes || !merged.subjects)) {
+      throw { status: 400, message: 'Timetable requires both classes and subjects carry options.' };
+    }
+    await prisma.batchPromotionRun.update({
+      where: { id: run.id },
+      data: { carryOptions: merged as unknown as Prisma.InputJsonValue },
+    });
+    return this.getRun(runId, branchId);
+  }
+
+  async getRun(runId: string, branchId: string) {    const run = await prisma.batchPromotionRun.findFirst({
       where: { id: runId, branchId },
       include: {
         sourceAy: { include: { calendar: true } },
@@ -338,55 +370,50 @@ class BatchPromotionService {
 
       const groupIdMap = new Map<string, string>();
       if (carry.classes) {
-        await tx.group.createMany({
-          data: sourceGroups.map((g) => ({
-            academicYearId: targetId,
-            name: g.name,
-            section: g.section,
-            displayOrder: g.displayOrder,
-            capacity: g.capacity,
-            onlyAdminCanSend: g.onlyAdminCanSend,
-            isActive: g.isActive,
-          })),
-          skipDuplicates: false,
+        // Bulk-create with client-generated IDs so the source→target map is
+        // exact 1:1 with no re-query. displayOrder is a grade level shared
+        // across sections (NOT unique), so matching created rows back by
+        // displayOrder collapses distinct groups onto one row — the duplicated
+        // (groupId, subjectId) pairs then fail group_subjects with P2002.
+        // (Stays a single createMany: see DB-03D batching invariant.)
+        const groupRows = sourceGroups.map((g) => ({
+          id: randomUUID(),
+          academicYearId: targetId,
+          name: g.name,
+          section: g.section,
+          displayOrder: g.displayOrder,
+          capacity: g.capacity,
+          onlyAdminCanSend: g.onlyAdminCanSend,
+          isActive: g.isActive,
+        }));
+        await tx.group.createMany({ data: groupRows, skipDuplicates: false });
+        sourceGroups.forEach((g, i) => {
+          const rowId = groupRows[i]?.id;
+          if (rowId) groupIdMap.set(g.id, rowId);
         });
-        // Target year was cleared — only groups we just created exist.
-        // Match by displayOrder (unique per source group) to build the ID map.
-        const createdGroups = await tx.group.findMany({
-          where: { academicYearId: targetId },
-          select: { id: true, displayOrder: true },
-        });
-        for (const g of sourceGroups) {
-          const match = createdGroups.find((cg) => cg.displayOrder === g.displayOrder);
-          if (match) groupIdMap.set(g.id, match.id);
-        }
       }
 
       const subjectIdMap = new Map<string, string>();
       if (carry.subjects) {
         const subjects = await tx.subject.findMany({ where: { academicYearId: sourceId } });
-        await tx.subject.createMany({
-          data: subjects.map((s) => ({
-            academicYearId: targetId,
-            name: s.name,
-            code: s.code,
-            description: s.description,
-            totalMarks: s.totalMarks,
-            passingMarks: s.passingMarks,
-            isElective: s.isElective,
-            hodId: s.hodId,
-          })),
-          skipDuplicates: false,
+        // Same reason: subject code is nullable and NULLs all match each
+        // other, so matching by code collapses distinct subjects.
+        const subjectRows = subjects.map((s) => ({
+          id: randomUUID(),
+          academicYearId: targetId,
+          name: s.name,
+          code: s.code,
+          description: s.description,
+          totalMarks: s.totalMarks,
+          passingMarks: s.passingMarks,
+          isElective: s.isElective,
+          hodId: s.hodId,
+        }));
+        await tx.subject.createMany({ data: subjectRows, skipDuplicates: false });
+        subjects.forEach((s, i) => {
+          const rowId = subjectRows[i]?.id;
+          if (rowId) subjectIdMap.set(s.id, rowId);
         });
-        // Target year was cleared — only subjects we just created exist.
-        const createdSubjects = await tx.subject.findMany({
-          where: { academicYearId: targetId },
-          select: { id: true, code: true },
-        });
-        for (const s of subjects) {
-          const match = createdSubjects.find((cs) => cs.code === s.code);
-          if (match) subjectIdMap.set(s.id, match.id);
-        }
         if (carry.classes) {
           const links = await tx.groupSubject.findMany({
             where: { group: { academicYearId: sourceId } },

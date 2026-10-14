@@ -63,6 +63,13 @@ router.get('/runs/:runId', asyncHandler(async (req: Request, res: Response) => {
   res.json({ success: true, data });
 }));
 
+router.patch('/runs/:runId/carry', asyncHandler(async (req: Request, res: Response) => {
+  if (!(await requirePromotionAdmin(req, res))) return;
+  const { branchId, runId } = req.params as { branchId: string; runId: string };
+  const data = await batchPromotionService.updateCarryOptions(runId, branchId, req.body.carryOptions ?? {});
+  res.json({ success: true, data });
+}));
+
 router.post('/runs/:runId/snapshot', asyncHandler(async (req: Request, res: Response) => {
   if (!(await requirePromotionAdmin(req, res))) return;
   const { branchId, runId } = req.params as { branchId: string; runId: string };
