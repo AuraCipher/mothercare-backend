@@ -26,6 +26,7 @@ export interface CreateStudentInput {
   referredBy?: string;
   groupId?: string;
   academicYearId?: string;
+  branchId?: string;
   admissionNumber?: string;
   rollNumber?: string;
   profilePhotoId?: string;
@@ -109,8 +110,9 @@ class StudentService {
     rollNumber?: string;
     page?: number;
     limit?: number;
+    status?: 'active' | 'inactive' | 'all';
   }) {
-    const { search, groupId, academicYearId, branchId, rollNumber, page = 1, limit: rawLimit } = params;
+    const { search, groupId, academicYearId, branchId, rollNumber, page = 1, limit: rawLimit, status = 'active' } = params;
     const limit = rawLimit || 20;
     const skip = (page - 1) * limit;
     const where: any = {};
@@ -118,6 +120,11 @@ class StudentService {
     if (academicYearId) where.academicYearId = academicYearId;
     if (branchId) where.academicYear = { branchId };
     if (rollNumber) where.rollNumber = { contains: rollNumber, mode: 'insensitive' };
+    // Default view = active students only. 'inactive' → everyone else
+    // (WITHDRAWN/SUSPENDED/EXPELED/TRANSFERRED/GRADUATED/DECEASED) for the
+    // separate Deactivated page, mirroring the teachers split.
+    if (status === 'active') where.status = 'ACTIVE';
+    else if (status === 'inactive') where.status = { not: 'ACTIVE' };
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
@@ -135,6 +142,9 @@ class StudentService {
               parent: { select: { whatsapp: true, phone: true } },
             },
           },
+          // Enrollment history drives the permanent-delete guard (same role
+          // as teacher assignments on the teachers deactivated page).
+          _count: { select: { enrollments: true } },
         },
       }),
       prisma.student.count({ where }),
@@ -169,9 +179,31 @@ class StudentService {
 
   async create(data: CreateStudentInput) {
     if (!data.name) throw { status: 400, message: 'Student name is required' };
+
+    // ── Resolve the academic year + branch ──────────────────────────
+    // A student always belongs to the academic year of their class, so the
+    // group is authoritative when it is known. Falling back to a global
+    // "first ACTIVE academic year" picks a year from a DIFFERENT branch —
+    // the student is then written under a year nobody is looking at, and
+    // every list scoped to the admin's branch/year silently omits them.
     let academicYearId = data.academicYearId;
+    if (data.groupId) {
+      const group = await prisma.group.findUnique({
+        where: { id: data.groupId },
+        select: { academicYearId: true },
+      });
+      if (!group) throw { status: 400, message: 'Class not found' };
+      if (academicYearId && academicYearId !== group.academicYearId) {
+        throw { status: 400, message: 'The selected class does not belong to the selected academic year' };
+      }
+      academicYearId = group.academicYearId;
+    }
     if (!academicYearId) {
-      const activeAy = await prisma.academicYear.findFirst({ where: { status: 'ACTIVE' }, select: { id: true, branchId: true } });
+      const activeAy = await prisma.academicYear.findFirst({
+        where: { status: 'ACTIVE', ...(data.branchId ? { branchId: data.branchId } : {}) },
+        select: { id: true },
+        orderBy: { createdAt: 'desc' },
+      });
       if (!activeAy) throw { status: 400, message: 'No active academic year found' };
       academicYearId = activeAy.id;
     }
@@ -180,6 +212,9 @@ class StudentService {
       select: { branchId: true },
     });
     if (!ayRow) throw { status: 400, message: 'Academic year not found' };
+    if (data.branchId && data.branchId !== ayRow.branchId) {
+      throw { status: 400, message: 'The selected class does not belong to the selected branch' };
+    }
 
     // Get next student number from sequence (permanent, never reuses)
     let studentNumber = 1;
@@ -187,15 +222,39 @@ class StudentService {
       const seqResult: any = await prisma.$queryRawUnsafe(`SELECT nextval('students_number_seq') AS n`);
       studentNumber = parseInt(seqResult[0]?.n || '1', 10);
     } catch {
-      // Fallback for test environment (mocked Prisma) or if sequence doesn't exist
-      const maxStudent = await prisma.student.findFirst({ orderBy: { studentNumber: 'desc' }, select: { studentNumber: true } });
-      studentNumber = (maxStudent?.studentNumber || 0) + 1;
+      // Fallback when the sequence is unavailable (e.g. a database that has
+      // not run the sequence migration). NULLs sort FIRST for DESC in
+      // Postgres, so the ordering must be explicit — otherwise this always
+      // returns a NULL row and yields studentNumber 1, which collides with
+      // the first student that was ever created.
+      const maxStudent = await prisma.student.findFirst({
+        orderBy: [{ studentNumber: { sort: 'desc', nulls: 'last' } }],
+        select: { studentNumber: true },
+      });
+      studentNumber = (maxStudent?.studentNumber ?? 0) + 1;
     }
 
     let admissionNumber = data.admissionNumber;
     if (!admissionNumber) {
-      const year = new Date().getFullYear();
-      admissionNumber = `MCS-${year}-${String(studentNumber).padStart(4, '0')}`;
+      // Both `student_persons.admissionNumber` and `students.studentNumber`
+      // are unique, and deleted students leave gaps behind. Walk forward
+      // until a pair is actually free instead of trusting the counter.
+      const allocYear = new Date().getFullYear();
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const candidate = `MCS-${allocYear}-${String(studentNumber).padStart(4, '0')}`;
+        const [personTaken, numberTaken] = await Promise.all([
+          prisma.studentPerson.findFirst({ where: { admissionNumber: candidate }, select: { id: true } }),
+          prisma.student.findFirst({ where: { studentNumber }, select: { id: true } }),
+        ]);
+        if (!personTaken && !numberTaken) {
+          admissionNumber = candidate;
+          break;
+        }
+        studentNumber += 1;
+      }
+      if (!admissionNumber) {
+        throw { status: 409, message: 'Could not allocate an admission number. Please try again.' };
+      }
     }
 
     // Auto-generate username using studentNumber + admission year
@@ -204,11 +263,27 @@ class StudentService {
       : new Date().getFullYear();
     const username = generateUsername(data.name, studentNumber, admissionYear);
 
-    // Auto-assign roll number (sequential within the group)
+    // Auto-assign roll number (sequential within the group).
+    // MAX + 1, not COUNT + 1: the count ignores gaps and the roll numbers
+    // already in use, so it happily hands out a roll that somebody else has
+    // and the roll filter then matches two different students.
     let rollNumber = data.rollNumber || undefined;
     if (!rollNumber && data.groupId) {
-      const count = await prisma.student.count({ where: { groupId: data.groupId } });
-      rollNumber = String(count + 1);
+      const classStudents = await prisma.student.findMany({
+        where: { groupId: data.groupId },
+        select: { rollNumber: true },
+      });
+      const taken = new Set(
+        classStudents.map(s => s.rollNumber).filter((r): r is string => !!r),
+      );
+      let maxRoll = 0;
+      for (const r of taken) {
+        const n = parseInt(r, 10);
+        if (Number.isFinite(n) && n > maxRoll) maxRoll = n;
+      }
+      let candidate = maxRoll + 1;
+      while (taken.has(String(candidate))) candidate++;
+      rollNumber = String(candidate);
     }
 
     const person = await prisma.studentPerson.create({
@@ -344,6 +419,66 @@ class StudentService {
     const existing = await prisma.student.findUnique({ where: { id } });
     if (!existing) throw { status: 404, message: 'Student not found' };
     return prisma.student.update({ where: { id }, data: { isActive: false, status: 'WITHDRAWN' as any } });
+  }
+
+  // Deactivate for the teachers-style flow: status → WITHDRAWN, login off,
+  // audit row written. Idempotent-safe: re-deactivating is a no-op update.
+  async deactivateStudent(id: string, changedById?: string) {
+    const existing = await prisma.student.findUnique({ where: { id }, select: { id: true, status: true } });
+    if (!existing) throw { status: 404, message: 'Student not found' };
+    if (existing.status !== 'ACTIVE') {
+      throw { status: 400, message: `Student is already ${existing.status.toLowerCase()}` };
+    }
+    return prisma.$transaction([
+      prisma.student.update({ where: { id }, data: { status: 'WITHDRAWN' as any, isActive: false } }),
+      prisma.studentStatusLog.create({
+        data: { studentId: id, previousStatus: 'ACTIVE', newStatus: 'WITHDRAWN', reason: 'Deactivated by admin', changedById: changedById ?? null },
+      }),
+    ]).then((rows) => rows[0]);
+  }
+
+  // Reactivate: back to ACTIVE with login restored + audit row.
+  async reactivateStudent(id: string, changedById?: string) {
+    const existing = await prisma.student.findUnique({ where: { id }, select: { id: true, status: true } });
+    if (!existing) throw { status: 404, message: 'Student not found' };
+    if (existing.status === 'ACTIVE') {
+      throw { status: 400, message: 'Student is already active' };
+    }
+    return prisma.$transaction([
+      prisma.student.update({ where: { id }, data: { status: 'ACTIVE' as any, isActive: true } }),
+      prisma.studentStatusLog.create({
+        data: { studentId: id, previousStatus: existing.status, newStatus: 'ACTIVE', reason: 'Reactivated by admin', changedById: changedById ?? null },
+      }),
+    ]).then((rows) => rows[0]);
+  }
+
+  // Permanent delete — teachers-style guard: only students with ZERO
+  // enrollment history (never attended a class) can be removed for real.
+  // Everything else stays deactivated forever. All Student relations cascade
+  // via the schema (onDelete: Cascade), so removing the row removes the
+  // record completely.
+  async deleteStudent(id: string) {
+    const student = await prisma.student.findUnique({
+      where: { id },
+      select: {
+        id: true, name: true, status: true,
+        _count: { select: { enrollments: true, studentFees: true, attendances: true, feePayments: true } },
+      },
+    });
+    if (!student) throw { status: 404, message: 'Student not found' };
+    const history =
+      (student._count?.enrollments ?? 0) +
+      (student._count?.studentFees ?? 0) +
+      (student._count?.attendances ?? 0) +
+      (student._count?.feePayments ?? 0);
+    if (history > 0) {
+      throw {
+        status: 400,
+        message: 'Cannot delete: student has attendance, enrollment, or fee history. Keep them deactivated instead.',
+      };
+    }
+    await prisma.student.delete({ where: { id } });
+    return { id: student.id, name: student.name };
   }
 
   // Emergency contacts

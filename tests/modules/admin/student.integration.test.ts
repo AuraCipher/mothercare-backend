@@ -26,6 +26,9 @@ jest.mock('../../../src/modules/admin/services/student.service', () => ({
     create: jest.fn().mockResolvedValue({ id: 's-new', name: 'New Student', groupId: 'g1' }),
     update: jest.fn().mockResolvedValue({ id: 's1', name: 'Updated Student' }),
     deactivate: jest.fn().mockResolvedValue({ id: 's1', isActive: false, status: 'WITHDRAWN' }),
+    deactivateStudent: jest.fn().mockResolvedValue({ id: 's1', status: 'WITHDRAWN', isActive: false }),
+    reactivateStudent: jest.fn().mockResolvedValue({ id: 's1', status: 'ACTIVE', isActive: true }),
+    deleteStudent: jest.fn().mockResolvedValue({ id: 's1', name: 'Ali Khan' }),
     addEmergencyContact: jest.fn().mockResolvedValue({ id: 'ec1', name: 'Father', phone: '03001234567' }),
     deleteEmergencyContact: jest.fn().mockResolvedValue({ id: 'ec1' }),
     upsertHealthRecord: jest.fn().mockResolvedValue({ id: 'hr1', studentId: 's1', bloodGroup: 'B+' }),
@@ -119,6 +122,24 @@ const ALL_ROUTES: RouteSpec[] = [
     path: `${BASE}/${STUDENT_ID}/parent`,
     body: { name: 'Parent Name', phone: '03001112222' },
     successStatus: 201,
+  },
+  {
+    label: 'POST deactivate student',
+    method: 'post',
+    path: `${BASE}/${STUDENT_ID}/deactivate`,
+    successStatus: 200,
+  },
+  {
+    label: 'POST reactivate student',
+    method: 'post',
+    path: `${BASE}/${STUDENT_ID}/reactivate`,
+    successStatus: 200,
+  },
+  {
+    label: 'DELETE student (permanent)',
+    method: 'delete',
+    path: `${BASE}/${STUDENT_ID}`,
+    successStatus: 200,
   },
   { label: 'DELETE unlink parent', method: 'delete', path: `${BASE}/${STUDENT_ID}/parents/${PARENT_ID}`, successStatus: 200 },
   { label: 'PUT generate-credentials', method: 'put', path: `${BASE}/${STUDENT_ID}/generate-credentials`, successStatus: 200 },
@@ -378,6 +399,37 @@ describe('Student admin integration routes', () => {
     });
   });
 
+  describe('POST /admin/students/:id/deactivate + /reactivate + DELETE', () => {
+    test('deactivate calls the service with the admin id', async () => {
+      const ep = ALL_ROUTES.find((e) => e.label === 'POST deactivate student')!;
+      const res = await send(ep, { auth: adminAuth, query: scopeQuery });
+      expect(res.status).toBe(200);
+      expect(studentService.deactivateStudent).toHaveBeenCalledWith(STUDENT_ID, expect.any(String));
+    });
+
+    test('reactivate calls the service', async () => {
+      const ep = ALL_ROUTES.find((e) => e.label === 'POST reactivate student')!;
+      const res = await send(ep, { auth: adminAuth, query: scopeQuery });
+      expect(res.status).toBe(200);
+      expect(studentService.reactivateStudent).toHaveBeenCalledWith(STUDENT_ID, expect.any(String));
+    });
+
+    test('permanent delete calls the guarded service', async () => {
+      const ep = ALL_ROUTES.find((e) => e.label === 'DELETE student (permanent)')!;
+      const res = await send(ep, { auth: adminAuth, query: scopeQuery });
+      expect(res.status).toBe(200);
+      expect(studentService.deleteStudent).toHaveBeenCalledWith(STUDENT_ID);
+    });
+
+    test('delete surfaces the guard 400 from the service', async () => {
+      (studentService.deleteStudent as jest.Mock).mockRejectedValueOnce({ status: 400, message: 'has enrollment history' });
+      const ep = ALL_ROUTES.find((e) => e.label === 'DELETE student (permanent)')!;
+      const res = await send(ep, { auth: adminAuth, query: scopeQuery });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/enrollment history/i);
+    });
+  });
+
   describe('PUT /admin/students/:id/parent — blank CNIC never collides', () => {
     const parentEp = ALL_ROUTES.find((e) => e.label === 'PUT parent profile')!;
 
@@ -559,11 +611,11 @@ describe('Student admin integration routes', () => {
       expect(studentService.create).toHaveBeenCalled();
     });
 
-    test('DELETE deactivates student', async () => {
+    test('DELETE permanently removes the student (guarded service)', async () => {
       const res = await request(app).delete(`${BASE}/${STUDENT_ID}`).query(scopeQuery).set(adminAuth);
       expect(res.status).toBe(200);
-      expect(res.body.message).toBe('Student deactivated');
-      expect(studentService.deactivate).toHaveBeenCalledWith(STUDENT_ID);
+      expect(res.body.message).toMatch(/deleted permanently/);
+      expect(studentService.deleteStudent).toHaveBeenCalledWith(STUDENT_ID);
     });
   });
 

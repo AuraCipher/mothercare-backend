@@ -1292,6 +1292,8 @@ describe('Admin — Students', () => {
     const activeAy = { id: 'ay-active', branchId: mockBranch.id, status: 'ACTIVE' };
     prismaMock.academicYear.findFirst.mockResolvedValue(activeAy as any);
     prismaMock.academicYear.findUnique.mockResolvedValue(activeAy as any);
+    // The class decides the academic year — it must belong to the same year.
+    prismaMock.group.findUnique.mockResolvedValue({ id: mockStudent.groupId, academicYearId: activeAy.id } as any);
     prismaMock.studentPerson.create.mockResolvedValue({ id: 'person-1' } as any);
     prismaMock.student.findFirst.mockResolvedValue(null);
     prismaMock.student.count.mockResolvedValue(0);
@@ -1314,6 +1316,27 @@ describe('Admin — Students', () => {
     );
   });
 
+  test('POST /admin/students rejects a class from another academic year', async () => {
+    const activeAy = { id: 'ay-active', branchId: mockBranch.id, status: 'ACTIVE' };
+    prismaMock.academicYear.findFirst.mockResolvedValue(activeAy as any);
+    prismaMock.academicYear.findUnique.mockResolvedValue(activeAy as any);
+    // The class belongs to a different year than the one in scope.
+    prismaMock.group.findUnique.mockResolvedValue({ id: mockStudent.groupId, academicYearId: 'ay-other' } as any);
+    prismaMock.studentPerson.create.mockResolvedValue({ id: 'person-1' } as any);
+    prismaMock.student.findFirst.mockResolvedValue(null);
+    prismaMock.student.count.mockResolvedValue(0);
+
+    const res = await request(app)
+      .post('/admin/students')
+      .query({ branchId: mockBranch.id, academicYearId: activeAy.id })
+      .set(adminToken)
+      .send({ name: 'Wrong Year', groupId: mockStudent.groupId });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/academic year/i);
+    expect(prismaMock.student.create).not.toHaveBeenCalled();
+  });
+
   test('POST /admin/students returns 400 when name is missing', async () => {
     const res = await request(app)
       .post('/admin/students')
@@ -1324,13 +1347,42 @@ describe('Admin — Students', () => {
     expect(res.status).toBe(400);
   });
 
-  test('DELETE /admin/students/:id soft-deletes a student', async () => {
+  test('DELETE /admin/students/:id permanently removes a history-less student', async () => {
     prismaMock.academicYear.findUnique.mockResolvedValue({ id: 'ay-active', branchId: mockBranch.id, status: 'ACTIVE' } as any);
-    prismaMock.student.findUnique.mockResolvedValue(mockStudent as any);
-    prismaMock.student.update.mockResolvedValue({ ...mockStudent, isActive: false } as any);
+    prismaMock.student.findUnique.mockResolvedValue({
+      ...mockStudent,
+      _count: { enrollments: 0 },
+    } as any);
     const res = await request(app).delete(`/admin/students/${mockStudent.id}`).query({ branchId: mockBranch.id, academicYearId: 'ay-active' }).set(adminToken);
     expect(res.status).toBe(200);
-    expect(res.body.message).toBe('Student deactivated');
+    expect(res.body.message).toBe('Student "Test Student" deleted permanently');
+    expect(prismaMock.student.delete).toHaveBeenCalledWith({ where: { id: mockStudent.id } });
+  });
+
+  test('DELETE /admin/students/:id is blocked when enrollment history exists', async () => {
+    prismaMock.academicYear.findUnique.mockResolvedValue({ id: 'ay-active', branchId: mockBranch.id, status: 'ACTIVE' } as any);
+    prismaMock.student.findUnique.mockResolvedValue({
+      ...mockStudent,
+      _count: { enrollments: 2 },
+    } as any);
+    const res = await request(app).delete(`/admin/students/${mockStudent.id}`).query({ branchId: mockBranch.id, academicYearId: 'ay-active' }).set(adminToken);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/history/i);
+    expect(res.body.message).toMatch(/deactivated/i);
+    expect(prismaMock.student.delete).not.toHaveBeenCalled();
+  });
+
+  test('DELETE /admin/students/:id returns 400 (not 500) on a foreign-key race', async () => {
+    prismaMock.academicYear.findUnique.mockResolvedValue({ id: 'ay-active', branchId: mockBranch.id, status: 'ACTIVE' } as any);
+    prismaMock.student.findUnique.mockResolvedValue({
+      ...mockStudent,
+      _count: { enrollments: 0, studentFees: 0, attendances: 0, feePayments: 0 },
+    } as any);
+    // A fee row landed between the guard check and the delete.
+    prismaMock.student.delete.mockRejectedValue({ code: 'P2003', message: 'Foreign key constraint violated' });
+    const res = await request(app).delete(`/admin/students/${mockStudent.id}`).query({ branchId: mockBranch.id, academicYearId: 'ay-active' }).set(adminToken);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/history/i);
   });
 });
 

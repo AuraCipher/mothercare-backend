@@ -11,16 +11,19 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
   (req: Request, res: Response, next: NextFunction) => { fn(req, res, next).catch(next); };
 
 // GET /students — List with search, filter, pagination (branch + AY scoped)
+// Optional ?status=inactive → deactivated students (Deactivated page);
+// ?status=all → both. Default = active only.
 router.get('/students', asyncHandler(async (req: Request, res: Response) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  const { search, groupId, rollNumber, page, limit } = req.query;
+  const { search, groupId, rollNumber, page, limit, status } = req.query;
   const result = await studentService.findAll({
     search: search as string, groupId: groupId as string,
     academicYearId: scope.academicYearId, branchId: scope.branchId,
     rollNumber: rollNumber as string,
     page: page ? parseInt(page as string, 10) : 1,
     limit: limit ? parseInt(limit as string, 10) : 20,
+    status: status as 'active' | 'inactive' | 'all' | undefined,
   });
   res.json({ success: true, ...result });
 }));
@@ -32,9 +35,19 @@ router.get('/students/:id', asyncHandler(async (req: Request, res: Response) => 
 }));
 
 // POST /students — Create
+// Scoped to the caller's branch + academic year so a student is never
+// written under a year from another branch (which would hide them from
+// every list). The class in the payload still wins when it is known.
 router.post('/students', asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user?.id;
-  const student = await studentService.create({ ...req.body, createdById: userId });
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const student = await studentService.create({
+    ...req.body,
+    academicYearId: req.body?.academicYearId || scope.academicYearId,
+    branchId: scope.branchId,
+    createdById: userId,
+  });
   res.status(201).json({ success: true, data: student });
 }));
 
@@ -45,10 +58,28 @@ router.put('/students/:id', asyncHandler(async (req: Request, res: Response) => 
   res.json({ success: true, data: student });
 }));
 
-// DELETE /students/:id — Soft delete (deactivate)
-router.delete('/students/:id', asyncHandler(async (req: Request, res: Response) => {
-  const student = await studentService.deactivate(req.params.id);
-  res.json({ success: true, message: 'Student deactivated', data: student });
+// POST /students/:id/deactivate — Teachers-style deactivate: status →
+// WITHDRAWN, login off, audit row. Student leaves the active list and moves
+// to the separate Deactivated page.
+router.post('/students/:id/deactivate', asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const data = await studentService.deactivateStudent(req.params.id, (req as any).user?.id);
+    res.json({ success: true, data });
+  } catch (e: any) {
+    const status = e?.status || 500;
+    res.status(status).json({ success: false, code: e?.code, message: e?.message || 'Failed to deactivate student' });
+  }
+}));
+
+// POST /students/:id/reactivate — Back to ACTIVE with login restored.
+router.post('/students/:id/reactivate', asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const data = await studentService.reactivateStudent(req.params.id, (req as any).user?.id);
+    res.json({ success: true, data });
+  } catch (e: any) {
+    const status = e?.status || 500;
+    res.status(status).json({ success: false, code: e?.code, message: e?.message || 'Failed to reactivate student' });
+  }
 }));
 
 // POST /students/:id/emergency-contact — Add emergency contact
@@ -235,16 +266,30 @@ router.get('/students/:id/status-logs', asyncHandler(async (req: Request, res: R
   res.json({ success: true, data: logs });
 }));
 
-// DELETE /students/:id — Delete student (with cascade)
+// DELETE /students/:id — Permanent delete (teachers-style guard: only with
+// zero enrollment history). All Student relations cascade via the schema, so
+// the record is removed completely. Deactivated students with history stay
+// deactivated forever — deletion is never available on the active list.
 router.delete('/students/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const student = await prisma.student.findUnique({ where: { id }, select: { id: true, name: true } });
-  if (!student) { res.status(404).json({ success: false, message: 'Student not found' }); return; }
-  await prisma.attendance.deleteMany({ where: { studentId: id } });
-  await prisma.credentialSend.deleteMany({ where: { studentId: id } });
-  await prisma.studentStatusLog.deleteMany({ where: { studentId: id } });
-  await prisma.student.delete({ where: { id } });
-  res.json({ success: true, message: `Student "${student.name}" deleted` });
+  try {
+    const removed = await studentService.deleteStudent(req.params.id);
+    res.json({ success: true, message: `Student "${removed.name}" deleted permanently` });
+  } catch (e: any) {
+    // Prisma P2003 = a foreign key still points at this student. The service
+    // guard normally catches this first; this is the safety net for a race
+    // (e.g. a fee row written between the check and the delete). Return a
+    // readable 400 instead of a 500 so the UI never shows a generic error.
+    if (e?.code === 'P2003') {
+      res.status(400).json({
+        success: false,
+        code: 'P2003',
+        message: 'Cannot delete: student has attendance, enrollment, or fee history. Keep them deactivated instead.',
+      });
+      return;
+    }
+    const status = e?.status || 500;
+    res.status(status).json({ success: false, code: e?.code, message: e?.message || 'Failed to delete student' });
+  }
 }));
 
 export default router;
