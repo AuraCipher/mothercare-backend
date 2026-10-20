@@ -215,9 +215,11 @@ describe('M13 groups cross-branch mutation + error masking + revocation', () => 
       process.env.APP_MODE = prev;
     }
     const [code, body] = calls[0] as [number, Record<string, unknown>];
-    expect(code).toBe(500);
+    // A unique-constraint violation is the caller's fault, not a server fault:
+    // it must not be masked as a 500 "Internal server error" any more.
+    expect(code).toBe(409);
     expect(body.success).toBe(false);
-    expect(body.message).toBe('Internal server error');
+    expect(body.message).toBe('That record already exists.');
     expect(body).not.toHaveProperty('stack');
     expect(JSON.stringify(body)).not.toMatch(/prisma|SELECT|\/tmp/i);
   });

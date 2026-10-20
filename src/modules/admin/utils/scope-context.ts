@@ -10,8 +10,32 @@ export interface ScopeContext {
   isArchived: boolean;
 }
 
-export async function resolveAcademicYearId(explicitId?: string | null): Promise<string | null> {
+export async function resolveAcademicYearId(explicitId?: string | null, branchId?: string | null): Promise<string | null> {
   if (explicitId) return explicitId;
+
+  // The fallback MUST stay inside the caller's branch. A global "newest ACTIVE
+  // year" lookup returns a year from a DIFFERENT branch, and the scope check
+  // below then rejects the request with 400 — which the list pages swallow,
+  // leaving an empty list with no error. Prefer the branch's ACTIVE year, and
+  // fall back to its most recent year so a branch without an ACTIVE year still
+  // resolves inside itself instead of leaking to another branch.
+  if (branchId) {
+    const active = await prisma.academicYear.findFirst({
+      where: { status: 'ACTIVE', branchId },
+      select: { id: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (active) return active.id;
+    const newest = await prisma.academicYear.findFirst({
+      where: { branchId },
+      select: { id: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    return newest?.id ?? null;
+  }
+
+  // No branch known: fall back to the globally newest ACTIVE year (only
+  // reachable when the caller has no branch access at all, e.g. super_admin).
   const active = await prisma.academicYear.findFirst({
     where: { status: 'ACTIVE' },
     select: { id: true },
@@ -49,7 +73,16 @@ function assertBranchAccess(req: Request, branchId: string): { status: number; m
 
 /** Resolve branch + academic year, validate AY belongs to branch and user has branch access. */
 export async function resolveScopeContext(req: Request): Promise<ScopeContext | { error: { status: number; message: string } }> {
-  const academicYearId = await resolveAcademicYearId(extractAcademicYearId(req));
+  const explicitBranchId = extractBranchId(req);
+
+  // When the request does not name a branch, scope the academic-year lookup to
+  // a branch the caller actually belongs to. Otherwise the year resolves
+  // globally, lands on another branch, and the request fails the check below.
+  const userBranchIds = (req as any).user?.branchIds;
+  const branchHint = explicitBranchId
+    || (Array.isArray(userBranchIds) && userBranchIds.length ? userBranchIds[0] : undefined);
+
+  const academicYearId = await resolveAcademicYearId(extractAcademicYearId(req), branchHint);
   if (!academicYearId) {
     return { error: { status: 400, message: 'No academic year specified' } };
   }
@@ -62,7 +95,6 @@ export async function resolveScopeContext(req: Request): Promise<ScopeContext | 
     return { error: { status: 404, message: 'Academic year not found' } };
   }
 
-  const explicitBranchId = extractBranchId(req);
   const branchId = explicitBranchId || ay.branchId;
 
   if (explicitBranchId && explicitBranchId !== ay.branchId) {
