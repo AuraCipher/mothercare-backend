@@ -150,6 +150,31 @@ router.post('/:userId/reactivate', asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 }));
 
+// DELETE /admin/staff/:userId — Permanent delete (teachers-style guard: only
+// staff with zero attendance/payroll history). Deactivated staff with history
+// stay deactivated forever — deletion is never available on the active list.
+router.delete('/:userId', asyncHandler(async (req, res) => {
+  const ctx = await assertStaffAdmin(req, res);
+  if (!ctx) return;
+  try {
+    const removed = await staffService.deleteStaff(ctx.branchId, req.params.userId);
+    res.json({ success: true, message: `Staff "${removed.name}" deleted permanently` });
+  } catch (e: any) {
+    // P2014 = a foreign key still points at this user (e.g. a record written
+    // between the guard and the delete). Return a readable 400, never a 500.
+    if (e?.code === 'P2014') {
+      res.status(400).json({
+        success: false,
+        code: 'P2014',
+        message: 'Cannot delete: staff still has linked records. Keep them deactivated instead.',
+      });
+      return;
+    }
+    const status = e?.status || 500;
+    res.status(status).json({ success: false, code: e?.code, message: e?.message || 'Failed to delete staff' });
+  }
+}));
+
 router.post('/:userId/set-password', passwordSetLimiter, asyncHandler(async (req, res) => {
   const ctx = await assertStaffAdmin(req, res);
   if (!ctx) return;

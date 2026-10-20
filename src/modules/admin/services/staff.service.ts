@@ -200,8 +200,15 @@ class StaffService {
 
     let rows = members.map((m) => this.mapMember(m));
 
-    if (opts?.status && opts.status !== 'all') {
-      rows = rows.filter((r) => r.status === opts.status);
+    // Default to ACTIVE only — same contract as teachers. The main Staff list
+    // shows active staff, ?status=inactive powers the Deactivated archive, and
+    // ?status=all returns everything. Without this default a deactivated member
+    // stayed visible on the active list.
+    const status = opts?.status === 'inactive' || opts?.status === 'all' ? opts.status : 'active';
+    if (status === 'inactive') {
+      rows = rows.filter((r) => r.status === 'inactive');
+    } else if (status !== 'all') {
+      rows = rows.filter((r) => r.status === 'active');
     }
     if (opts?.search?.trim()) {
       const q = opts.search.trim().toLowerCase();
@@ -384,6 +391,38 @@ class StaffService {
     });
 
     return { message: `"${member.user.name}" reactivated.` };
+  }
+
+  // Permanent delete — teachers-style guard: only staff with ZERO attendance
+  // and payroll history can be removed for real. Everything else stays
+  // deactivated forever. The guard is mandatory because payrollPaymentDetails.payee
+  // and payments.recordedBy are onDelete: Restrict — an unguarded
+  // prisma.user.delete() would throw P2014. All other Staff relations cascade via
+  // the schema (staffProfile, branchMember, staffAttendance, staffModulePermission,
+  // branchTenure), so removing the user removes the record completely.
+  async deleteStaff(branchId: string, userId: string) {
+    const member = await prisma.branchMember.findUnique({
+      where: { branchId_userId: { branchId, userId } },
+      include: { user: { select: { id: true, name: true } } },
+    });
+    if (!member) throw { status: 404, message: 'Staff member not found' };
+
+    const [attendanceCount, payrollCount, balanceCount, recordedCount] = await Promise.all([
+      prisma.staffAttendance.count({ where: { staffUserId: userId } }),
+      prisma.payrollPaymentDetail.count({ where: { payeeUserId: userId } }),
+      prisma.payrollMonthBalance.count({ where: { payeeUserId: userId } }),
+      prisma.payment.count({ where: { recordedById: userId } }),
+    ]);
+    const history = attendanceCount + payrollCount + balanceCount + recordedCount;
+    if (history > 0) {
+      throw {
+        status: 400,
+        message: 'Cannot delete: staff has attendance or payroll history. Keep them deactivated instead.',
+      };
+    }
+
+    await prisma.user.delete({ where: { id: userId } });
+    return { id: userId, name: member.user.name };
   }
 
   async createStaff(

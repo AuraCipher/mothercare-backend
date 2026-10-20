@@ -30,6 +30,7 @@ jest.mock('../../../src/modules/admin/services/staff.service', () => ({
     updateStaffProfile: jest.fn().mockResolvedValue({ id: 'u1' }),
     deactivateStaff: jest.fn().mockResolvedValue({ id: 'u1', status: 'inactive' }),
     reactivateStaff: jest.fn().mockResolvedValue({ id: 'u1', status: 'active' }),
+    deleteStaff: jest.fn().mockResolvedValue({ id: 'u1', name: 'Fee Manager' }),
     setPassword: jest.fn().mockResolvedValue({ message: 'Password updated' }),
     saveCredential: jest.fn().mockResolvedValue({ success: true, website: 'https://school.test' }),
   },
@@ -61,7 +62,7 @@ const validCreateStaffBody = {
 const validWorkerBody = { name: 'Ground Worker', username: 'worker1', phone: '03001234567' };
 const validSetPasswordBody = { newPassword: 'NewPass123!', adminPassword: 'AdminPass123!' };
 
-type HttpMethod = 'get' | 'post' | 'put' | 'patch';
+type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
 
 interface StaffEndpoint {
   label: string;
@@ -87,6 +88,7 @@ const STAFF_ENDPOINTS: StaffEndpoint[] = [
   { label: 'PATCH profile', method: 'patch', path: `${BASE}/${STAFF_USER_ID}`, body: { name: 'Updated' }, successStatus: 200 },
   { label: 'POST deactivate', method: 'post', path: `${BASE}/${STAFF_USER_ID}/deactivate`, successStatus: 200 },
   { label: 'POST reactivate', method: 'post', path: `${BASE}/${STAFF_USER_ID}/reactivate`, successStatus: 200 },
+  { label: 'DELETE staff', method: 'delete', path: `${BASE}/${STAFF_USER_ID}`, successStatus: 200 },
   {
     label: 'POST set-password',
     method: 'post',
@@ -140,6 +142,7 @@ function resetStaffMocks() {
   (staffService.updateStaffProfile as jest.Mock).mockResolvedValue({ id: 'u1' });
   (staffService.deactivateStaff as jest.Mock).mockResolvedValue({ id: 'u1', status: 'inactive' });
   (staffService.reactivateStaff as jest.Mock).mockResolvedValue({ id: 'u1', status: 'active' });
+  (staffService.deleteStaff as jest.Mock).mockResolvedValue({ id: 'u1', name: 'Fee Manager' });
   (staffService.setPassword as jest.Mock).mockResolvedValue({ message: 'Password updated' });
   (staffService.saveCredential as jest.Mock).mockResolvedValue({ success: true, website: 'https://school.test' });
 }
@@ -449,6 +452,42 @@ describe('Staff admin integration routes', () => {
       const res = await request(app).post(`${BASE}/${STAFF_USER_ID}/reactivate`).query(scopeQuery).set(adminAuth);
       expect(res.status).toBe(200);
       expect(res.body.data.status).toBe('active');
+    });
+  });
+
+  describe('DELETE /admin/staff/:userId — permanent delete', () => {
+    test('deletes a staff member with no attendance/payroll history', async () => {
+      const res = await request(app).delete(`${BASE}/${STAFF_USER_ID}`).query(scopeQuery).set(adminAuth);
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.message).toMatch(/deleted permanently/i);
+      expect(staffService.deleteStaff).toHaveBeenCalledWith(TEST_BRANCH_ID, STAFF_USER_ID);
+    });
+
+    test('returns the service 400 guard message instead of deleting', async () => {
+      (staffService.deleteStaff as jest.Mock).mockRejectedValueOnce({
+        status: 400,
+        message: 'Cannot delete: staff has attendance or payroll history. Keep them deactivated instead.',
+      });
+      const res = await request(app).delete(`${BASE}/${STAFF_USER_ID}`).query(scopeQuery).set(adminAuth);
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toMatch(/attendance or payroll history/i);
+    });
+
+    test('maps a race P2014 to a readable 400, never a 500', async () => {
+      (staffService.deleteStaff as jest.Mock).mockRejectedValueOnce({ code: 'P2014', message: 'Foreign key failed' });
+      const res = await request(app).delete(`${BASE}/${STAFF_USER_ID}`).query(scopeQuery).set(adminAuth);
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('P2014');
+      expect(res.body.message).toMatch(/still has linked records/i);
+    });
+
+    test('returns 404 when the service cannot find the staff member', async () => {
+      (staffService.deleteStaff as jest.Mock).mockRejectedValueOnce({ status: 404, message: 'Staff member not found' });
+      const res = await request(app).delete(`${BASE}/${STAFF_USER_ID}`).query(scopeQuery).set(adminAuth);
+      expect(res.status).toBe(404);
+      expect(res.body.message).toBe('Staff member not found');
     });
   });
 
