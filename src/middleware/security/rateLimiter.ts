@@ -18,7 +18,7 @@ const uploadSessionMax = Number(process.env.RATE_LIMIT_UPLOAD_SESSION_MAX ?? 120
 const loginWindowMs = Number(process.env.RATE_LIMIT_LOGIN_WINDOW_MS ?? 900_000); // 15 min
 const loginMax = Number(process.env.RATE_LIMIT_LOGIN_MAX ?? 10);
 const globalWindowMs = Number(process.env.RATE_LIMIT_GLOBAL_WINDOW_MS ?? 60_000);
-const globalMax = Number(process.env.RATE_LIMIT_GLOBAL_MAX ?? 100);
+const globalMax = Number(process.env.RATE_LIMIT_GLOBAL_MAX ?? 200);
 
 /**
  * Rate limiter for password set endpoint.
@@ -101,7 +101,7 @@ export const loginLimiter = rateLimit({
 /**
  * General API rate limiter.
  * Prevents abuse across all API endpoints.
- * 100 requests per minute per IP.
+ * 200 requests per minute per IP.
  */
 export const globalLimiter = rateLimit({
   windowMs: globalWindowMs,
