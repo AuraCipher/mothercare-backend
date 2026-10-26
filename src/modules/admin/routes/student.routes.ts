@@ -42,13 +42,20 @@ router.post('/students', asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user?.id;
   const scope = await requireScope(req, res);
   if (!scope) return;
+  const idempotencyKey = (req.body as any)?.idempotencyKey as string | undefined;
+  if (idempotencyKey !== undefined && (typeof idempotencyKey !== 'string' || idempotencyKey.trim().length === 0 || idempotencyKey.length > 128)) {
+    res.status(400).json({ success: false, message: 'idempotencyKey must be a non-empty string up to 128 characters' });
+    return;
+  }
   const student = await studentService.create({
     ...req.body,
     academicYearId: req.body?.academicYearId || scope.academicYearId,
     branchId: scope.branchId,
     createdById: userId,
+    idempotencyKey: idempotencyKey?.trim(),
   });
-  res.status(201).json({ success: true, data: student });
+  const replayed = (student as any)?.replayed === true || (student as any)?.deduplicated === true;
+  res.status(replayed ? 200 : 201).json({ success: true, data: student });
 }));
 
 // PUT /students/:id — Update

@@ -48,6 +48,11 @@ export interface CreateStudentInput {
   guardianMaritalStatus?: string;
   guardianMonthlyIncome?: string;
   createdById?: string;
+  // Client-generated unique identity for one logical create. A retry — the
+  // same key sent again after a dropped response, a double-tap, or a "did
+  // that go through?" resubmit — converges on the FIRST committed student
+  // instead of inserting another copy of the same child.
+  idempotencyKey?: string;
 }
 
 export interface ParentLink {
@@ -180,6 +185,30 @@ class StudentService {
   async create(data: CreateStudentInput) {
     if (!data.name) throw { status: 400, message: 'Student name is required' };
 
+    // ── Idempotency (same proven pattern as payroll M15) ───────────
+    // Every POST that reaches the server allocates a fresh admission
+    // number from the sequence, so the database can never tell a retry
+    // from a new child. The key is the client's promise that "this body
+    // is the same logical student as last time"; without it a lost
+    // response on a weak connection turned every resubmit into a
+    // duplicate admission.
+    const rawIdempotencyKey = data.idempotencyKey?.trim() || null;
+    if (data.idempotencyKey && (!rawIdempotencyKey || rawIdempotencyKey.length > 128)) {
+      throw { status: 400, message: 'idempotencyKey must be a non-empty string up to 128 characters' };
+    }
+    const includeGroup = { group: { select: { id: true, name: true, section: true } } } as const;
+    // Generic so the replayed/deduplicated flag merges into the SAME type
+    // Prisma returned, keeping downstream property access type-safe.
+    const returnReplayed = <T>(student: T): T => Object.assign(student as any, { replayed: true }) as T;
+    const returnDeduplicated = <T>(student: T): T => Object.assign(student as any, { deduplicated: true }) as T;
+    if (rawIdempotencyKey) {
+      const replay = await prisma.student.findFirst({
+        where: { idempotencyKey: rawIdempotencyKey },
+        include: includeGroup,
+      });
+      if (replay) return returnReplayed(replay);
+    }
+
     // ── Resolve the academic year + branch ──────────────────────────
     // A student always belongs to the academic year of their class, so the
     // group is authoritative when it is known. Falling back to a global
@@ -214,6 +243,47 @@ class StudentService {
     if (!ayRow) throw { status: 400, message: 'Academic year not found' };
     if (data.branchId && data.branchId !== ayRow.branchId) {
       throw { status: 400, message: 'The selected class does not belong to the selected branch' };
+    }
+
+    // ── Soft-duplicate guard ────────────────────────────────────────
+    // Second line of defense for retries that arrive WITHOUT the key: the
+    // admin saw a failure, discarded the form, reopened it and refilled
+    // it within minutes. The same child in the same class, moments apart,
+    // is a resubmit — return the first admission instead of stacking
+    // another copy. Guardian name must line up when it is provided, so
+    // two genuinely different kids with one common name (twins) are not
+    // collapsed into each other by accident.
+    if (data.groupId) {
+      const since = new Date(Date.now() - 120_000);
+      const normalize = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+      const nameNorm = normalize(data.name);
+      const guardianNorm = (data.guardianName || '').trim().replace(/\s+/g, ' ').toLowerCase();
+      const recent = await prisma.student.findMany({
+        where: {
+          groupId: data.groupId,
+          academicYearId,
+          isActive: true,
+          createdAt: { gte: since },
+        },
+        select: {
+          id: true, name: true, studentNumber: true,
+          parents: { select: { parent: { select: { user: { select: { name: true } } } } } },
+        },
+      });
+      const twin = recent.find(s => {
+        if (normalize(String(s.name ?? '')) !== nameNorm) return false;
+        if (!guardianNorm) return true;
+        return (s.parents || []).some(
+          p => p.parent?.user?.name && normalize(p.parent.user.name) === guardianNorm,
+        );
+      });
+      if (twin) {
+        const first = await prisma.student.findFirst({
+          where: { id: twin.id },
+          include: includeGroup,
+        });
+        return returnDeduplicated(first);
+      }
     }
 
     // Get next student number from sequence (permanent, never reuses)
@@ -314,8 +384,23 @@ class StudentService {
         rollNumber,
         username,
         credentialTag: 'CRED_NEW',
+        idempotencyKey: rawIdempotencyKey || undefined,
       },
       include: { group: { select: { id: true, name: true, section: true } } },
+    }).catch(async (e: any) => {
+      // Two requests carrying the same key can interleave between the
+      // replay lookup and the insert. The unique index arbitrates: the
+      // loser converges on the winner's row instead of surfacing a
+      // "That record already exists." for a school operation that
+      // actually succeeded.
+      if (rawIdempotencyKey && e?.code === 'P2002' && String(e?.meta?.target || '').includes('idempotencyKey')) {
+        const winner = await prisma.student.findFirst({
+          where: { idempotencyKey: rawIdempotencyKey },
+          include: includeGroup,
+        });
+        if (winner) return returnReplayed(winner as any);
+      }
+      throw e;
     });
 
     // Resolve guardian contact. Dedicated guardian* fields win; otherwise fall

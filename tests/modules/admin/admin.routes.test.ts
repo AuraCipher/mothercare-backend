@@ -1296,6 +1296,7 @@ describe('Admin — Students', () => {
     prismaMock.group.findUnique.mockResolvedValue({ id: mockStudent.groupId, academicYearId: activeAy.id } as any);
     prismaMock.studentPerson.create.mockResolvedValue({ id: 'person-1' } as any);
     prismaMock.student.findFirst.mockResolvedValue(null);
+    prismaMock.student.findMany.mockResolvedValue([]); // soft-duplicate guard: no recent twin
     prismaMock.student.count.mockResolvedValue(0);
     prismaMock.student.create.mockResolvedValue(mockStudent as any);
 

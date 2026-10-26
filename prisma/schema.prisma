@@ -1179,6 +1179,7 @@ model Student {
   user                    User?                    @relation(fields: [userId], references: [id], onDelete: SetNull)
   username                String?
   studentNumber           Int?                     @unique
+  idempotencyKey          String?                  @unique
   status                  StudentStatus            @default(ACTIVE)
   isActive                Boolean                  @default(true)
   admissionDate           DateTime                 @default(now())
