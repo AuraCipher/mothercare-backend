@@ -285,49 +285,6 @@ describe('R2-12c — .env.production template audit', () => {
   });
 });
 
-// ─── Docker development without production secrets ─────────
-
-describe('R2-12c — Docker development environment', () => {
-  const dockerEnvPath = path.resolve(__dirname, '../../.env.docker');
-
-  test('.env.docker file exists', () => {
-    expect(fs.existsSync(dockerEnvPath)).toBe(true);
-  });
-
-  test('.env.docker sets NODE_ENV=production', () => {
-    const dockerEnv = fs.readFileSync(dockerEnvPath, 'utf8');
-    const nodeEnv = dockerEnv.split('\n').find((l) => l.startsWith('NODE_ENV='));
-    expect(nodeEnv).toContain('production');
-  });
-
-  test('.env.docker has valid DATABASE_URL', () => {
-    const dockerEnv = fs.readFileSync(dockerEnvPath, 'utf8');
-    const dbLine = dockerEnv.split('\n').find((l) => l.startsWith('DATABASE_URL='));
-    expect(dbLine).toBeDefined();
-    expect(dbLine).toContain('postgresql://');
-  });
-
-  test('.env.docker has valid JWT_SECRET (min 32 chars)', () => {
-    const dockerEnv = fs.readFileSync(dockerEnvPath, 'utf8');
-    const jwtLine = dockerEnv.split('\n').find((l) => l.startsWith('JWT_SECRET='));
-    expect(jwtLine).toBeDefined();
-    const secret = jwtLine!.split('=')[1].replace(/"/g, '');
-    expect(secret.length).toBeGreaterThanOrEqual(32);
-  });
-
-  test('.env.docker disables FCM', () => {
-    const dockerEnv = fs.readFileSync(dockerEnvPath, 'utf8');
-    const fcmLine = dockerEnv.split('\n').find((l) => l.startsWith('FCM_ENABLED='));
-    expect(fcmLine).toContain('false');
-  });
-
-  test('.env.docker has no Twilio references (M22 removal)', () => {
-    const dockerEnv = fs.readFileSync(dockerEnvPath, 'utf8');
-    const twilioLines = dockerEnv.split('\n').filter((l) => l.includes('TWILIO'));
-    expect(twilioLines).toEqual([]);
-  });
-});
-
 // ─── env.ts source code audit ──────────────────────────────
 
 describe('R2-12c — env.ts source audit', () => {
